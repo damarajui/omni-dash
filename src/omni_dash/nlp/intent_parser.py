@@ -32,8 +32,13 @@ class IntentParser:
     4. Claude Code renders the template with appropriate variables
     """
 
-    def __init__(self, registry: ModelRegistry):
+    def __init__(
+        self,
+        registry: ModelRegistry,
+        keyword_map: dict[str, list[str]] | None = None,
+    ):
         self._registry = registry
+        self._keyword_map = keyword_map or {}
 
     def infer_model(self, description: str) -> str | None:
         """Infer the best dbt model from a natural language description.
@@ -43,34 +48,9 @@ class IntentParser:
         """
         description_lower = description.lower()
 
-        # Direct keyword to model mapping (based on Lindy's models)
-        keyword_map = {
-            "seo": ["mart_seo_weekly_funnel", "mart_seo_page_performance", "mart_seo_llm_sessions"],
-            "organic": ["mart_seo_weekly_funnel", "mart_seo_page_performance"],
-            "paid": ["mart_monthly_paid_performance"],
-            "acquisition": ["mart_monthly_paid_performance"],
-            "channel": ["mart_monthly_paid_performance"],
-            "page": ["mart_seo_page_performance"],
-            "landing page": ["mart_seo_page_performance"],
-            "llm": ["mart_seo_llm_sessions"],
-            "ai traffic": ["mart_seo_llm_sessions"],
-            "chatgpt": ["mart_seo_llm_sessions"],
-            "funnel": ["mart_seo_weekly_funnel"],
-            "signup": ["mart_seo_weekly_funnel", "mart_seo_page_signups_all_channels"],
-            "arr": ["fct_customer_daily_ts"],
-            "revenue": ["fct_customer_daily_ts"],
-            "customer": ["dim_identities", "fct_customer_daily_ts"],
-            "retention": ["fct_customer_daily_ts"],
-            "usage": ["mart_ai_assistant_dau_wau"],
-            "dau": ["mart_ai_assistant_dau_wau"],
-            "wau": ["mart_ai_assistant_dau_wau"],
-            "assistant": ["mart_ai_assistant_dau_wau"],
-            "phone": ["mart_lindy_assistant_phone_dau_wau"],
-        }
-
-        for keyword, candidates in keyword_map.items():
+        # Use provided keyword map for project-specific matching
+        for keyword, candidates in self._keyword_map.items():
             if keyword in description_lower:
-                # Verify the model exists
                 for candidate in candidates:
                     try:
                         self._registry.get_model(candidate)

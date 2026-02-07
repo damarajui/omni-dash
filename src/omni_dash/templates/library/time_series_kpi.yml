@@ -26,6 +26,7 @@ variables:
   metric_columns:
     type: list
     required: true
+    min_length: 2
     description: List of metric column names to chart
   number_columns:
     type: list

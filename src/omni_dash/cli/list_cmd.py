@@ -30,6 +30,11 @@ def list_resources(
             console.print(f"[red]Invalid resource. Choose from: {', '.join(VALID_RESOURCES)}[/red]")
             raise typer.Exit(1)
 
+        valid_formats = ("table", "json")
+        if fmt not in valid_formats:
+            console.print(f"[red]Invalid format '{fmt}'. Choose from: {', '.join(valid_formats)}[/red]")
+            raise typer.Exit(1)
+
         if resource == "templates":
             _list_templates(fmt)
         elif resource == "dbt-models":
@@ -137,7 +142,12 @@ def _list_dashboards(fmt: str, *, folder: str | None) -> None:
     table.add_column("Updated", style="dim")
 
     for d in dashboards:
-        table.add_row(d.id[:12] + "...", d.name, d.document_type, d.updated_at[:10] if d.updated_at else "")
+        table.add_row(
+            (d.id[:12] + "...") if d.id else "",
+            d.name or "",
+            d.document_type or "",
+            d.updated_at[:10] if d.updated_at else "",
+        )
 
     console.print(table)
     console.print(f"\n  Total: {len(dashboards)} dashboards")
@@ -166,7 +176,12 @@ def _list_omni_models(fmt: str) -> None:
     table.add_column("Schema")
 
     for m in models:
-        table.add_row(m.id[:12] + "...", m.name, m.database, m.schema_name)
+        table.add_row(
+            (m.id[:12] + "...") if m.id else "",
+            m.name or "",
+            m.database or "",
+            m.schema_name or "",
+        )
 
     console.print(table)
 
@@ -197,7 +212,7 @@ def _list_topics(model_id: str | None, fmt: str) -> None:
     table.add_column("Description")
 
     for t in topics:
-        table.add_row(t.name, t.label, t.description[:60])
+        table.add_row(t.name or "", t.label or "", (t.description or "")[:60])
 
     console.print(table)
 

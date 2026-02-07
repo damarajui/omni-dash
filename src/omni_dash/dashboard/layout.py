@@ -142,7 +142,7 @@ class LayoutManager:
             x = tile.position.x
 
             # Find the lowest y where this tile fits at its current x
-            best_y = 0
+            best_y = tile.position.y  # Default: keep current position
             for y in range(tile.position.y + 1):
                 if all(
                     (x + dx, y + dy) not in occupied
@@ -151,8 +151,6 @@ class LayoutManager:
                 ):
                     best_y = y
                     break
-            else:
-                best_y = tile.position.y
 
             new_pos = TilePosition(x=x, y=best_y, w=w, h=h)
             for dx in range(w):

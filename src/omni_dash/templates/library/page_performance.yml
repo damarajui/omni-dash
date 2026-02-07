@@ -36,6 +36,7 @@ variables:
   metric_columns:
     type: list
     required: true
+    min_length: 2
     description: Metric columns (visits, bounce_rate, signups, etc.)
   primary_metric:
     type: string

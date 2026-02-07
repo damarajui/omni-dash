@@ -85,5 +85,9 @@ class DashboardDefinitionError(OmniDashError):
     """Error in dashboard definition structure or content."""
 
 
+class ConfigurationError(OmniDashError):
+    """Missing or invalid configuration (API keys, paths, etc.)."""
+
+
 class CacheError(OmniDashError):
     """Error reading or writing the local cache."""

@@ -30,6 +30,11 @@ def export(
         settings = get_settings()
         settings.require_api()
 
+        valid_formats = ("yaml", "json")
+        if fmt not in valid_formats:
+            console.print(f"[red]Invalid format '{fmt}'. Choose from: {', '.join(valid_formats)}[/red]")
+            raise typer.Exit(1)
+
         from omni_dash.api.client import OmniClient
         from omni_dash.api.documents import DocumentService
         from omni_dash.dashboard.serializer import DashboardSerializer

@@ -134,22 +134,53 @@ class QueryBuilder:
 
     def to_api_dict(self) -> dict[str, Any]:
         """Build and return the raw API payload dict."""
-        spec = self.build()
-        payload: dict[str, Any] = {
-            "modelId": spec.model_id,
-            "query": {
-                "table": spec.table,
-                "fields": spec.fields,
-                "limit": spec.limit,
-            },
-        }
-        if spec.sorts:
-            payload["query"]["sorts"] = spec.sorts
-        if spec.filters:
-            payload["query"]["filters"] = spec.filters
-        if spec.pivots:
-            payload["query"]["pivots"] = spec.pivots
-        return payload
+        return _spec_to_payload(self.build())
+
+
+def _spec_to_payload(query: QuerySpec) -> dict[str, Any]:
+    """Convert a QuerySpec to an Omni API payload dict.
+
+    Single source of truth for payload assembly — used by QueryBuilder,
+    QueryRunner.run(), and QueryRunner.run_blocking().
+    """
+    payload: dict[str, Any] = {
+        "modelId": query.model_id,
+        "query": {
+            "table": query.table,
+            "fields": query.fields,
+            "limit": query.limit,
+        },
+    }
+    if query.sorts:
+        payload["query"]["sorts"] = query.sorts
+    if query.filters:
+        payload["query"]["filters"] = query.filters
+    if query.pivots:
+        payload["query"]["pivots"] = query.pivots
+    return payload
+
+
+def _parse_query_result(result: dict[str, Any]) -> QueryResult:
+    """Parse a raw API response into a QueryResult.
+
+    Handles both SDK-style (data key) and direct (rows key) responses.
+    """
+    if "data" in result:
+        rows = result["data"]
+        fields = list(rows[0].keys()) if rows else []
+    elif "rows" in result:
+        rows = result["rows"]
+        fields = result.get("fields", list(rows[0].keys()) if rows else [])
+    else:
+        rows = []
+        fields = []
+
+    return QueryResult(
+        fields=fields,
+        rows=rows,
+        row_count=len(rows),
+        truncated=result.get("truncated", False),
+    )
 
 
 class QueryRunner:
@@ -163,47 +194,14 @@ class QueryRunner:
 
         Accepts either a QuerySpec or a raw API payload dict.
         """
-        if isinstance(query, QuerySpec):
-            payload = {
-                "modelId": query.model_id,
-                "query": {
-                    "table": query.table,
-                    "fields": query.fields,
-                    "limit": query.limit,
-                },
-            }
-            if query.sorts:
-                payload["query"]["sorts"] = query.sorts
-            if query.filters:
-                payload["query"]["filters"] = query.filters
-            if query.pivots:
-                payload["query"]["pivots"] = query.pivots
-        else:
-            payload = query
+        payload = _spec_to_payload(query) if isinstance(query, QuerySpec) else query
 
         result = self._client.post("/api/v1/query/run", json=payload, timeout=120.0)
 
         if not result or not isinstance(result, dict):
             raise OmniAPIError(0, "Empty response from query execution")
 
-        # Try to parse the SDK-style response first, then fall back
-        if "data" in result:
-            rows = result["data"]
-            fields = list(rows[0].keys()) if rows else []
-        elif "rows" in result:
-            rows = result["rows"]
-            fields = result.get("fields", list(rows[0].keys()) if rows else [])
-        else:
-            # The result itself might be the row data
-            rows = []
-            fields = []
-
-        return QueryResult(
-            fields=fields,
-            rows=rows,
-            row_count=len(rows),
-            truncated=result.get("truncated", False),
-        )
+        return _parse_query_result(result)
 
     def run_blocking(self, query: QuerySpec | dict[str, Any]) -> QueryResult:
         """Run a query using the blocking poll pattern.
@@ -211,21 +209,7 @@ class QueryRunner:
         Submits the query, then polls /api/v1/query/wait until complete.
         Use this for long-running queries.
         """
-        if isinstance(query, QuerySpec):
-            payload = {
-                "modelId": query.model_id,
-                "query": {
-                    "table": query.table,
-                    "fields": query.fields,
-                    "limit": query.limit,
-                },
-            }
-            if query.sorts:
-                payload["query"]["sorts"] = query.sorts
-            if query.filters:
-                payload["query"]["filters"] = query.filters
-        else:
-            payload = query
+        payload = _spec_to_payload(query) if isinstance(query, QuerySpec) else query
 
         # Submit
         submit_result = self._client.post("/api/v1/query/run", json=payload, timeout=120.0)
@@ -233,9 +217,9 @@ class QueryRunner:
         if not submit_result or not isinstance(submit_result, dict):
             raise OmniAPIError(0, "Empty response from query submission")
 
-        # If we got data directly, return it
+        # If we got data directly, parse it without re-submitting
         if "data" in submit_result or "rows" in submit_result:
-            return self.run(query)
+            return _parse_query_result(submit_result)
 
         # Otherwise poll via /wait
         query_id = submit_result.get("queryId", submit_result.get("id", ""))
@@ -251,12 +235,4 @@ class QueryRunner:
         if not wait_result or not isinstance(wait_result, dict):
             raise OmniAPIError(0, "Empty response from query wait")
 
-        rows = wait_result.get("data", wait_result.get("rows", []))
-        fields = list(rows[0].keys()) if rows else []
-
-        return QueryResult(
-            fields=fields,
-            rows=rows,
-            row_count=len(rows),
-            truncated=wait_result.get("truncated", False),
-        )
+        return _parse_query_result(wait_result)

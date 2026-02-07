@@ -85,13 +85,7 @@ class SchemaReader:
         for pattern in patterns:
             files.update(self._models_dir.glob(pattern))
 
-        # Also check for _int_schema.yml and similar patterns
-        files.update(self._models_dir.glob("**/*schema*.yml"))
-
-        # Filter out non-YAML files that might match
-        self._schema_files = sorted(
-            f for f in files if f.is_file() and f.suffix in (".yml", ".yaml")
-        )
+        self._schema_files = sorted(f for f in files if f.is_file())
 
         logger.debug("Found %d schema files", len(self._schema_files))
         return self._schema_files

@@ -211,6 +211,30 @@ class OmniClient:
 
     # -- Health check --
 
+    def get_raw(self, path: str, **kwargs: Any) -> bytes:
+        """Make a GET request and return raw response bytes (for binary downloads)."""
+        if not self._rate_limiter.acquire(timeout=30.0):
+            raise RateLimitError()
+
+        params = kwargs.get("params")
+        timeout = kwargs.get("timeout")
+        req_kwargs: dict[str, Any] = {}
+        if params:
+            req_kwargs["params"] = params
+        if timeout:
+            req_kwargs["timeout"] = timeout
+
+        response = self._http.request("GET", path, **req_kwargs)
+        if response.status_code >= 400:
+            if response.status_code in (401, 403):
+                raise AuthenticationError(response.text)
+            if response.status_code == 404:
+                parts = path.split("/")
+                doc_id = parts[-1] if len(parts) > 2 else path
+                raise DocumentNotFoundError(doc_id)
+            raise OmniAPIError(response.status_code, response.text, response.text)
+        return response.content
+
     def ping(self) -> bool:
         """Test API connectivity by listing models."""
         try:

@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from jinja2 import BaseLoader, Environment, TemplateError, TemplateSyntaxError
+from jinja2 import BaseLoader, TemplateError, TemplateSyntaxError
+from jinja2.sandbox import SandboxedEnvironment
 
 from omni_dash.dashboard.definition import DashboardDefinition
 from omni_dash.dashboard.serializer import DashboardSerializer
@@ -62,13 +63,37 @@ class TemplateEngine:
 
         # Jinja2 environment (using string-based loading, not file-based,
         # because we need to render only the dashboard section)
-        self._jinja_env = Environment(
+        self._jinja_env = SandboxedEnvironment(
             loader=BaseLoader(),
             keep_trailing_newline=True,
         )
         self._jinja_env.filters["title_case"] = _title_case
         self._jinja_env.filters["snake_to_label"] = _snake_to_label
         self._jinja_env.filters["slugify"] = _slugify
+
+    def _extract_dashboard_section(self, raw_text: str) -> str:
+        """Extract the dashboard section from raw template text.
+
+        Only the dashboard section is rendered through Jinja2 to avoid
+        corrupting meta/variables sections that may contain Jinja2-like
+        syntax in descriptions.
+        """
+        lines = raw_text.split("\n")
+        start_idx = None
+        end_idx = len(lines)
+
+        for i, line in enumerate(lines):
+            if line.startswith("dashboard:"):
+                start_idx = i
+            elif start_idx is not None and line and not line[0].isspace() and not line.startswith("#"):
+                # Another top-level key after dashboard section
+                end_idx = i
+                break
+
+        if start_idx is None:
+            return raw_text  # Fallback: render everything
+
+        return "\n".join(lines[start_idx:end_idx])
 
     def _find_template_file(self, template_name: str) -> Path:
         """Find a template file by name across all directories."""
@@ -133,13 +158,24 @@ class TemplateEngine:
         # Parse YAML for variable specs (validation only)
         raw = self._load_raw_template(template_name)
 
-        # Validate required variables
+        # Validate required variables and list lengths
         var_specs = raw.get("variables", {})
         for var_name, spec in var_specs.items():
-            if isinstance(spec, dict) and spec.get("required", False):
+            if not isinstance(spec, dict):
+                continue
+            if spec.get("required", False):
                 if var_name not in variables and "default" not in spec:
                     raise OmniTemplateError(
                         f"Template '{template_name}' requires variable '{var_name}'"
+                    )
+            # Validate list variable lengths
+            if spec.get("type") == "list" and var_name in variables:
+                val = variables[var_name]
+                min_len = spec.get("min_length", 0)
+                if isinstance(val, list) and min_len and len(val) < min_len:
+                    raise OmniTemplateError(
+                        f"Template '{template_name}' variable '{var_name}' "
+                        f"requires at least {min_len} items, got {len(val)}"
                     )
 
         if not raw.get("dashboard"):
@@ -159,11 +195,14 @@ class TemplateEngine:
             if k not in merged_vars:
                 merged_vars[k] = v
 
-        # Read the raw file text to preserve Jinja2 expressions exactly as written.
-        # We cannot round-trip through yaml.safe_load → yaml.dump because yaml.dump
-        # corrupts Jinja2 filter syntax (e.g. replace('_', ' ') gets mangled).
+        # Read the raw file text and extract the dashboard section for Jinja2 rendering.
+        # Only the dashboard section is rendered through Jinja2 to avoid corrupting
+        # meta/variables sections that may contain Jinja2-like syntax.
         path = self._find_template_file(template_name)
         raw_text = path.read_text()
+
+        # Extract the dashboard section from raw text
+        raw_text = self._extract_dashboard_section(raw_text)
 
         try:
             template = self._jinja_env.from_string(raw_text)
@@ -214,7 +253,9 @@ class TemplateEngine:
         for directory in self._dirs:
             if not directory.exists():
                 continue
-            for path in sorted(directory.glob("*.yml")):
+            for path in sorted(
+                list(directory.glob("*.yml")) + list(directory.glob("*.yaml"))
+            ):
                 name = path.stem
                 if name in seen:
                     continue

@@ -12,6 +12,8 @@ from typing import Annotated
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from omni_dash.exceptions import ConfigurationError
+
 
 class OmniDashSettings(BaseSettings):
     """Application settings loaded from environment variables and .env files.
@@ -94,23 +96,23 @@ class OmniDashSettings(BaseSettings):
     def require_api(self) -> None:
         """Raise if API credentials are not configured."""
         if not self.omni_api_key:
-            raise ValueError(
+            raise ConfigurationError(
                 "OMNI_API_KEY is not set. Set it in .env or as an environment variable."
             )
         if not self.omni_base_url:
-            raise ValueError(
+            raise ConfigurationError(
                 "OMNI_BASE_URL is not set. Set it in .env or as an environment variable."
             )
 
     def require_dbt(self) -> Path:
         """Raise if dbt project path is not configured; return the path."""
         if not self.dbt_project_path:
-            raise ValueError(
+            raise ConfigurationError(
                 "DBT_PROJECT_PATH is not set. Set it in .env or as an environment variable."
             )
         p = Path(self.dbt_project_path).expanduser()
         if not p.exists():
-            raise ValueError(f"dbt project path does not exist: {p}")
+            raise ConfigurationError(f"dbt project path does not exist: {p}")
         return p
 
 
