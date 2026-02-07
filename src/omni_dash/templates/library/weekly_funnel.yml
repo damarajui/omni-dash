@@ -1,0 +1,106 @@
+meta:
+  name: Weekly Funnel Dashboard
+  description: >
+    Time series funnel with weekly grain. Shows progression from top-of-funnel
+    metrics (visits, signups) through conversion stages to bottom-of-funnel
+    outcomes (customers, ARR). Best for SEO, marketing, or product funnels.
+  tags: [funnel, time-series, weekly, marketing, seo]
+
+variables:
+  dashboard_name:
+    type: string
+    required: true
+    description: Dashboard display name
+  omni_model_id:
+    type: string
+    required: true
+    description: Omni model UUID
+  omni_table:
+    type: string
+    required: true
+    description: Omni table/view name (matches dbt model name)
+  time_column:
+    type: string
+    required: true
+    default: week_start
+    description: Weekly date column
+  metric_columns:
+    type: list
+    required: true
+    description: Ordered list of funnel metric column names (top to bottom)
+  rate_columns:
+    type: list
+    required: false
+    default: []
+    description: Columns representing rates/percentages (rendered as line charts instead of area)
+
+dashboard:
+  name: "{{ dashboard_name }}"
+  model_id: "{{ omni_model_id }}"
+  refresh_interval: 3600
+  filters:
+    - field: "{{ omni_table }}.{{ time_column }}"
+      type: date_range
+      label: Date Range
+      default: last 12 weeks
+  tiles:
+    - name: "{{ metric_columns[0] | replace('_', ' ') | title() }}"
+      chart_type: area
+      query:
+        table: "{{ omni_table }}"
+        fields:
+          - "{{ omni_table }}.{{ time_column }}"
+          - "{{ omni_table }}.{{ metric_columns[0] }}"
+        sorts:
+          - column_name: "{{ omni_table }}.{{ time_column }}"
+            sort_descending: false
+      vis_config:
+        x_axis: "{{ omni_table }}.{{ time_column }}"
+        y_axis:
+          - "{{ omni_table }}.{{ metric_columns[0] }}"
+      position: {x: 0, y: 0, w: 6, h: 4}
+    - name: "{{ metric_columns[1] | replace('_', ' ') | title() }}"
+      chart_type: area
+      query:
+        table: "{{ omni_table }}"
+        fields:
+          - "{{ omni_table }}.{{ time_column }}"
+          - "{{ omni_table }}.{{ metric_columns[1] }}"
+        sorts:
+          - column_name: "{{ omni_table }}.{{ time_column }}"
+            sort_descending: false
+      vis_config:
+        x_axis: "{{ omni_table }}.{{ time_column }}"
+        y_axis:
+          - "{{ omni_table }}.{{ metric_columns[1] }}"
+      position: {x: 6, y: 0, w: 6, h: 4}
+    - name: "{{ metric_columns[2] | replace('_', ' ') | title() }}"
+      chart_type: area
+      query:
+        table: "{{ omni_table }}"
+        fields:
+          - "{{ omni_table }}.{{ time_column }}"
+          - "{{ omni_table }}.{{ metric_columns[2] }}"
+        sorts:
+          - column_name: "{{ omni_table }}.{{ time_column }}"
+            sort_descending: false
+      vis_config:
+        x_axis: "{{ omni_table }}.{{ time_column }}"
+        y_axis:
+          - "{{ omni_table }}.{{ metric_columns[2] }}"
+      position: {x: 0, y: 4, w: 6, h: 4}
+    - name: "{{ metric_columns[3] | replace('_', ' ') | title() }}"
+      chart_type: area
+      query:
+        table: "{{ omni_table }}"
+        fields:
+          - "{{ omni_table }}.{{ time_column }}"
+          - "{{ omni_table }}.{{ metric_columns[3] }}"
+        sorts:
+          - column_name: "{{ omni_table }}.{{ time_column }}"
+            sort_descending: false
+      vis_config:
+        x_axis: "{{ omni_table }}.{{ time_column }}"
+        y_axis:
+          - "{{ omni_table }}.{{ metric_columns[3] }}"
+      position: {x: 6, y: 4, w: 6, h: 4}

@@ -1,0 +1,79 @@
+meta:
+  name: Time Series KPI Dashboard
+  description: >
+    Generic KPI dashboard with line charts over time. Works with any
+    time-series mart model. Each metric gets its own tile.
+  tags: [kpi, time-series, generic, metrics]
+
+variables:
+  dashboard_name:
+    type: string
+    required: true
+    description: Dashboard display name
+  omni_model_id:
+    type: string
+    required: true
+    description: Omni model UUID
+  omni_table:
+    type: string
+    required: true
+    description: Omni table/view name
+  time_column:
+    type: string
+    required: true
+    default: day_start
+    description: Date/time column
+  metric_columns:
+    type: list
+    required: true
+    description: List of metric column names to chart
+  number_columns:
+    type: list
+    required: false
+    default: []
+    description: Columns to display as single-number KPI tiles (latest value)
+  sort_descending:
+    type: boolean
+    required: false
+    default: false
+    description: Sort time column descending (newest first)
+
+dashboard:
+  name: "{{ dashboard_name }}"
+  model_id: "{{ omni_model_id }}"
+  refresh_interval: 3600
+  filters:
+    - field: "{{ omni_table }}.{{ time_column }}"
+      type: date_range
+      label: Date Range
+  tiles:
+    - name: "{{ metric_columns[0] | replace('_', ' ') | title() }}"
+      chart_type: line
+      query:
+        table: "{{ omni_table }}"
+        fields:
+          - "{{ omni_table }}.{{ time_column }}"
+          - "{{ omni_table }}.{{ metric_columns[0] }}"
+        sorts:
+          - column_name: "{{ omni_table }}.{{ time_column }}"
+            sort_descending: false
+      vis_config:
+        x_axis: "{{ omni_table }}.{{ time_column }}"
+        y_axis:
+          - "{{ omni_table }}.{{ metric_columns[0] }}"
+      position: {x: 0, y: 0, w: 6, h: 4}
+    - name: "{{ metric_columns[1] | replace('_', ' ') | title() }}"
+      chart_type: line
+      query:
+        table: "{{ omni_table }}"
+        fields:
+          - "{{ omni_table }}.{{ time_column }}"
+          - "{{ omni_table }}.{{ metric_columns[1] }}"
+        sorts:
+          - column_name: "{{ omni_table }}.{{ time_column }}"
+            sort_descending: false
+      vis_config:
+        x_axis: "{{ omni_table }}.{{ time_column }}"
+        y_axis:
+          - "{{ omni_table }}.{{ metric_columns[1] }}"
+      position: {x: 6, y: 0, w: 6, h: 4}
