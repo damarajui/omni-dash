@@ -83,16 +83,36 @@ class DashboardSerializer:
                 vis["config"]["colorBy"] = tile.vis_config.color_by
             if tile.vis_config.stacked:
                 vis["config"]["stacked"] = True
+            if not tile.vis_config.show_labels:
+                vis["config"]["showLabels"] = False
+            if not tile.vis_config.show_legend:
+                vis["config"]["showLegend"] = False
+            if not tile.vis_config.show_grid:
+                vis["config"]["showGrid"] = False
             if tile.vis_config.show_values:
                 vis["config"]["showValues"] = True
             if tile.vis_config.value_format:
                 vis["config"]["valueFormat"] = tile.vis_config.value_format
+            if tile.vis_config.axis_label_x:
+                vis["config"]["axisLabelX"] = tile.vis_config.axis_label_x
+            if tile.vis_config.axis_label_y:
+                vis["config"]["axisLabelY"] = tile.vis_config.axis_label_y
             if tile.vis_config.series_colors:
                 vis["config"]["seriesColors"] = tile.vis_config.series_colors
             if tile.vis_config.custom:
                 vis["config"].update(tile.vis_config.custom)
 
             qp["visualization"] = vis
+
+            # Position (layout)
+            if tile.position:
+                qp["position"] = {
+                    "x": tile.position.x,
+                    "y": tile.position.y,
+                    "w": tile.position.w,
+                    "h": tile.position.h,
+                }
+
             query_presentations.append(qp)
 
         payload: dict[str, Any] = {
@@ -150,6 +170,7 @@ class DashboardSerializer:
             tile_data: dict[str, Any] = {
                 "name": tile.name,
                 "chart_type": tile.chart_type,
+                "size": tile.size,
                 "query": {
                     "table": tile.query.table,
                     "fields": tile.query.fields,
@@ -187,12 +208,24 @@ class DashboardSerializer:
                 vis["color_by"] = tile.vis_config.color_by
             if tile.vis_config.stacked:
                 vis["stacked"] = True
+            if not tile.vis_config.show_labels:
+                vis["show_labels"] = False
+            if not tile.vis_config.show_legend:
+                vis["show_legend"] = False
+            if not tile.vis_config.show_grid:
+                vis["show_grid"] = False
             if tile.vis_config.show_values:
                 vis["show_values"] = True
             if tile.vis_config.value_format:
                 vis["value_format"] = tile.vis_config.value_format
+            if tile.vis_config.axis_label_x:
+                vis["axis_label_x"] = tile.vis_config.axis_label_x
+            if tile.vis_config.axis_label_y:
+                vis["axis_label_y"] = tile.vis_config.axis_label_y
             if tile.vis_config.series_colors:
                 vis["series_colors"] = tile.vis_config.series_colors
+            if tile.vis_config.custom:
+                vis["custom"] = tile.vis_config.custom
             if vis:
                 tile_data["vis_config"] = vis
 
@@ -267,9 +300,15 @@ class DashboardSerializer:
                 y_axis=vis_data.get("y_axis", []),
                 color_by=vis_data.get("color_by"),
                 stacked=vis_data.get("stacked", False),
+                show_labels=vis_data.get("show_labels", True),
+                show_legend=vis_data.get("show_legend", True),
+                show_grid=vis_data.get("show_grid", True),
                 show_values=vis_data.get("show_values", False),
                 value_format=vis_data.get("value_format"),
+                axis_label_x=vis_data.get("axis_label_x"),
+                axis_label_y=vis_data.get("axis_label_y"),
                 series_colors=vis_data.get("series_colors", {}),
+                custom=vis_data.get("custom", {}),
             )
 
             pos_data = tile_data.get("position")

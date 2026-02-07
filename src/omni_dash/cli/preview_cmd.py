@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.syntax import Syntax
 from rich.table import Table
 
+from omni_dash.cli.create_cmd import _parse_json_or_string, _parse_var
 from omni_dash.config import get_settings
 from omni_dash.exceptions import OmniDashError
 
@@ -51,16 +52,8 @@ def preview(
 
             variables = {}
             for v in var or []:
-                if "=" not in v:
-                    raise typer.BadParameter(f"Variable must be KEY=VALUE, got: {v}")
-                key, _, value = v.partition("=")
-                value = value.strip()
-                if value.startswith(("[", "{")):
-                    try:
-                        value = json.loads(value)
-                    except json.JSONDecodeError:
-                        pass
-                variables[key.strip()] = value
+                key, value = _parse_var(v)
+                variables[key] = _parse_json_or_string(value)
 
             if dbt_model:
                 variables.setdefault("omni_table", dbt_model)

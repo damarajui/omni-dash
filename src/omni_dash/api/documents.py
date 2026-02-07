@@ -79,6 +79,7 @@ class DocumentService:
         Returns:
             DashboardResponse with the created document's metadata.
         """
+        payload = {**payload}  # Don't mutate caller's dict
         if folder_id:
             payload["folderId"] = folder_id
 
@@ -179,18 +180,19 @@ class DocumentService:
         Returns:
             ImportResponse with the new document ID.
         """
+        doc = {**export_data.get("document", {})}  # Copy to avoid mutating caller's dict
+        if name:
+            doc["name"] = name
+        if folder_id:
+            doc["folderId"] = folder_id
+
         payload = {
             "baseModelId": base_model_id,
             "dashboard": export_data.get("dashboard", {}),
-            "document": export_data.get("document", {}),
+            "document": doc,
             "exportVersion": export_data.get("exportVersion", "0.1"),
             "workbookModel": export_data.get("workbookModel", {}),
         }
-
-        if name:
-            payload["document"]["name"] = name
-        if folder_id:
-            payload["document"]["folderId"] = folder_id
 
         result = self._client.post(
             "/api/unstable/documents/import",
@@ -241,13 +243,16 @@ class DocumentService:
         dashboard_id: str,
         *,
         file_format: str = "pdf",
-    ) -> bytes | dict:
+    ) -> bytes:
         """Download a rendered dashboard (PDF, PNG, CSV).
 
-        Note: This returns raw content for binary formats. The caller
-        is responsible for writing to disk.
+        Returns raw bytes. The caller is responsible for writing to disk.
         """
-        result = self._client.get(
+        valid_formats = {"pdf", "png", "csv"}
+        if file_format not in valid_formats:
+            raise ValueError(f"file_format must be one of {valid_formats}, got '{file_format}'")
+
+        result = self._client.get_raw(
             f"/api/v1/dashboards/{dashboard_id}/download",
             params={"format": file_format},
             timeout=120.0,

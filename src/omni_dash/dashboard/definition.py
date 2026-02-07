@@ -10,7 +10,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ChartType(str, Enum):
@@ -101,6 +101,14 @@ class TilePosition(BaseModel):
         if v < 1:
             raise ValueError(f"h must be >= 1, got {v}")
         return v
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> TilePosition:
+        if self.x + self.w > 12:
+            raise ValueError(
+                f"Tile extends beyond grid: x({self.x}) + w({self.w}) = {self.x + self.w} > 12"
+            )
+        return self
 
 
 class SortSpec(BaseModel):

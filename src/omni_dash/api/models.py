@@ -204,8 +204,9 @@ class ModelService:
 
     def _get_cache(self, key: str) -> dict | None:
         """Get a value from the in-memory cache (with TTL check)."""
-        if time.monotonic() - self._cache_ts > self._cache_ttl:
+        if self._cache_ts and time.monotonic() - self._cache_ts > self._cache_ttl:
             self._cache.clear()
+            self._cache_ts = 0.0
             return None
         return self._cache.get(key)
 

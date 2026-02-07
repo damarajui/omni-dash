@@ -27,6 +27,7 @@ variables:
   metric_columns:
     type: list
     required: true
+    min_length: 4
     description: Ordered list of funnel metric column names (top to bottom)
   rate_columns:
     type: list
