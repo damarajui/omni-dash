@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import time
 from unittest.mock import MagicMock
 
 import pytest
 
-from omni_dash.api.models import ModelService, OmniModel, TopicDetail, TopicSummary
-from omni_dash.exceptions import ModelNotFoundError, OmniAPIError
+from omni_dash.api.models import ModelService, OmniModel, TopicSummary
+from omni_dash.exceptions import ModelNotFoundError
 
 
 @pytest.fixture

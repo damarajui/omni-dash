@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
-
 from omni_dash.exceptions import (
     AIGenerationError,
     AINotAvailableError,
     AuthenticationError,
-    CacheError,
     ConfigurationError,
     DashboardDefinitionError,
     DbtMetadataError,
@@ -36,7 +33,6 @@ class TestHierarchy:
         assert issubclass(DbtModelNotFoundError, DbtMetadataError)
         assert issubclass(DashboardDefinitionError, OmniDashError)
         assert issubclass(ConfigurationError, OmniDashError)
-        assert issubclass(CacheError, OmniDashError)
         assert issubclass(AIGenerationError, OmniDashError)
         assert issubclass(AINotAvailableError, OmniDashError)
 

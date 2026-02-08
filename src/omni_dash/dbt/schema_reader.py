@@ -13,7 +13,6 @@ from typing import Any
 import yaml
 
 from omni_dash.dbt.manifest_reader import DbtColumnMetadata
-from omni_dash.exceptions import DbtMetadataError
 
 logger = logging.getLogger(__name__)
 

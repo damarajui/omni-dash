@@ -39,12 +39,14 @@ def main_callback(
 
 # Import and register commands
 from omni_dash.cli.create_cmd import create  # noqa: E402
+from omni_dash.cli.dbt_cmd import inspect as dbt_inspect
+from omni_dash.cli.dbt_cmd import models as dbt_models  # noqa: E402
+from omni_dash.cli.dbt_cmd import suggest as dbt_suggest
 from omni_dash.cli.export_cmd import export  # noqa: E402
+from omni_dash.cli.generate_cmd import generate  # noqa: E402
 from omni_dash.cli.import_cmd import import_dashboard  # noqa: E402
 from omni_dash.cli.list_cmd import list_resources  # noqa: E402
 from omni_dash.cli.preview_cmd import preview  # noqa: E402
-from omni_dash.cli.dbt_cmd import models as dbt_models, inspect as dbt_inspect, suggest as dbt_suggest  # noqa: E402
-from omni_dash.cli.generate_cmd import generate  # noqa: E402
 
 app.command("create")(create)
 app.command("export")(export)

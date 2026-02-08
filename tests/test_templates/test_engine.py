@@ -1,11 +1,10 @@
 """Tests for the template engine."""
 
-from pathlib import Path
 
 import pytest
 
-from omni_dash.templates.engine import TemplateEngine
 from omni_dash.exceptions import TemplateError
+from omni_dash.templates.engine import TemplateEngine
 
 
 @pytest.fixture

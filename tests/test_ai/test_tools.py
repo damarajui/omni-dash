@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import MagicMock
 
 import pytest
-from unittest.mock import MagicMock
 
 from omni_dash.ai.tools import ToolExecutor, get_tool_definitions
 from omni_dash.dashboard.definition import ChartType

@@ -7,8 +7,9 @@ explore dbt models and generate validated DashboardDefinition objects.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from omni_dash.ai.prompts import build_system_prompt
 from omni_dash.ai.tools import ToolExecutor, get_tool_definitions

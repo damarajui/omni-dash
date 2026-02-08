@@ -214,23 +214,6 @@ class DocumentService:
         self._client.delete(f"/api/v1/documents/{document_id}")
         logger.info("Deleted dashboard %s", document_id)
 
-    def move_dashboard(
-        self, document_id: str, folder_id: str
-    ) -> None:
-        """Move a dashboard to a different folder."""
-        self._client.put(
-            f"/api/v1/documents/{document_id}",
-            json={"folderId": folder_id},
-        )
-
-    def add_label(self, document_id: str, label: str) -> None:
-        """Add a label to a document."""
-        self._client.post(f"/api/v1/documents/{document_id}/labels/{label}")
-
-    def remove_label(self, document_id: str, label: str) -> None:
-        """Remove a label from a document."""
-        self._client.delete(f"/api/v1/documents/{document_id}/labels/{label}")
-
     def list_folders(self) -> list[dict[str, Any]]:
         """List all folders in the organization."""
         result = self._client.get("/api/v1/folders")
