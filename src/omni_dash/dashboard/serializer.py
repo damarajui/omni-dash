@@ -20,6 +20,62 @@ from omni_dash.dashboard.definition import (
 from omni_dash.exceptions import DashboardDefinitionError
 
 
+# Map internal chart type names to Omni API chart type names.
+# Omni's valid types: auto, area, areaStacked, areaStackedPercentage, bar, barLine,
+# barGrouped, barStacked, barStackedPercentage, boxplot, code, column, columnGrouped,
+# columnStacked, columnStackedPercentage, heatmap, kpi, line, lineColor, map,
+# regionMap, markdown, pie, sankey, point, pointColor, pointSize, pointSizeColor,
+# singleRecord, summaryValue, table
+_CHART_TYPE_TO_OMNI: dict[str, str] = {
+    "line": "line",
+    "bar": "bar",
+    "area": "area",
+    "scatter": "point",
+    "pie": "pie",
+    "donut": "pie",
+    "table": "table",
+    "number": "kpi",
+    "funnel": "bar",
+    "heatmap": "heatmap",
+    "stacked_bar": "barStacked",
+    "stacked_area": "areaStacked",
+    "grouped_bar": "barGrouped",
+    "combo": "barLine",
+    "pivot_table": "table",
+    "text": "markdown",
+}
+
+# Reverse mapping: Omni API chart types → internal chart types.
+_OMNI_TO_CHART_TYPE: dict[str, str] = {
+    "line": "line",
+    "lineColor": "line",
+    "bar": "bar",
+    "barStacked": "stacked_bar",
+    "barStackedPercentage": "stacked_bar",
+    "barGrouped": "grouped_bar",
+    "barLine": "combo",
+    "area": "area",
+    "areaStacked": "stacked_area",
+    "areaStackedPercentage": "stacked_area",
+    "point": "scatter",
+    "pointColor": "scatter",
+    "pointSize": "scatter",
+    "pointSizeColor": "scatter",
+    "pie": "pie",
+    "table": "table",
+    "kpi": "number",
+    "summaryValue": "number",
+    "heatmap": "heatmap",
+    "markdown": "text",
+    "column": "bar",
+    "columnStacked": "stacked_bar",
+    "columnStackedPercentage": "stacked_bar",
+    "columnGrouped": "grouped_bar",
+    "sankey": "funnel",
+    "singleRecord": "table",
+}
+
+
 class DashboardSerializer:
     """Convert DashboardDefinition to/from various formats."""
 
@@ -69,9 +125,10 @@ class DashboardSerializer:
             if tile.query.pivots:
                 qp["query"]["pivots"] = tile.query.pivots
 
-            # Chart type
-            qp["chartType"] = tile.chart_type
-            qp["prefersChart"] = tile.chart_type != "table"
+            # Chart type — map internal names to Omni API names
+            omni_chart_type = _CHART_TYPE_TO_OMNI.get(tile.chart_type, tile.chart_type)
+            qp["chartType"] = omni_chart_type
+            qp["prefersChart"] = omni_chart_type not in ("table", "markdown")
 
             # Visualization config
             vis: dict[str, Any] = {"visType": "basic", "config": {}}
@@ -426,7 +483,9 @@ class DashboardSerializer:
                         limit=query.get("limit", 200),
                         pivots=query.get("pivots", []),
                     ),
-                    chart_type=qp.get("chartType", "line"),
+                    chart_type=_OMNI_TO_CHART_TYPE.get(
+                        qp.get("chartType", "line"), qp.get("chartType", "line")
+                    ),
                     vis_config=TileVisConfig(
                         x_axis=vis.get("xAxis"),
                         y_axis=vis.get("yAxis", []),
