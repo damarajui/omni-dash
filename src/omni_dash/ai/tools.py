@@ -212,6 +212,67 @@ def _build_dashboard_schema() -> dict[str, Any]:
                                     "items": {"type": "string"},
                                     "default": [],
                                 },
+                                "calculations": {
+                                    "type": "array",
+                                    "description": (
+                                        "Calculated fields. Each: {calc_name, label, "
+                                        "formula ('field_a / field_b' for safe divide), format}."
+                                    ),
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "calc_name": {"type": "string"},
+                                            "label": {"type": "string"},
+                                            "formula": {"type": "string"},
+                                            "format": {"type": "string"},
+                                        },
+                                        "required": ["calc_name", "label"],
+                                    },
+                                    "default": [],
+                                },
+                                "metadata": {
+                                    "type": "object",
+                                    "description": (
+                                        "Per-field metadata overrides. "
+                                        "E.g., {\"t.field\": {\"label\": \"Custom Name\"}}."
+                                    ),
+                                    "additionalProperties": {
+                                        "type": "object",
+                                        "properties": {
+                                            "label": {"type": "string"},
+                                        },
+                                    },
+                                },
+                                "composite_filters": {
+                                    "type": "array",
+                                    "description": (
+                                        "Composite filters combining conditions with AND/OR. "
+                                        "Each: {conditions: [{field, operator, value}], conjunction: 'AND'|'OR'}."
+                                    ),
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "conditions": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "field": {"type": "string"},
+                                                        "operator": {"type": "string"},
+                                                        "value": {},
+                                                    },
+                                                    "required": ["field"],
+                                                },
+                                            },
+                                            "conjunction": {
+                                                "type": "string",
+                                                "enum": ["AND", "OR"],
+                                                "default": "AND",
+                                            },
+                                        },
+                                    },
+                                    "default": [],
+                                },
                             },
                             "required": ["table", "fields"],
                         },
@@ -340,7 +401,73 @@ def _build_dashboard_schema() -> dict[str, Any]:
                                     "type": "string",
                                     "description": (
                                         "Raw markdown/HTML template for text tiles. "
-                                        "Supports Mustache syntax: {{result._last.field.value}}."
+                                        "Supports Mustache syntax: {{result.0.field.value}} (formatted), "
+                                        "{{result.0.field.raw}} (raw for CSS), "
+                                        "{{result._last.field.value}} (last row)."
+                                    ),
+                                },
+                                "reference_lines": {
+                                    "type": "array",
+                                    "description": (
+                                        "Reference/target lines on charts. "
+                                        "Each entry: {value (number), label (string), "
+                                        "dash ([8,8] for dashed), color (#hex)}."
+                                    ),
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "value": {"type": "number"},
+                                            "label": {"type": "string"},
+                                            "dash": {"type": "array", "items": {"type": "integer"}},
+                                            "color": {"type": "string"},
+                                        },
+                                        "required": ["value"],
+                                    },
+                                },
+                                "color_field": {
+                                    "type": "string",
+                                    "description": "Field for heatmap color intensity (qualified name).",
+                                },
+                                "color_values": {
+                                    "type": "object",
+                                    "description": (
+                                        "Manual color mapping: category name → hex color. "
+                                        "E.g., {\"Brand\": \"#FF8515\", \"Non-Brand\": \"#BE43C0\"}."
+                                    ),
+                                    "additionalProperties": {"type": "string"},
+                                },
+                                "show_data_labels": {
+                                    "type": "boolean",
+                                    "description": "Show data labels on chart marks.",
+                                    "default": False,
+                                },
+                                "data_label_format": {
+                                    "type": "string",
+                                    "description": "Format for data labels (e.g., 'PERCENT_1', 'BIGNUMBER_2').",
+                                },
+                                "frozen_column": {
+                                    "type": "string",
+                                    "description": "Pin a table column for horizontal scrolling (qualified field name).",
+                                },
+                                "column_formats": {
+                                    "type": "object",
+                                    "description": (
+                                        "Per-column formatting for tables. "
+                                        "E.g., {\"t.revenue\": {\"align\": \"right\", \"width\": 150}}."
+                                    ),
+                                    "additionalProperties": {
+                                        "type": "object",
+                                        "properties": {
+                                            "align": {"type": "string", "enum": ["left", "right", "center"]},
+                                            "width": {"type": "integer"},
+                                        },
+                                    },
+                                },
+                                "vegalite_spec": {
+                                    "type": "object",
+                                    "description": (
+                                        "Full Vega-Lite v5 spec for custom visualizations. "
+                                        "Use chart_type='vegalite'. Omni wraps with container width."
                                     ),
                                 },
                             },

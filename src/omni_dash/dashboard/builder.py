@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from omni_dash.dashboard.definition import (
+    CalculatedField,
+    CompositeFilter,
     DashboardDefinition,
     DashboardFilter,
     FilterSpec,
@@ -125,9 +127,16 @@ class DashboardBuilder:
         value_format: str | None = None,
         series_config: list[dict[str, Any]] | None = None,
         tooltip_fields: list[str] | None = None,
+        reference_lines: list[dict[str, Any]] | None = None,
+        color_by: str | None = None,
+        color_values: dict[str, str] | None = None,
+        show_data_labels: bool = False,
+        data_label_format: str | None = None,
     ) -> DashboardBuilder:
         """Add a line chart tile."""
         fields = [time_col] + metric_cols
+        if color_by and color_by not in fields:
+            fields.append(color_by)
         self._tiles.append(
             Tile(
                 name=name,
@@ -150,6 +159,11 @@ class DashboardBuilder:
                     y_axis_format=value_format,
                     series_config=series_config or [],
                     tooltip_fields=self._qualify_fields(tooltip_fields) if tooltip_fields else [],
+                    reference_lines=reference_lines or [],
+                    color_by=self._qualify_field(color_by) if color_by else None,
+                    color_values=color_values or {},
+                    show_data_labels=show_data_labels,
+                    data_label_format=data_label_format,
                 ),
                 size=size,
             )
@@ -210,9 +224,14 @@ class DashboardBuilder:
         axis_title_y: str | None = None,
         value_format: str | None = None,
         label_rotation: int | None = None,
+        color_by: str | None = None,
+        color_values: dict[str, str] | None = None,
+        reference_lines: list[dict[str, Any]] | None = None,
     ) -> DashboardBuilder:
         """Add a bar chart tile."""
         fields = [dimension_col] + metric_cols
+        if color_by and color_by not in fields:
+            fields.append(color_by)
         sort_col = sort_by or metric_cols[0]
         chart_type = "stacked_bar" if stacked else ("grouped_bar" if grouped else "bar")
 
@@ -234,6 +253,9 @@ class DashboardBuilder:
                     axis_label_y=axis_title_y,
                     y_axis_format=value_format,
                     x_axis_rotation=label_rotation,
+                    color_by=self._qualify_field(color_by) if color_by else None,
+                    color_values=color_values or {},
+                    reference_lines=reference_lines or [],
                 ),
                 size=size,
             )
@@ -251,12 +273,14 @@ class DashboardBuilder:
         size: str = "full",
         description: str = "",
         column_formats: dict[str, dict[str, Any]] | None = None,
+        frozen_column: str | None = None,
     ) -> DashboardBuilder:
         """Add a data table tile.
 
         Args:
             column_formats: Per-column formatting, e.g.
-                ``{"REVENUE": {"align": "right"}, "NAME": {"align": "left"}}``
+                ``{"REVENUE": {"align": "right", "width": 150}, "NAME": {"align": "left"}}``
+            frozen_column: Pin a column for horizontal scrolling.
         """
         sorts = []
         if sort_by:
@@ -275,6 +299,7 @@ class DashboardBuilder:
                 chart_type="table",
                 vis_config=TileVisConfig(
                     column_formats=column_formats or {},
+                    frozen_column=self._qualify_field(frozen_column) if frozen_column else None,
                 ),
                 size=size,
             )
@@ -510,6 +535,80 @@ class DashboardBuilder:
                     kpi_comparison_format=comparison_format,
                     kpi_sparkline=sparkline,
                     kpi_sparkline_type=sparkline_type,
+                ),
+                size=size,
+            )
+        )
+        return self
+
+    def add_heatmap(
+        self,
+        name: str,
+        *,
+        x_col: str,
+        y_col: str,
+        color_col: str,
+        show_data_labels: bool = True,
+        x_rotation: int | None = None,
+        size: str = "full",
+        description: str = "",
+    ) -> DashboardBuilder:
+        """Add a heatmap tile (cohort retention, DAU, etc.)."""
+        fields = [x_col, y_col, color_col]
+        self._tiles.append(
+            Tile(
+                name=name,
+                description=description,
+                query=TileQuery(
+                    table=self._table or "",
+                    fields=self._qualify_fields(fields),
+                    limit=1000,
+                ),
+                chart_type="heatmap",
+                vis_config=TileVisConfig(
+                    x_axis=self._qualify_field(x_col),
+                    y_axis=[self._qualify_field(y_col)],
+                    color_field=self._qualify_field(color_col),
+                    show_data_labels=show_data_labels,
+                    x_axis_rotation=x_rotation,
+                ),
+                size=size,
+            )
+        )
+        return self
+
+    def add_vegalite_tile(
+        self,
+        name: str,
+        *,
+        spec: dict[str, Any],
+        query_table: str | None = None,
+        query_fields: list[str] | None = None,
+        height: int = 350,
+        size: str = "half",
+        description: str = "",
+    ) -> DashboardBuilder:
+        """Add a custom Vega-Lite visualization tile.
+
+        Pass a full Vega-Lite v5 spec dict. The spec will be wrapped with
+        Omni-standard defaults (container width, transparent background).
+        """
+        table = query_table or self._table or ""
+        fields = self._qualify_fields(query_fields) if query_fields else [f"{table}.id"]
+        spec.setdefault("height", height)
+
+        self._tiles.append(
+            Tile(
+                name=name,
+                description=description,
+                query=TileQuery(
+                    table=table,
+                    fields=fields,
+                    limit=1000,
+                ),
+                chart_type="vegalite",
+                vis_config=TileVisConfig(
+                    vegalite_spec=spec,
                 ),
                 size=size,
             )

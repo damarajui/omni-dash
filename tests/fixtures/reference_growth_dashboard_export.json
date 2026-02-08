@@ -1,0 +1,1160 @@
+{
+    "documentMetadata": {
+        "presentation": {
+            "filters": {
+                "collapsible": true,
+                "defaultExpanded": false
+            }
+        }
+    },
+    "facetFilters": false,
+    "filterConfig": {},
+    "filterOrder": [],
+    "modelId": "8d3a9a62-5f17-4bf8-9cb8-78978acbb712",
+    "name": "Growth Dashboard",
+    "queryPresentations": [
+        {
+            "aiConfig": {},
+            "chartType": "lineColor",
+            "name": "Activated Users - On Signup Date",
+            "prefersChart": true,
+            "query": {
+                "limit": 1000,
+                "sorts": [
+                    {
+                        "column_name": "calc_1",
+                        "sort_descending": false
+                    }
+                ],
+                "table": "ai_assistant_activated_users",
+                "fields": [
+                    "ai_assistant_activated_users.signup_date",
+                    "ai_assistant_activated_users.activated_within_7_days_sum",
+                    "ai_assistant_activated_users.lindy_user_id_count_distinct",
+                    "calc_1"
+                ],
+                "pivots": [],
+                "dbtMode": false,
+                "filters": {
+                    "ai_assistant_activated_users.signup_date": {
+                        "type": "composite",
+                        "filters": [
+                            {
+                                "kind": "ON_OR_AFTER",
+                                "type": "date",
+                                "ui_type": "ON_OR_AFTER",
+                                "isFiscal": false,
+                                "left_side": "2026-01-01",
+                                "is_negative": false,
+                                "offset_interval_string": null
+                            },
+                            {
+                                "kind": "BEFORE",
+                                "type": "date",
+                                "ui_type": "BEFORE",
+                                "isFiscal": false,
+                                "right_side": "7 days ago",
+                                "is_negative": false,
+                                "offset_interval_string": null
+                            }
+                        ],
+                        "conjunction": "AND"
+                    }
+                },
+                "modelId": "8d3a9a62-5f17-4bf8-9cb8-78978acbb712",
+                "version": 8,
+                "controls": [],
+                "metadata": {
+                    "ai_assistant_activated_users.lindy_user_id_count_distinct": {
+                        "label": "Signups"
+                    }
+                },
+                "manualSort": true,
+                "rewriteSql": true,
+                "row_totals": {},
+                "fill_fields": [],
+                "calculations": [
+                    {
+                        "label": "Percent Activated (7d)",
+                        "format": "PERCENT",
+                        "calc_name": "calc_1",
+                        "outside_pivot": false,
+                        "sql_expression": {
+                            "type": "call",
+                            "distinct": false,
+                            "operands": [
+                                {
+                                    "type": "field",
+                                    "field_name": "ai_assistant_activated_users.activated_within_7_days_sum"
+                                },
+                                {
+                                    "type": "field",
+                                    "field_name": "ai_assistant_activated_users.lindy_user_id_count_distinct"
+                                }
+                            ],
+                            "operator": "Omni.OMNI_FX_SAFE_DIVIDE"
+                        },
+                        "swallow_errors": true,
+                        "original_formula": "=B1/C1"
+                    }
+                ],
+                "column_limit": 50,
+                "join_via_map": {},
+                "column_totals": {},
+                "userEditedSQL": "",
+                "dimensionIndex": 4,
+                "default_group_by": true,
+                "custom_summary_types": {}
+            },
+            "resultConfig": {
+                "tableType": "spreadsheet",
+                "rowBanding": {
+                    "enabled": false,
+                    "bandSize": 1
+                },
+                "expandedRows": {},
+                "columnFormats": {
+                    "calc_1": {
+                        "width": 191
+                    },
+                    "ai_assistant_activated_users.signup_date": {
+                        "width": 150
+                    },
+                    "ai_assistant_activated_users.signup_date__raw": {
+                        "width": 150
+                    },
+                    "ai_assistant_activated_users.activated_within_7_days_sum": {
+                        "width": 150
+                    },
+                    "ai_assistant_activated_users.lindy_user_id_count_distinct": {
+                        "width": 150
+                    }
+                },
+                "hideIndexColumn": false,
+                "truncateHeaders": true,
+                "showDescriptions": true,
+                "visColumnDisplay": "hide-view-name"
+            },
+            "subTitle": "NOTE: This is a very preliminary definition of signup: if a user either opens the recorder page or runs an ad hoc task within their first 7 days, they're \"activated\". There is also a 7d gate to give users time to activate",
+            "config": {
+                "x": {
+                    "field": {
+                        "name": "ai_assistant_activated_users.signup_date"
+                    }
+                },
+                "y": {},
+                "y2": {},
+                "mark": {
+                    "type": "line"
+                },
+                "color": {},
+                "series": [
+                    {
+                        "mark": {
+                            "_mark_color": "#FF6291"
+                        },
+                        "field": {
+                            "name": "calc_1"
+                        },
+                        "yAxis": "y",
+                        "dataLabel": {
+                            "format": "PERCENT_1",
+                            "enabled": true,
+                            "useSparseLabelAlgorithm": true
+                        }
+                    },
+                    {
+                        "mark": {
+                            "type": "bar"
+                        },
+                        "field": {
+                            "name": "ai_assistant_activated_users.lindy_user_id_count_distinct"
+                        },
+                        "yAxis": "y2",
+                        "manual": true,
+                        "dataLabel": {
+                            "enabled": true,
+                            "useSparseLabelAlgorithm": true
+                        }
+                    }
+                ],
+                "tooltip": [
+                    {
+                        "field": {
+                            "name": "ai_assistant_activated_users.signup_date"
+                        }
+                    },
+                    {
+                        "field": {
+                            "name": "ai_assistant_activated_users.activated_within_7_days_sum"
+                        }
+                    },
+                    {
+                        "field": {
+                            "name": "ai_assistant_activated_users.lindy_user_id_count_distinct"
+                        }
+                    },
+                    {
+                        "field": {
+                            "name": "calc_1"
+                        }
+                    }
+                ],
+                "version": 0,
+                "behaviors": {
+                    "stackMultiMark": false
+                },
+                "configType": "cartesian",
+                "_dependentAxis": "y"
+            },
+            "visType": "basic",
+            "fields": [
+                "ai_assistant_activated_users.signup_date",
+                "ai_assistant_activated_users.activated_within_7_days_sum",
+                "ai_assistant_activated_users.lindy_user_id_count_distinct",
+                "calc_1"
+            ],
+            "id": "7563b9c6-2498-4d65-9ceb-1ff29cf48697",
+            "queryIdentifierMapKey": "4"
+        },
+        {
+            "aiConfig": {},
+            "chartType": "heatmap",
+            "name": "NRR Chart",
+            "prefersChart": true,
+            "query": {
+                "limit": 1000,
+                "sorts": [],
+                "table": "nrr_cohort_detail_assistant",
+                "fields": [
+                    "nrr_cohort_detail_assistant.weeks_since_cohort",
+                    "nrr_cohort_detail_assistant.cohort_nrr_percent",
+                    "nrr_cohort_detail_assistant.cohort_label"
+                ],
+                "pivots": [],
+                "dbtMode": false,
+                "filters": {
+                    "nrr_cohort_detail_assistant.cohort_week": {
+                        "kind": "ON_OR_AFTER",
+                        "type": "date",
+                        "ui_type": "ON_OR_AFTER",
+                        "isFiscal": false,
+                        "left_side": "2026-01-01",
+                        "is_negative": false,
+                        "offset_interval_string": null
+                    }
+                },
+                "modelId": "8d3a9a62-5f17-4bf8-9cb8-78978acbb712",
+                "version": 8,
+                "controls": [],
+                "manualSort": true,
+                "rewriteSql": true,
+                "row_totals": {},
+                "fill_fields": [],
+                "calculations": [],
+                "column_limit": 50,
+                "join_via_map": {},
+                "column_totals": {},
+                "userEditedSQL": "",
+                "default_group_by": true,
+                "custom_summary_types": {}
+            },
+            "resultConfig": {
+                "tableType": "spreadsheet",
+                "rowBanding": {
+                    "enabled": false,
+                    "bandSize": 1
+                },
+                "expandedRows": {},
+                "columnFormats": {
+                    "calc_1": {
+                        "width": 431
+                    },
+                    "nrr_cohort_detail_assistant.cohort_label": {
+                        "width": 333
+                    },
+                    "nrr_cohort_detail_assistant.users_in_cohort": {
+                        "width": 150
+                    },
+                    "nrr_cohort_detail_assistant.cohort_week__raw": {
+                        "width": 150
+                    },
+                    "nrr_cohort_detail_assistant.cohort_week[week]": {
+                        "width": 150
+                    },
+                    "nrr_cohort_detail_assistant.cohort_nrr_percent": {
+                        "width": 150
+                    },
+                    "nrr_cohort_detail_assistant.weeks_since_cohort": {
+                        "width": 150
+                    },
+                    "nrr_cohort_detail_assistant.cohort_starting_arr": {
+                        "width": 150
+                    }
+                },
+                "hideIndexColumn": false,
+                "truncateHeaders": true,
+                "showDescriptions": true,
+                "visColumnDisplay": "hide-view-name"
+            },
+            "config": {
+                "x": {
+                    "axis": {
+                        "label": {
+                            "format": {
+                                "angle": 360
+                            }
+                        }
+                    },
+                    "field": {
+                        "name": "nrr_cohort_detail_assistant.weeks_since_cohort"
+                    },
+                    "manual": true
+                },
+                "y": {
+                    "field": {
+                        "name": "nrr_cohort_detail_assistant.cohort_label"
+                    },
+                    "manual": true
+                },
+                "color": {
+                    "field": {
+                        "name": "nrr_cohort_detail_assistant.cohort_nrr_percent"
+                    },
+                    "manual": true
+                },
+                "tooltip": [
+                    {
+                        "field": {
+                            "expr": {
+                                "type": "reference",
+                                "column_ref": [
+                                    "COHORT_WEEK"
+                                ],
+                                "is_default_alias_scoped": true
+                            },
+                            "name": "nrr_cohort_detail_assistant.cohort_week[week]",
+                            "type": {
+                                "typeId": 5
+                            },
+                            "label": "Cohort Week Week",
+                            "hidden": false,
+                            "isCalc": false,
+                            "dateType": "WEEK",
+                            "omniType": "TIMESTAMP",
+                            "viewName": "nrr_cohort_detail_assistant",
+                            "fieldName": "cohort_week[week]",
+                            "isMeasure": false,
+                            "viewLabel": "Nrr Cohort Detail Assistant",
+                            "timeFrames": [
+                                null,
+                                "DATE",
+                                "WEEK",
+                                "MONTH",
+                                "QUARTER",
+                                "YEAR"
+                            ],
+                            "drillFields": [
+                                {
+                                    "name": "nrr_cohort_detail_assistant.cohort_week[date]",
+                                    "label": "Date"
+                                }
+                            ],
+                            "enumeration": false,
+                            "isAggregate": false,
+                            "isDimension": true,
+                            "parentField": "cohort_week",
+                            "parentLabel": "Cohort Week",
+                            "rawFieldName": "nrr_cohort_detail_assistant.cohort_week[week]__raw",
+                            "canSortOnField": true,
+                            "frontendOmniType": "TIMESTAMP",
+                            "defaultNumericFormat": "DEFAULT"
+                        }
+                    },
+                    {
+                        "field": {
+                            "expr": {
+                                "type": "reference",
+                                "column_ref": [
+                                    "WEEKS_SINCE_COHORT"
+                                ],
+                                "is_default_alias_scoped": true
+                            },
+                            "name": "nrr_cohort_detail_assistant.weeks_since_cohort",
+                            "type": {
+                                "typeId": 2,
+                                "bitWidth": 64,
+                                "isSigned": true
+                            },
+                            "label": "Weeks Since Cohort",
+                            "hidden": false,
+                            "isCalc": false,
+                            "omniType": "NUMBER",
+                            "viewName": "nrr_cohort_detail_assistant",
+                            "fieldName": "weeks_since_cohort",
+                            "isMeasure": false,
+                            "viewLabel": "Nrr Cohort Detail Assistant",
+                            "enumeration": false,
+                            "isAggregate": false,
+                            "isDimension": true,
+                            "canSortOnField": true,
+                            "frontendOmniType": "NUMBER",
+                            "defaultNumericFormat": "DEFAULT"
+                        }
+                    },
+                    {
+                        "field": {
+                            "expr": {
+                                "type": "reference",
+                                "column_ref": [
+                                    "COHORT_NRR_PERCENT"
+                                ],
+                                "is_default_alias_scoped": true
+                            },
+                            "name": "nrr_cohort_detail_assistant.cohort_nrr_percent",
+                            "type": {
+                                "typeId": 3,
+                                "precision": 2
+                            },
+                            "label": "Cohort Nrr Percent",
+                            "hidden": false,
+                            "isCalc": false,
+                            "omniType": "NUMBER",
+                            "viewName": "nrr_cohort_detail_assistant",
+                            "fieldName": "cohort_nrr_percent",
+                            "isMeasure": false,
+                            "viewLabel": "Nrr Cohort Detail Assistant",
+                            "enumeration": false,
+                            "isAggregate": false,
+                            "isDimension": true,
+                            "canSortOnField": true,
+                            "frontendOmniType": "NUMBER",
+                            "defaultNumericFormat": "DEFAULT"
+                        }
+                    },
+                    {
+                        "field": {
+                            "expr": {
+                                "type": "reference",
+                                "column_ref": [
+                                    "USERS_IN_COHORT"
+                                ],
+                                "is_default_alias_scoped": true
+                            },
+                            "name": "nrr_cohort_detail_assistant.users_in_cohort",
+                            "type": {
+                                "typeId": 2,
+                                "bitWidth": 64,
+                                "isSigned": true
+                            },
+                            "label": "Users In Cohort",
+                            "hidden": false,
+                            "isCalc": false,
+                            "omniType": "NUMBER",
+                            "viewName": "nrr_cohort_detail_assistant",
+                            "fieldName": "users_in_cohort",
+                            "isMeasure": false,
+                            "viewLabel": "Nrr Cohort Detail Assistant",
+                            "enumeration": false,
+                            "isAggregate": false,
+                            "isDimension": true,
+                            "canSortOnField": true,
+                            "frontendOmniType": "NUMBER",
+                            "defaultNumericFormat": "DEFAULT"
+                        }
+                    },
+                    {
+                        "field": {
+                            "expr": {
+                                "type": "reference",
+                                "column_ref": [
+                                    "COHORT_STARTING_ARR"
+                                ],
+                                "is_default_alias_scoped": true
+                            },
+                            "name": "nrr_cohort_detail_assistant.cohort_starting_arr",
+                            "type": {
+                                "typeId": 3,
+                                "precision": 2
+                            },
+                            "label": "Cohort Starting Arr",
+                            "hidden": false,
+                            "isCalc": false,
+                            "omniType": "NUMBER",
+                            "viewName": "nrr_cohort_detail_assistant",
+                            "fieldName": "cohort_starting_arr",
+                            "isMeasure": false,
+                            "viewLabel": "Nrr Cohort Detail Assistant",
+                            "enumeration": false,
+                            "isAggregate": false,
+                            "isDimension": true,
+                            "canSortOnField": true,
+                            "frontendOmniType": "NUMBER",
+                            "defaultNumericFormat": "DEFAULT"
+                        }
+                    },
+                    {
+                        "field": {
+                            "expr": {
+                                "type": "reference",
+                                "column_ref": [
+                                    "COHORT_LABEL"
+                                ],
+                                "is_default_alias_scoped": true
+                            },
+                            "name": "nrr_cohort_detail_assistant.cohort_label",
+                            "type": {
+                                "typeId": 5
+                            },
+                            "label": "Cohort Label",
+                            "hidden": false,
+                            "isCalc": false,
+                            "omniType": "STRING",
+                            "viewName": "nrr_cohort_detail_assistant",
+                            "fieldName": "cohort_label",
+                            "isMeasure": false,
+                            "viewLabel": "Nrr Cohort Detail Assistant",
+                            "enumeration": false,
+                            "isAggregate": false,
+                            "isDimension": true,
+                            "canSortOnField": true,
+                            "frontendOmniType": "STRING",
+                            "defaultNumericFormat": "DEFAULT"
+                        }
+                    }
+                ],
+                "dataLabel": {
+                    "enabled": true,
+                    "fontSize": 14
+                },
+                "configType": "heatmap"
+            },
+            "visType": "basic",
+            "fields": [
+                "nrr_cohort_detail_assistant.cohort_label",
+                "nrr_cohort_detail_assistant.cohort_nrr_percent",
+                "nrr_cohort_detail_assistant.cohort_starting_arr",
+                "nrr_cohort_detail_assistant.cohort_week[week]",
+                "nrr_cohort_detail_assistant.weeks_since_cohort"
+            ],
+            "id": "cf07a7b6-6c06-4372-89b3-4b289eeb9ab6",
+            "queryIdentifierMapKey": "7"
+        },
+        {
+            "aiConfig": {},
+            "chartType": "lineColor",
+            "name": "Onboarding Rate",
+            "prefersChart": true,
+            "query": {
+                "limit": 1000,
+                "sorts": [
+                    {
+                        "column_name": "dim_identities.created_at_pt[date]",
+                        "sort_descending": false
+                    }
+                ],
+                "table": "dim_identities",
+                "fields": [
+                    "dim_identities.created_at_pt[date]",
+                    "dim_identities.converted_through_paywall_sum",
+                    "dim_identities.lindy_user_id_count_distinct",
+                    "converted_through_paywall_sum_percent_of_total_1"
+                ],
+                "pivots": [],
+                "dbtMode": false,
+                "filters": {
+                    "dim_identities.email": {
+                        "kind": "EQUALS",
+                        "type": "string",
+                        "values": [
+                            "michellejinliu@gmail.com",
+                            "ian@mcgregor.codes",
+                            "michellejinliu+1@gmail.com",
+                            "me@jonathancardoso.com",
+                            "michellejinliu+2@gmail.com",
+                            "lindy.a.drope@gmail.com"
+                        ],
+                        "is_negative": true,
+                        "appliedLabels": {}
+                    },
+                    "dim_identities.created_at_pt": {
+                        "kind": "BETWEEN",
+                        "type": "date",
+                        "ui_type": "BETWEEN",
+                        "isFiscal": false,
+                        "left_side": "2026-01-01",
+                        "right_side": "yesterday",
+                        "is_negative": false,
+                        "offset_interval_string": null
+                    },
+                    "dim_identities.assistant_signup_binary": {
+                        "kind": "EQUALS",
+                        "type": "number",
+                        "values": [
+                            "1"
+                        ],
+                        "is_negative": false,
+                        "is_inclusive": false
+                    }
+                },
+                "modelId": "8d3a9a62-5f17-4bf8-9cb8-78978acbb712",
+                "version": 8,
+                "controls": [],
+                "rewriteSql": true,
+                "row_totals": {},
+                "fill_fields": [],
+                "calculations": [
+                    {
+                        "type": "call",
+                        "label": "Converted Through Paywall Sum Percent Of Total",
+                        "format": "percent_2",
+                        "calc_name": "converted_through_paywall_sum_percent_of_total_1",
+                        "outside_pivot": false,
+                        "sql_expression": {
+                            "type": "call",
+                            "operands": [
+                                {
+                                    "type": "field",
+                                    "field_name": "dim_identities.converted_through_paywall_sum"
+                                },
+                                {
+                                    "type": "field",
+                                    "field_name": "dim_identities.lindy_user_id_count_distinct"
+                                }
+                            ],
+                            "operator": "Omni.OMNI_FX_SAFE_DIVIDE"
+                        },
+                        "swallow_errors": true,
+                        "original_formula": "=B1 / C1"
+                    }
+                ],
+                "column_limit": 50,
+                "join_via_map": {},
+                "column_totals": {},
+                "userEditedSQL": "",
+                "default_group_by": true,
+                "custom_summary_types": {
+                    "converted_through_paywall_sum_percent_of_total_1": "SUM"
+                },
+                "join_paths_from_topic_name": "dim_identities"
+            },
+            "resultConfig": {
+                "tableType": "spreadsheet",
+                "rowBanding": {
+                    "enabled": false,
+                    "bandSize": 1
+                },
+                "expandedRows": {},
+                "frozenColumn": "dim_identities.lindy_user_id",
+                "columnFormats": {
+                    "calc_1": {
+                        "width": 150
+                    },
+                    "dim_identities.email": {
+                        "width": 354
+                    },
+                    "dim_identities.created_at_pt[date]": {
+                        "width": 150
+                    },
+                    "dim_identities.created_at_pt[date]__raw": {
+                        "width": 150
+                    },
+                    "dim_identities.lindy_user_id_count_distinct": {
+                        "width": 263
+                    },
+                    "dim_identities.converted_through_paywall_sum": {
+                        "width": 244
+                    },
+                    "converted_through_paywall_sum_percent_of_total_1": {
+                        "width": 150
+                    }
+                },
+                "hideIndexColumn": false,
+                "truncateHeaders": true,
+                "showDescriptions": true,
+                "visColumnDisplay": "hide-view-name"
+            },
+            "subTitle": "Signup -> Converted Through Paywall",
+            "topicName": "dim_identities",
+            "config": {
+                "x": {
+                    "field": {
+                        "name": "dim_identities.created_at_pt[date]"
+                    },
+                    "manual": true
+                },
+                "y2": null,
+                "mark": {
+                    "type": "line"
+                },
+                "color": {},
+                "series": [
+                    {
+                        "field": {
+                            "name": "converted_through_paywall_sum_percent_of_total_1"
+                        },
+                        "yAxis": "y",
+                        "manual": true,
+                        "dataLabel": {
+                            "enabled": true,
+                            "useSparseLabelAlgorithm": true
+                        }
+                    }
+                ],
+                "tooltip": [
+                    {
+                        "field": {
+                            "name": "dim_identities.created_at_pt[date]"
+                        }
+                    },
+                    {
+                        "field": {
+                            "name": "dim_identities.converted_through_paywall_sum"
+                        }
+                    },
+                    {
+                        "field": {
+                            "name": "converted_through_paywall_sum_percent_of_total_1"
+                        }
+                    },
+                    {
+                        "field": {
+                            "name": "dim_identities.lindy_user_id_count_distinct"
+                        }
+                    }
+                ],
+                "version": 0,
+                "configType": "cartesian",
+                "_dependentAxis": "y"
+            },
+            "visType": "basic",
+            "fields": [
+                "dim_identities.created_at_pt[date]",
+                "dim_identities.converted_through_paywall_sum",
+                "dim_identities.lindy_user_id_count_distinct",
+                "converted_through_paywall_sum_percent_of_total_1"
+            ],
+            "id": "cc2afb49-b892-4d07-8c10-ebbc5a30c8b4",
+            "queryIdentifierMapKey": "3"
+        },
+        {
+            "aiConfig": {},
+            "chartType": "heatmap",
+            "name": "Daily Active Users",
+            "prefersChart": true,
+            "query": {
+                "limit": 1000,
+                "sorts": [
+                    {
+                        "column_name": "ai_assistant_dau.day",
+                        "sort_descending": false
+                    }
+                ],
+                "table": "ai_assistant_dau",
+                "fields": [
+                    "ai_assistant_dau.day",
+                    "ai_assistant_dau.days_since_signup",
+                    "ai_assistant_dau.signup_date",
+                    "ai_assistant_dau.was_active_sum"
+                ],
+                "pivots": [],
+                "dbtMode": false,
+                "filters": {
+                    "ai_assistant_dau.signup_date": {
+                        "kind": "ON_OR_AFTER",
+                        "type": "date",
+                        "ui_type": "ON_OR_AFTER",
+                        "isFiscal": false,
+                        "left_side": "2026-01-01",
+                        "is_negative": false,
+                        "offset_interval_string": null
+                    }
+                },
+                "modelId": "8d3a9a62-5f17-4bf8-9cb8-78978acbb712",
+                "version": 8,
+                "controls": [],
+                "metadata": {
+                    "ai_assistant_dau.was_active_sum": {
+                        "label": "DAU"
+                    }
+                },
+                "manualSort": true,
+                "rewriteSql": true,
+                "row_totals": {},
+                "fill_fields": [],
+                "calculations": [],
+                "column_limit": 50,
+                "join_via_map": {},
+                "column_totals": {},
+                "userEditedSQL": "",
+                "dimensionIndex": 3,
+                "default_group_by": true,
+                "custom_summary_types": {}
+            },
+            "resultConfig": {
+                "tableType": "spreadsheet",
+                "rowBanding": {
+                    "enabled": false,
+                    "bandSize": 1
+                },
+                "expandedRows": {},
+                "columnFormats": {
+                    "ai_assistant_dau.day": {
+                        "align": "left"
+                    },
+                    "ai_assistant_dau.signup_date": {
+                        "align": "left"
+                    },
+                    "ai_assistant_dau.was_active_sum": {
+                        "align": "right"
+                    }
+                },
+                "hideIndexColumn": false,
+                "truncateHeaders": true,
+                "showDescriptions": true,
+                "visColumnDisplay": "hide-view-name"
+            },
+            "subTitle": "How many users did one of the following: Ad Hoc Task, Opened Meeting Tab",
+            "config": {
+                "x": {
+                    "axis": {
+                        "label": {
+                            "format": {
+                                "angle": 360
+                            }
+                        }
+                    },
+                    "field": {
+                        "name": "ai_assistant_dau.days_since_signup"
+                    },
+                    "manual": true
+                },
+                "y": {
+                    "field": {
+                        "name": "ai_assistant_dau.signup_date"
+                    },
+                    "manual": true
+                },
+                "color": {
+                    "field": {
+                        "name": "ai_assistant_dau.was_active_sum"
+                    }
+                },
+                "tooltip": [
+                    {
+                        "field": {
+                            "expr": {
+                                "type": "reference",
+                                "column_ref": [
+                                    "DAY"
+                                ],
+                                "is_default_alias_scoped": true
+                            },
+                            "name": "ai_assistant_dau.day",
+                            "type": {
+                                "typeId": 5
+                            },
+                            "label": "Day",
+                            "hidden": false,
+                            "isCalc": false,
+                            "dateType": "DATE",
+                            "omniType": "TIMESTAMP",
+                            "viewName": "ai_assistant_dau",
+                            "fieldName": "day",
+                            "isMeasure": false,
+                            "viewLabel": "Ai Assistant Dau",
+                            "timeFrames": [
+                                null,
+                                "DATE",
+                                "WEEK",
+                                "MONTH",
+                                "QUARTER",
+                                "YEAR"
+                            ],
+                            "enumeration": false,
+                            "isAggregate": false,
+                            "isDimension": true,
+                            "parentField": "day",
+                            "parentLabel": "Day",
+                            "rawFieldName": "ai_assistant_dau.day__raw",
+                            "canSortOnField": true,
+                            "frontendOmniType": "TIMESTAMP",
+                            "defaultNumericFormat": "DEFAULT"
+                        }
+                    },
+                    {
+                        "field": {
+                            "expr": {
+                                "type": "reference",
+                                "column_ref": [
+                                    "DAYS_SINCE_SIGNUP"
+                                ],
+                                "is_default_alias_scoped": true
+                            },
+                            "name": "ai_assistant_dau.days_since_signup",
+                            "type": {
+                                "typeId": 2,
+                                "bitWidth": 64,
+                                "isSigned": true
+                            },
+                            "label": "Days Since Signup",
+                            "hidden": false,
+                            "isCalc": false,
+                            "omniType": "NUMBER",
+                            "viewName": "ai_assistant_dau",
+                            "fieldName": "days_since_signup",
+                            "isMeasure": false,
+                            "viewLabel": "Ai Assistant Dau",
+                            "enumeration": false,
+                            "isAggregate": false,
+                            "isDimension": true,
+                            "canSortOnField": true,
+                            "frontendOmniType": "NUMBER",
+                            "defaultNumericFormat": "DEFAULT"
+                        }
+                    },
+                    {
+                        "field": {
+                            "expr": {
+                                "type": "field",
+                                "field_name": "ai_assistant_dau.was_active"
+                            },
+                            "name": "ai_assistant_dau.was_active_sum",
+                            "type": {
+                                "typeId": 2,
+                                "bitWidth": 64,
+                                "isSigned": true
+                            },
+                            "label": "DAU",
+                            "hidden": false,
+                            "isCalc": false,
+                            "omniType": "NUMBER",
+                            "viewName": "ai_assistant_dau",
+                            "fieldName": "was_active_sum",
+                            "isMeasure": true,
+                            "viewLabel": "Ai Assistant Dau",
+                            "enumeration": false,
+                            "isAggregate": true,
+                            "aggregateType": "SUM",
+                            "canSortOnField": true,
+                            "frontendOmniType": "NUMBER",
+                            "defaultNumericFormat": "DEFAULT"
+                        }
+                    }
+                ],
+                "dataLabel": {
+                    "enabled": true
+                },
+                "configType": "heatmap"
+            },
+            "visType": "basic",
+            "id": "ea48c6db-90e1-49ec-83a6-4699a4e85c58",
+            "queryIdentifierMapKey": "6"
+        },
+        {
+            "aiConfig": {},
+            "chartType": "lineColor",
+            "name": "Activated Users - On Signup Date (Monthly)",
+            "prefersChart": true,
+            "query": {
+                "limit": 1000,
+                "sorts": [
+                    {
+                        "column_name": "calc_1",
+                        "sort_descending": false
+                    }
+                ],
+                "table": "ai_assistant_activated_users",
+                "fields": [
+                    "ai_assistant_activated_users.signup_date[month]",
+                    "ai_assistant_activated_users.activated_within_7_days_sum",
+                    "ai_assistant_activated_users.lindy_user_id_count_distinct",
+                    "calc_1"
+                ],
+                "pivots": [],
+                "dbtMode": false,
+                "filters": {
+                    "ai_assistant_activated_users.signup_date": {
+                        "type": "composite",
+                        "filters": [
+                            {
+                                "kind": "ON_OR_AFTER",
+                                "type": "date",
+                                "ui_type": "ON_OR_AFTER",
+                                "isFiscal": false,
+                                "left_side": "2026-01-01",
+                                "is_negative": false,
+                                "offset_interval_string": null
+                            },
+                            {
+                                "kind": "BEFORE",
+                                "type": "date",
+                                "ui_type": "BEFORE",
+                                "isFiscal": false,
+                                "right_side": "7 days ago",
+                                "is_negative": false,
+                                "offset_interval_string": null
+                            }
+                        ],
+                        "conjunction": "AND"
+                    }
+                },
+                "modelId": "8d3a9a62-5f17-4bf8-9cb8-78978acbb712",
+                "version": 8,
+                "controls": [],
+                "metadata": {
+                    "ai_assistant_activated_users.lindy_user_id_count_distinct": {
+                        "label": "Signups"
+                    }
+                },
+                "manualSort": true,
+                "rewriteSql": true,
+                "row_totals": {},
+                "fill_fields": [],
+                "calculations": [
+                    {
+                        "label": "Percent Activated (7d)",
+                        "format": "PERCENT",
+                        "calc_name": "calc_1",
+                        "outside_pivot": false,
+                        "sql_expression": {
+                            "type": "call",
+                            "distinct": false,
+                            "operands": [
+                                {
+                                    "type": "field",
+                                    "field_name": "ai_assistant_activated_users.activated_within_7_days_sum"
+                                },
+                                {
+                                    "type": "field",
+                                    "field_name": "ai_assistant_activated_users.lindy_user_id_count_distinct"
+                                }
+                            ],
+                            "operator": "Omni.OMNI_FX_SAFE_DIVIDE"
+                        },
+                        "swallow_errors": true,
+                        "original_formula": "=B1/C1"
+                    }
+                ],
+                "column_limit": 50,
+                "join_via_map": {},
+                "column_totals": {},
+                "userEditedSQL": "",
+                "dimensionIndex": 4,
+                "default_group_by": true,
+                "custom_summary_types": {}
+            },
+            "resultConfig": {
+                "tableType": "spreadsheet",
+                "rowBanding": {
+                    "enabled": false,
+                    "bandSize": 1
+                },
+                "expandedRows": {},
+                "columnFormats": {
+                    "calc_1": {
+                        "width": 191
+                    },
+                    "ai_assistant_activated_users.signup_date__raw": {
+                        "width": 150
+                    },
+                    "ai_assistant_activated_users.signup_date[month]": {
+                        "width": 150
+                    },
+                    "ai_assistant_activated_users.activated_within_7_days_sum": {
+                        "width": 150
+                    },
+                    "ai_assistant_activated_users.lindy_user_id_count_distinct": {
+                        "width": 150
+                    }
+                },
+                "hideIndexColumn": false,
+                "truncateHeaders": true,
+                "showDescriptions": true,
+                "visColumnDisplay": "hide-view-name"
+            },
+            "subTitle": "NOTE: This is a very preliminary definition of signup: if a user either opens the recorder page or runs an ad hoc task within their first 7 days, they're \"activated\". There is also a 7d gate to give users time to activate",
+            "config": {
+                "x": {
+                    "field": {
+                        "name": "ai_assistant_activated_users.signup_date[month]"
+                    }
+                },
+                "y": {},
+                "y2": {},
+                "mark": {
+                    "type": "line"
+                },
+                "color": {},
+                "series": [
+                    {
+                        "mark": {
+                            "_mark_color": "#FF6291"
+                        },
+                        "field": {
+                            "name": "calc_1"
+                        },
+                        "yAxis": "y",
+                        "dataLabel": {
+                            "format": "PERCENT_1",
+                            "enabled": true,
+                            "useSparseLabelAlgorithm": true
+                        }
+                    },
+                    {
+                        "mark": {
+                            "type": "bar"
+                        },
+                        "field": {
+                            "name": "ai_assistant_activated_users.lindy_user_id_count_distinct"
+                        },
+                        "yAxis": "y2",
+                        "manual": true,
+                        "dataLabel": {
+                            "enabled": true,
+                            "useSparseLabelAlgorithm": true
+                        }
+                    }
+                ],
+                "tooltip": [
+                    {
+                        "field": {
+                            "name": "ai_assistant_activated_users.signup_date[month]"
+                        }
+                    },
+                    {
+                        "field": {
+                            "name": "ai_assistant_activated_users.activated_within_7_days_sum"
+                        }
+                    },
+                    {
+                        "field": {
+                            "name": "ai_assistant_activated_users.lindy_user_id_count_distinct"
+                        }
+                    },
+                    {
+                        "field": {
+                            "name": "calc_1"
+                        }
+                    }
+                ],
+                "version": 0,
+                "behaviors": {
+                    "stackMultiMark": false
+                },
+                "configType": "cartesian",
+                "_dependentAxis": "y"
+            },
+            "visType": "basic",
+            "fields": [
+                "ai_assistant_activated_users.signup_date[month]",
+                "ai_assistant_activated_users.activated_within_7_days_sum",
+                "ai_assistant_activated_users.lindy_user_id_count_distinct",
+                "calc_1"
+            ],
+            "id": "f2b6ef9b-78dd-47cb-9cb3-f2512b7ea5f0",
+            "queryIdentifierMapKey": "8"
+        }
+    ],
+    "refreshInterval": 3600
+}

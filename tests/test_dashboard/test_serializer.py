@@ -529,6 +529,303 @@ def test_basic_vis_used_when_no_advanced_config():
     assert vis["visType"] == "basic"
 
 
+def test_reference_lines_in_cartesian_spec():
+    """Reference lines should appear in the Y axis spec."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Reference Line Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Revenue with Target",
+                chart_type="line",
+                query=TileQuery(table="t", fields=["t.date", "t.revenue"]),
+                vis_config=TileVisConfig(
+                    x_axis="t.date",
+                    y_axis=["t.revenue"],
+                    reference_lines=[{"value": 186, "label": "Goal", "dash": [8, 8]}],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visualization"]
+    spec = vis["spec"]
+
+    assert vis["visType"] == "cartesian"
+    ref = spec["y"]["axis"]["referenceLine"]
+    assert ref["enabled"] is True
+    assert ref["value"] == 186
+    assert ref["line"]["dash"] == [8, 8]
+    assert ref["label"] == "Goal"
+
+
+def test_heatmap_generates_heatmap_spec():
+    """Heatmap tiles should generate heatmap configType spec."""
+    definition = (
+        DashboardBuilder("Heatmap Test")
+        .model("m-1")
+        .dbt_source("t")
+        .add_heatmap(
+            "NRR Cohort",
+            x_col="weeks_since_cohort",
+            y_col="cohort_label",
+            color_col="cohort_nrr_percent",
+            x_rotation=360,
+        )
+        .build()
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visualization"]
+
+    assert vis["visType"] == "basic"
+    assert vis["chartType"] == "heatmap"
+    spec = vis["spec"]
+    assert spec["configType"] == "heatmap"
+    assert spec["x"]["field"]["name"] == "t.weeks_since_cohort"
+    assert spec["y"]["field"]["name"] == "t.cohort_label"
+    assert spec["color"]["field"]["name"] == "t.cohort_nrr_percent"
+    assert spec["x"]["axis"]["label"]["format"]["angle"] == 360
+    assert spec["dataLabel"]["enabled"] is True
+
+
+def test_vegalite_tile_generates_vegalite_vis():
+    """Vega-Lite tiles should pass through the full spec."""
+    vl_spec = {
+        "height": 350,
+        "layer": [
+            {"mark": {"type": "bar"}, "encoding": {"x": {"field": "val"}}}
+        ],
+    }
+    definition = (
+        DashboardBuilder("VL Test")
+        .model("m-1")
+        .dbt_source("t")
+        .add_vegalite_tile("Custom Funnel", spec=vl_spec, query_fields=["val", "label"])
+        .build()
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visualization"]
+
+    assert vis["visType"] == "vegalite"
+    assert vis["chartType"] == "code"
+    config = vis["config"]
+    assert config["$schema"] == "https://vega.github.io/schema/vega-lite/v5.json"
+    assert config["width"] == "container"
+    assert config["background"] == "transparent"
+    assert len(config["layer"]) == 1
+
+
+def test_color_values_in_cartesian_spec():
+    """Manual color mapping should be included in the cartesian spec."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Color Map Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="By Campaign",
+                chart_type="line",
+                query=TileQuery(table="t", fields=["t.date", "t.value", "t.type"]),
+                vis_config=TileVisConfig(
+                    x_axis="t.date",
+                    color_by="t.type",
+                    color_values={"Brand": "#FF8515", "Non-Brand": "#BE43C0"},
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    spec = payload["queryPresentations"][0]["visualization"]["spec"]
+
+    assert spec["color"]["field"]["name"] == "t.type"
+    assert spec["color"]["manual"] is True
+    assert spec["color"]["values"]["Brand"] == "#FF8515"
+
+
+def test_composite_filters_in_payload():
+    """Composite filters (AND/OR) should generate proper Omni format."""
+    from omni_dash.dashboard.definition import (
+        CalculatedField, CompositeFilter, FilterSpec as FS,
+        Tile, TileQuery, TileVisConfig,
+    )
+
+    definition = DashboardDefinition(
+        name="Composite Filter Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Filtered Chart",
+                chart_type="line",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.date", "t.value"],
+                    composite_filters=[
+                        CompositeFilter(
+                            conditions=[
+                                FS(field="t.date", operator="date_range", value="2026-01-01"),
+                                FS(field="t.date", operator="before", value="7 days ago"),
+                            ],
+                            conjunction="AND",
+                        ),
+                    ],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    filters = payload["queryPresentations"][0]["query"]["filters"]
+
+    assert "t.date" in filters
+    assert filters["t.date"]["type"] == "composite"
+    assert filters["t.date"]["conjunction"] == "AND"
+    assert len(filters["t.date"]["filters"]) == 2
+
+
+def test_calculated_fields_in_payload():
+    """Calculated fields should generate Omni AST format."""
+    from omni_dash.dashboard.definition import CalculatedField, Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="Calc Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Activation Rate",
+                chart_type="line",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.date", "t.activated", "t.signups"],
+                    calculations=[
+                        CalculatedField(
+                            calc_name="calc_1",
+                            label="Activation Rate",
+                            formula="t.activated / t.signups",
+                            format="PERCENT_1",
+                        ),
+                    ],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    calcs = payload["queryPresentations"][0]["query"]["calculations"]
+
+    assert len(calcs) == 1
+    assert calcs[0]["calc_name"] == "calc_1"
+    assert calcs[0]["label"] == "Activation Rate"
+    assert calcs[0]["format"] == "PERCENT_1"
+    assert calcs[0]["sql_expression"]["operator"] == "Omni.OMNI_FX_SAFE_DIVIDE"
+    assert calcs[0]["sql_expression"]["operands"][0]["field_name"] == "t.activated"
+
+
+def test_field_metadata_in_payload():
+    """Field metadata overrides should be included in the query."""
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="Metadata Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="DAU",
+                chart_type="heatmap",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.date", "t.was_active_sum"],
+                    metadata={"t.was_active_sum": {"label": "DAU"}},
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    meta = payload["queryPresentations"][0]["query"]["metadata"]
+
+    assert meta["t.was_active_sum"]["label"] == "DAU"
+
+
+def test_frozen_column_in_table_vis():
+    """Table with frozen_column should include it in spec."""
+    definition = (
+        DashboardBuilder("Frozen Test")
+        .model("m-1")
+        .dbt_source("t")
+        .add_table("Data", columns=["id", "name", "value"], frozen_column="id")
+        .build()
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    spec = payload["queryPresentations"][0]["visualization"]["spec"]
+    assert spec["frozenColumn"] == "t.id"
+
+
+def test_data_labels_in_series_config():
+    """Series with show_data_labels should generate proper dataLabel config."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Data Labels Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Labeled Chart",
+                chart_type="line",
+                query=TileQuery(table="t", fields=["t.date", "t.rate", "t.count"]),
+                vis_config=TileVisConfig(
+                    x_axis="t.date",
+                    series_config=[
+                        {
+                            "field": "t.rate",
+                            "mark_type": "line",
+                            "color": "#FF6291",
+                            "y_axis": "y",
+                            "show_data_labels": True,
+                            "data_label_format": "PERCENT_1",
+                        },
+                        {
+                            "field": "t.count",
+                            "mark_type": "bar",
+                            "y_axis": "y2",
+                            "show_data_labels": True,
+                        },
+                    ],
+                    y2_axis=True,
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    series = payload["queryPresentations"][0]["visualization"]["spec"]["series"]
+
+    assert series[0]["dataLabel"]["enabled"] is True
+    assert series[0]["dataLabel"]["format"] == "PERCENT_1"
+    assert series[0]["mark"]["_mark_color"] == "#FF6291"
+    assert series[1]["dataLabel"]["enabled"] is True
+
+
+def test_kpi_comparison_swap_colors():
+    """KPI with comparison should include comparisonType."""
+    definition = (
+        DashboardBuilder("KPI Comp")
+        .model("m-1")
+        .dbt_source("t")
+        .add_kpi_tile(
+            "CAC",
+            metric_col="cac",
+            comparison_col="prev_cac",
+            comparison_type="percent",
+        )
+        .build()
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    mc = payload["queryPresentations"][0]["visualization"]["spec"]["markdownConfig"]
+
+    assert len(mc) == 2
+    assert mc[1]["type"] == "comparison"
+    assert mc[1]["config"]["comparisonType"] == "percent"
+
+
 def test_from_yaml_invalid():
     with pytest.raises(DashboardDefinitionError):
         DashboardSerializer.from_yaml("")

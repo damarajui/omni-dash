@@ -7,6 +7,8 @@ from typing import Any
 import yaml
 
 from omni_dash.dashboard.definition import (
+    CalculatedField,
+    CompositeFilter,
     DashboardDefinition,
     DashboardFilter,
     FilterSpec,
@@ -43,6 +45,7 @@ _CHART_TYPE_TO_OMNI: dict[str, str] = {
     "combo": "barLine",
     "pivot_table": "table",
     "text": "markdown",
+    "vegalite": "code",
 }
 
 # Reverse mapping: Omni API chart types → internal chart types.
@@ -73,6 +76,7 @@ _OMNI_TO_CHART_TYPE: dict[str, str] = {
     "columnGrouped": "grouped_bar",
     "sankey": "funnel",
     "singleRecord": "table",
+    "code": "vegalite",
 }
 
 
@@ -278,17 +282,29 @@ def _build_series_entry(s: dict[str, Any]) -> dict[str, Any]:
     if "field" in s:
         entry["field"] = {"name": s["field"]}
     if "mark_type" in s:
-        entry["mark"] = {"type": s["mark_type"]}
-    if "color" in s:
-        entry["color"] = s["color"]
+        mark: dict[str, Any] = {"type": s["mark_type"]}
+        if "color" in s:
+            mark["_mark_color"] = s["color"]
+        if "dash" in s:
+            mark["line"] = {"dash": s["dash"], "width": s.get("line_width", 2)}
+        if "point" in s:
+            mark["line"] = mark.get("line", {})
+            mark["line"]["point"] = s["point"]
+        entry["mark"] = mark
+    elif "color" in s:
+        entry["mark"] = {"_mark_color": s["color"]}
     if "y_axis" in s:
         entry["yAxis"] = s["y_axis"]
-    if "dash" in s:
-        entry["strokeDash"] = s["dash"]
-    if "show_data_labels" in s:
-        entry["dataLabel"] = {"show": s["show_data_labels"]}
+    if "manual" in s:
+        entry["manual"] = s["manual"]
+    # Data labels
+    if s.get("show_data_labels"):
+        dl: dict[str, Any] = {"enabled": True}
         if "data_label_format" in s:
-            entry["dataLabel"]["format"] = {"format": s["data_label_format"]}
+            dl["format"] = s["data_label_format"]
+        if s.get("sparse_labels", True):
+            dl["useSparseLabelAlgorithm"] = True
+        entry["dataLabel"] = dl
     return entry
 
 
@@ -323,6 +339,22 @@ def _build_cartesian_spec(tile: Tile, omni_chart_type: str, fields: list[str]) -
         y_config.setdefault("axis", {}).setdefault("label", {})["format"] = {
             "format": vc.y_axis_format,
         }
+    # Reference lines on Y axis
+    if vc.reference_lines:
+        ref = vc.reference_lines[0]
+        ref_config: dict[str, Any] = {
+            "enabled": True,
+            "type": "quantitative",
+            "value": ref.get("value", 0),
+        }
+        if "dash" in ref:
+            ref_config["line"] = {"dash": ref["dash"]}
+        if "label" in ref:
+            ref_config["label"] = ref["label"]
+        y_config.setdefault("axis", {})["referenceLine"] = ref_config
+    # Color stacking on Y
+    if vc.stacked:
+        y_config.setdefault("color", {})["_stack"] = "stack"
     if y_config:
         spec["y"] = y_config
 
@@ -347,10 +379,66 @@ def _build_cartesian_spec(tile: Tile, omni_chart_type: str, fields: list[str]) -
 
     # Color
     if vc.color_by:
-        spec["color"] = {"field": {"name": vc.color_by}}
+        color_config: dict[str, Any] = {"field": {"name": vc.color_by}}
+        if vc.color_values:
+            color_config["manual"] = True
+            color_config["values"] = vc.color_values
+        spec["color"] = color_config
+    elif vc.color_values:
+        spec["color"] = {"manual": True, "values": vc.color_values}
 
+    # Behaviors
+    spec["behaviors"] = {"stackMultiMark": vc.stacked}
     spec["_dependentAxis"] = "y"
     return spec
+
+
+def _build_heatmap_spec(tile: Tile) -> dict[str, Any]:
+    """Build Omni heatmap visConfig.spec.
+
+    Heatmaps use configType "heatmap" with x, y, and color fields.
+    """
+    vc = tile.vis_config
+    spec: dict[str, Any] = {"version": 0, "configType": "heatmap"}
+
+    if vc.x_axis:
+        x_config: dict[str, Any] = {"field": {"name": vc.x_axis}, "manual": True}
+        if vc.x_axis_rotation is not None:
+            x_config["axis"] = {"label": {"format": {"angle": vc.x_axis_rotation}}}
+        spec["x"] = x_config
+
+    if vc.y_axis:
+        spec["y"] = {"field": {"name": vc.y_axis[0]}, "manual": True}
+
+    if vc.color_field:
+        spec["color"] = {"field": {"name": vc.color_field}}
+
+    if vc.show_data_labels:
+        dl: dict[str, Any] = {"enabled": True}
+        if vc.data_label_format:
+            dl["fontSize"] = 14
+        spec["dataLabel"] = dl
+
+    return spec
+
+
+def _build_vegalite_vis(tile: Tile) -> dict[str, Any]:
+    """Build Omni Vega-Lite visConfig for custom visualizations.
+
+    Passes through a full Vega-Lite v5 spec with Omni-standard defaults.
+    """
+    vl_spec = tile.vis_config.vegalite_spec or {}
+    # Ensure Omni-friendly defaults
+    vl_spec.setdefault("$schema", "https://vega.github.io/schema/vega-lite/v5.json")
+    vl_spec.setdefault("width", "container")
+    vl_spec.setdefault("background", "transparent")
+    vl_spec.setdefault("config", {}).setdefault("view", {})["stroke"] = None
+
+    return {
+        "visType": "vegalite",
+        "chartType": "code",
+        "config": vl_spec,
+    }
 
 
 def _build_kpi_vis(tile: Tile) -> dict[str, Any]:
@@ -448,7 +536,7 @@ def _build_table_vis(tile: Tile) -> dict[str, Any]:
     """Build Omni table visConfig matching working spreadsheet tables.
 
     Supports per-column formatting via ``column_formats`` in vis_config:
-    ``{"COL_NAME": {"align": "right"}, ...}``
+    ``{"COL_NAME": {"align": "right", "width": 150}, ...}``
     """
     spec: dict[str, Any] = {
         "tableType": "spreadsheet",
@@ -460,6 +548,8 @@ def _build_table_vis(tile: Tile) -> dict[str, Any]:
     }
     if tile.vis_config.column_formats:
         spec["columnFormats"] = tile.vis_config.column_formats
+    if tile.vis_config.frozen_column:
+        spec["frozenColumn"] = tile.vis_config.frozen_column
 
     return {
         "visType": "omni-table",
@@ -479,6 +569,11 @@ def _has_advanced_vis(tile: Tile) -> bool:
         or vc.series_config
         or vc.tooltip_fields
         or vc.show_trendline
+        or vc.reference_lines
+        or vc.color_values
+        or vc.show_data_labels
+        or vc.axis_label_y
+        or vc.axis_label_x
     )
 
 
@@ -514,6 +609,8 @@ class DashboardSerializer:
             is_kpi = omni_chart_type in ("kpi", "summaryValue")
             is_markdown = omni_chart_type == "markdown"
             is_table = omni_chart_type == "table"
+            is_heatmap = tile.chart_type == "heatmap"
+            is_vegalite = tile.chart_type == "vegalite"
 
             # Build fields list — ensure sort columns are included
             fields = list(tile.query.fields)
@@ -571,6 +668,50 @@ class DashboardSerializer:
             if omni_filters:
                 qp["query"]["filters"] = omni_filters
 
+            # Composite filters (AND/OR combinations)
+            if tile.query.composite_filters:
+                for cf in tile.query.composite_filters:
+                    if cf.conditions:
+                        field_key = cf.conditions[0].field
+                        composite_entry: dict[str, Any] = {
+                            "type": "composite",
+                            "conjunction": cf.conjunction,
+                            "filters": [_to_omni_filter(c) for c in cf.conditions],
+                        }
+                        qp["query"].setdefault("filters", {})[field_key] = composite_entry
+
+            # Calculated fields
+            if tile.query.calculations:
+                calcs = []
+                for calc in tile.query.calculations:
+                    calc_entry: dict[str, Any] = {
+                        "calc_name": calc.calc_name,
+                        "label": calc.label,
+                        "swallow_errors": True,
+                    }
+                    if calc.format:
+                        calc_entry["format"] = calc.format
+                    if calc.sql_expression:
+                        calc_entry["sql_expression"] = calc.sql_expression
+                    elif calc.formula:
+                        # Simple formula → Omni safe_divide AST
+                        parts = calc.formula.split("/")
+                        if len(parts) == 2:
+                            calc_entry["sql_expression"] = {
+                                "type": "call",
+                                "operator": "Omni.OMNI_FX_SAFE_DIVIDE",
+                                "operands": [
+                                    {"type": "field", "field_name": parts[0].strip()},
+                                    {"type": "field", "field_name": parts[1].strip()},
+                                ],
+                            }
+                    calcs.append(calc_entry)
+                qp["query"]["calculations"] = calcs
+
+            # Field metadata overrides (custom labels)
+            if tile.query.metadata:
+                qp["query"]["metadata"] = tile.query.metadata
+
             # Pivots
             if tile.query.pivots:
                 qp["query"]["pivots"] = tile.query.pivots
@@ -579,12 +720,20 @@ class DashboardSerializer:
             qp["prefersChart"] = omni_chart_type not in ("table", "markdown")
 
             # Visualization config — use rich Omni visTypes when appropriate
-            if is_kpi:
+            if is_vegalite:
+                qp["visualization"] = _build_vegalite_vis(tile)
+            elif is_kpi:
                 qp["visualization"] = _build_kpi_vis(tile)
             elif is_markdown:
                 qp["visualization"] = _build_markdown_vis(tile)
             elif is_table:
                 qp["visualization"] = _build_table_vis(tile)
+            elif is_heatmap:
+                qp["visualization"] = {
+                    "visType": "basic",
+                    "chartType": "heatmap",
+                    "spec": _build_heatmap_spec(tile),
+                }
             elif omni_chart_type in _CARTESIAN_CHART_TYPES and _has_advanced_vis(tile):
                 qp["visualization"] = {
                     "visType": "cartesian",
