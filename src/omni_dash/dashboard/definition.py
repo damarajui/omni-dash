@@ -32,6 +32,7 @@ class ChartType(str, Enum):
     COMBO = "combo"
     PIVOT_TABLE = "pivot_table"
     TEXT = "text"
+    VEGALITE = "vegalite"
 
 
 class TileSize(str, Enum):
@@ -70,6 +71,7 @@ CHART_TYPE_DEFAULTS: dict[str, tuple[int, int]] = {
     "funnel": (6, 5),
     "heatmap": (12, 6),
     "text": (12, 2),
+    "vegalite": (6, 5),
 }
 
 
@@ -126,6 +128,23 @@ class FilterSpec(BaseModel):
     value: Any = None
 
 
+class CompositeFilter(BaseModel):
+    """A composite filter combining multiple conditions with AND/OR."""
+
+    conditions: list[FilterSpec] = Field(default_factory=list)
+    conjunction: str = "AND"  # "AND" or "OR"
+
+
+class CalculatedField(BaseModel):
+    """A calculated field defined at query level."""
+
+    calc_name: str  # e.g., "calc_1"
+    label: str = ""  # Human-readable name
+    formula: str = ""  # Simple formula like "field_a / field_b"
+    sql_expression: dict[str, Any] | None = None  # Omni AST expression
+    format: str | None = None  # e.g., "PERCENT_1"
+
+
 class TileQuery(BaseModel):
     """Query definition for a dashboard tile."""
 
@@ -133,8 +152,11 @@ class TileQuery(BaseModel):
     fields: list[str]
     sorts: list[SortSpec] = Field(default_factory=list)
     filters: list[FilterSpec] = Field(default_factory=list)
+    composite_filters: list[CompositeFilter] = Field(default_factory=list)
+    calculations: list[CalculatedField] = Field(default_factory=list)
     limit: int = 200
     pivots: list[str] = Field(default_factory=list)
+    metadata: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
     @field_validator("fields")
     @classmethod
@@ -147,6 +169,7 @@ class TileQuery(BaseModel):
 class TileVisConfig(BaseModel):
     """Visualization configuration for a tile."""
 
+    # Core axis & display
     x_axis: str | None = None
     y_axis: list[str] = Field(default_factory=list)
     color_by: str | None = None
@@ -160,6 +183,71 @@ class TileVisConfig(BaseModel):
     axis_label_x: str | None = None
     axis_label_y: str | None = None
     custom: dict[str, Any] = Field(default_factory=dict)
+
+    # Axis formatting
+    x_axis_format: str | None = None  # Date format: "%-m/%-d/%-Y", "MMM-DD-YY"
+    x_axis_rotation: int | None = None  # Label angle: 0, 45, 270
+    y_axis_format: str | None = None  # Number format: "USDCURRENCY_0", "PERCENT_0"
+    y2_axis: bool = False  # Enable secondary Y axis (combo charts)
+    y2_axis_format: str | None = None  # Format for secondary axis
+
+    # Series customization (for multi-series or combo charts)
+    # Each entry: {"field": "table.col", "mark_type": "line"|"bar",
+    #   "color": "#hex", "y_axis": "y"|"y2", "dash": [8,8],
+    #   "data_label_format": "BIGNUMBER_2", "show_data_labels": True}
+    series_config: list[dict[str, Any]] = Field(default_factory=list)
+
+    # Trendlines & analytics
+    show_trendline: bool = False
+    trendline_type: str | None = None  # "linear", "moving_average"
+    moving_average_window: int | None = None
+
+    # Tooltips
+    tooltip_fields: list[str] = Field(default_factory=list)
+
+    # KPI-specific
+    kpi_comparison_field: str | None = None  # Field for comparison (e.g., previous period)
+    kpi_comparison_type: str | None = None  # "number_percent", "number", "percent"
+    kpi_comparison_format: str | None = None  # "USDCURRENCY_0"
+    kpi_label: str | None = None  # Override display label
+    kpi_sparkline: bool = False  # Show sparkline in KPI tile
+    kpi_sparkline_type: str | None = None  # "bar" or "line"
+
+    # Markdown tile content
+    markdown_template: str | None = None  # Raw markdown/HTML with Mustache syntax
+
+    # Table-specific
+    # Per-column formats: {"COL_NAME": {"align": "right", "width": 150}, ...}
+    column_formats: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    frozen_column: str | None = None  # Pin a column for horizontal scrolling
+
+    # Reference lines (target/goal lines on charts)
+    # Each entry: {"value": 186, "label": "Goal", "dash": [8, 8], "color": "#97A345"}
+    reference_lines: list[dict[str, Any]] = Field(default_factory=list)
+
+    # Heatmap-specific
+    color_field: str | None = None  # Field for heatmap color intensity
+
+    # Data label control (per-series granularity is in series_config)
+    show_data_labels: bool = False
+    data_label_format: str | None = None  # "PERCENT_1", "BIGNUMBER_2", etc.
+    sparse_labels: bool = True  # Smart label placement to avoid overlap
+
+    # Color mapping — manual category→hex color assignment
+    # e.g., {"Brand": "#FF8515", "Non-Brand": "#BE43C0", "Goal": "#97A345"}
+    color_values: dict[str, str] = Field(default_factory=dict)
+
+    # Vega-Lite passthrough — full custom Vega-Lite v5 spec
+    vegalite_spec: dict[str, Any] | None = None
+
+    # Calculated fields at query level
+    # Each entry: {"calc_name": "calc_1", "label": "Percent Activated",
+    #   "formula": "field_a / field_b", "format": "PERCENT_1"}
+    calculations: list[dict[str, Any]] = Field(default_factory=list)
+
+    # Field metadata overrides (custom labels for fields)
+    # {"table.field_name": {"label": "Custom Label"}}
+    field_metadata: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class Tile(BaseModel):

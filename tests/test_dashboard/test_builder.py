@@ -172,3 +172,213 @@ def test_labels_and_folder():
     assert dashboard.folder_id == "folder-123"
     assert "seo" in dashboard.labels
     assert "weekly" in dashboard.labels
+
+
+def test_add_combo_chart():
+    dashboard = (
+        DashboardBuilder("Combo")
+        .model("m")
+        .table("t")
+        .add_combo_chart(
+            "Revenue & Count",
+            time_col="date",
+            bar_cols=["revenue"],
+            line_cols=["count"],
+            y_format="USDCURRENCY_0",
+            y2_format="BIGNUMBER_0",
+        )
+        .build()
+    )
+    tile = dashboard.tiles[0]
+    assert tile.chart_type == "combo"
+    assert tile.vis_config.y2_axis is True
+    assert tile.vis_config.y_axis_format == "USDCURRENCY_0"
+    assert tile.vis_config.y2_axis_format == "BIGNUMBER_0"
+    assert len(tile.vis_config.series_config) == 2
+    assert tile.vis_config.series_config[0]["mark_type"] == "bar"
+    assert tile.vis_config.series_config[1]["mark_type"] == "line"
+
+
+def test_add_markdown_tile():
+    dashboard = (
+        DashboardBuilder("Markdown")
+        .model("m")
+        .table("t")
+        .add_markdown_tile(
+            "Header",
+            template="<h1>Dashboard</h1><p>{{result._last.field.value}}</p>",
+        )
+        .build()
+    )
+    tile = dashboard.tiles[0]
+    assert tile.chart_type == "text"
+    assert tile.vis_config.markdown_template == "<h1>Dashboard</h1><p>{{result._last.field.value}}</p>"
+
+
+def test_add_kpi_tile_with_sparkline():
+    dashboard = (
+        DashboardBuilder("KPI")
+        .model("m")
+        .table("t")
+        .add_kpi_tile(
+            "Revenue",
+            metric_col="total_revenue",
+            label="Total Revenue",
+            value_format="USDCURRENCY_0",
+            comparison_col="prev_revenue",
+            comparison_type="number_percent",
+            sparkline=True,
+            sparkline_type="bar",
+        )
+        .build()
+    )
+    tile = dashboard.tiles[0]
+    assert tile.chart_type == "number"
+    assert tile.vis_config.kpi_label == "Total Revenue"
+    assert tile.vis_config.value_format == "USDCURRENCY_0"
+    assert tile.vis_config.kpi_comparison_field == "t.prev_revenue"
+    assert tile.vis_config.kpi_comparison_type == "number_percent"
+    assert tile.vis_config.kpi_sparkline is True
+    assert tile.vis_config.kpi_sparkline_type == "bar"
+    # comparison_col should be in fields
+    assert "t.prev_revenue" in tile.query.fields
+
+
+def test_line_chart_with_axis_format():
+    dashboard = (
+        DashboardBuilder("Formatted")
+        .model("m")
+        .table("t")
+        .add_line_chart(
+            "Revenue",
+            time_col="date",
+            metric_cols=["revenue"],
+            axis_title_y="Revenue ($)",
+            date_format="%-m/%-d/%-Y",
+            label_rotation=270,
+            value_format="USDCURRENCY_0",
+            tooltip_fields=["date", "revenue"],
+        )
+        .build()
+    )
+    tile = dashboard.tiles[0]
+    assert tile.vis_config.axis_label_y == "Revenue ($)"
+    assert tile.vis_config.x_axis_format == "%-m/%-d/%-Y"
+    assert tile.vis_config.x_axis_rotation == 270
+    assert tile.vis_config.y_axis_format == "USDCURRENCY_0"
+    assert "t.date" in tile.vis_config.tooltip_fields
+
+
+def test_add_heatmap():
+    dashboard = (
+        DashboardBuilder("Heatmap")
+        .model("m")
+        .table("t")
+        .add_heatmap(
+            "NRR Cohort",
+            x_col="weeks_since",
+            y_col="cohort",
+            color_col="nrr_pct",
+            x_rotation=360,
+        )
+        .build()
+    )
+    tile = dashboard.tiles[0]
+    assert tile.chart_type == "heatmap"
+    assert tile.vis_config.x_axis == "t.weeks_since"
+    assert tile.vis_config.y_axis == ["t.cohort"]
+    assert tile.vis_config.color_field == "t.nrr_pct"
+    assert tile.vis_config.show_data_labels is True
+    assert tile.vis_config.x_axis_rotation == 360
+
+
+def test_add_vegalite_tile():
+    spec = {
+        "layer": [{"mark": {"type": "bar"}, "encoding": {"x": {"field": "val"}}}],
+    }
+    dashboard = (
+        DashboardBuilder("VL")
+        .model("m")
+        .table("t")
+        .add_vegalite_tile("Custom Funnel", spec=spec, query_fields=["val", "label"], height=400)
+        .build()
+    )
+    tile = dashboard.tiles[0]
+    assert tile.chart_type == "vegalite"
+    assert tile.vis_config.vegalite_spec is not None
+    assert tile.vis_config.vegalite_spec["height"] == 400
+    assert len(tile.vis_config.vegalite_spec["layer"]) == 1
+    assert "t.val" in tile.query.fields
+
+
+def test_line_chart_with_reference_lines():
+    dashboard = (
+        DashboardBuilder("Ref Line")
+        .model("m")
+        .table("t")
+        .add_line_chart(
+            "Revenue vs Target",
+            time_col="date",
+            metric_cols=["revenue"],
+            reference_lines=[{"value": 1000, "label": "Target", "dash": [8, 8]}],
+        )
+        .build()
+    )
+    tile = dashboard.tiles[0]
+    assert len(tile.vis_config.reference_lines) == 1
+    assert tile.vis_config.reference_lines[0]["value"] == 1000
+    assert tile.vis_config.reference_lines[0]["dash"] == [8, 8]
+
+
+def test_line_chart_with_color_values():
+    dashboard = (
+        DashboardBuilder("Colors")
+        .model("m")
+        .table("t")
+        .add_line_chart(
+            "By Type",
+            time_col="date",
+            metric_cols=["value"],
+            color_by="type",
+            color_values={"Brand": "#FF8515", "Non-Brand": "#BE43C0"},
+        )
+        .build()
+    )
+    tile = dashboard.tiles[0]
+    assert tile.vis_config.color_by == "t.type"
+    assert tile.vis_config.color_values["Brand"] == "#FF8515"
+    assert "t.type" in tile.query.fields
+
+
+def test_table_with_frozen_column():
+    dashboard = (
+        DashboardBuilder("Frozen")
+        .model("m")
+        .table("t")
+        .add_table("Data", columns=["id", "name", "val"], frozen_column="id")
+        .build()
+    )
+    tile = dashboard.tiles[0]
+    assert tile.vis_config.frozen_column == "t.id"
+
+
+def test_bar_chart_with_reference_lines():
+    dashboard = (
+        DashboardBuilder("Bar Ref")
+        .model("m")
+        .table("t")
+        .add_bar_chart(
+            "Revenue",
+            dimension_col="channel",
+            metric_cols=["revenue"],
+            reference_lines=[{"value": 500}],
+            color_by="region",
+            color_values={"US": "#0000FF", "EU": "#FF0000"},
+        )
+        .build()
+    )
+    tile = dashboard.tiles[0]
+    assert len(tile.vis_config.reference_lines) == 1
+    assert tile.vis_config.color_by == "t.region"
+    assert tile.vis_config.color_values["US"] == "#0000FF"
+    assert "t.region" in tile.query.fields

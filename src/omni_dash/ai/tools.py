@@ -201,12 +201,76 @@ def _build_dashboard_schema() -> dict[str, Any]:
                                 },
                                 "limit": {
                                     "type": "integer",
-                                    "description": "Max rows to return. Default 200, use 1 for number tiles.",
+                                    "description": (
+                                        "Max rows. Default 200 (auto-upgraded to 1000 for Omni). "
+                                        "Use 1 for KPI/number tiles."
+                                    ),
                                     "default": 200,
                                 },
                                 "pivots": {
                                     "type": "array",
                                     "items": {"type": "string"},
+                                    "default": [],
+                                },
+                                "calculations": {
+                                    "type": "array",
+                                    "description": (
+                                        "Calculated fields. Each: {calc_name, label, "
+                                        "formula ('field_a / field_b' for safe divide), format}."
+                                    ),
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "calc_name": {"type": "string"},
+                                            "label": {"type": "string"},
+                                            "formula": {"type": "string"},
+                                            "format": {"type": "string"},
+                                        },
+                                        "required": ["calc_name", "label"],
+                                    },
+                                    "default": [],
+                                },
+                                "metadata": {
+                                    "type": "object",
+                                    "description": (
+                                        "Per-field metadata overrides. "
+                                        "E.g., {\"t.field\": {\"label\": \"Custom Name\"}}."
+                                    ),
+                                    "additionalProperties": {
+                                        "type": "object",
+                                        "properties": {
+                                            "label": {"type": "string"},
+                                        },
+                                    },
+                                },
+                                "composite_filters": {
+                                    "type": "array",
+                                    "description": (
+                                        "Composite filters combining conditions with AND/OR. "
+                                        "Each: {conditions: [{field, operator, value}], conjunction: 'AND'|'OR'}."
+                                    ),
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "conditions": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "field": {"type": "string"},
+                                                        "operator": {"type": "string"},
+                                                        "value": {},
+                                                    },
+                                                    "required": ["field"],
+                                                },
+                                            },
+                                            "conjunction": {
+                                                "type": "string",
+                                                "enum": ["AND", "OR"],
+                                                "default": "AND",
+                                            },
+                                        },
+                                    },
                                     "default": [],
                                 },
                             },
@@ -247,7 +311,164 @@ def _build_dashboard_schema() -> dict[str, Any]:
                                 },
                                 "value_format": {
                                     "type": "string",
-                                    "description": "Format string for values (e.g., '$#,##0', '0.0%').",
+                                    "description": (
+                                        "Omni number format code. Common values: "
+                                        "USDCURRENCY_0 ($1,235), USDCURRENCY_2 ($1,234.50), "
+                                        "BIGNUMBER_2 (5.60M), PERCENT_0 (24%), PERCENT_2 (24.40%), "
+                                        "number_0 (1,235), big_0 (5.6M)."
+                                    ),
+                                },
+                                "x_axis_format": {
+                                    "type": "string",
+                                    "description": (
+                                        "Date format for x-axis labels. "
+                                        "Examples: '%-m/%-d/%-Y', 'MMM-DD-YY'."
+                                    ),
+                                },
+                                "x_axis_rotation": {
+                                    "type": "integer",
+                                    "description": "Label rotation angle for x-axis (0, 45, 270).",
+                                },
+                                "y_axis_format": {
+                                    "type": "string",
+                                    "description": "Number format for y-axis labels (e.g., 'USDCURRENCY_0').",
+                                },
+                                "y2_axis": {
+                                    "type": "boolean",
+                                    "description": "Enable secondary Y axis (for combo/dual-axis charts).",
+                                    "default": False,
+                                },
+                                "y2_axis_format": {
+                                    "type": "string",
+                                    "description": "Number format for secondary y-axis.",
+                                },
+                                "axis_label_x": {
+                                    "type": "string",
+                                    "description": "Custom x-axis title.",
+                                },
+                                "axis_label_y": {
+                                    "type": "string",
+                                    "description": "Custom y-axis title.",
+                                },
+                                "series_config": {
+                                    "type": "array",
+                                    "description": (
+                                        "Per-series customization for multi-series/combo charts. "
+                                        "Each entry: {field, mark_type (line|bar), color (#hex), "
+                                        "y_axis (y|y2), show_data_labels (bool), data_label_format}."
+                                    ),
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "field": {"type": "string"},
+                                            "mark_type": {"type": "string", "enum": ["line", "bar", "area", "point"]},
+                                            "color": {"type": "string"},
+                                            "y_axis": {"type": "string", "enum": ["y", "y2"]},
+                                            "show_data_labels": {"type": "boolean"},
+                                            "data_label_format": {"type": "string"},
+                                        },
+                                    },
+                                },
+                                "tooltip_fields": {
+                                    "type": "array",
+                                    "description": "Qualified fields to show in chart tooltips.",
+                                    "items": {"type": "string"},
+                                },
+                                "kpi_label": {
+                                    "type": "string",
+                                    "description": "Override display label for KPI tiles.",
+                                },
+                                "kpi_sparkline": {
+                                    "type": "boolean",
+                                    "description": "Show sparkline in KPI tile.",
+                                    "default": False,
+                                },
+                                "kpi_sparkline_type": {
+                                    "type": "string",
+                                    "description": "Sparkline type: 'bar' or 'line'.",
+                                    "enum": ["bar", "line"],
+                                },
+                                "kpi_comparison_field": {
+                                    "type": "string",
+                                    "description": "Qualified field for KPI comparison value.",
+                                },
+                                "kpi_comparison_type": {
+                                    "type": "string",
+                                    "description": "Comparison display type.",
+                                    "enum": ["number_percent", "number", "percent"],
+                                },
+                                "markdown_template": {
+                                    "type": "string",
+                                    "description": (
+                                        "Raw markdown/HTML template for text tiles. "
+                                        "Supports Mustache syntax: {{result.0.field.value}} (formatted), "
+                                        "{{result.0.field.raw}} (raw for CSS), "
+                                        "{{result._last.field.value}} (last row)."
+                                    ),
+                                },
+                                "reference_lines": {
+                                    "type": "array",
+                                    "description": (
+                                        "Reference/target lines on charts. "
+                                        "Each entry: {value (number), label (string), "
+                                        "dash ([8,8] for dashed), color (#hex)}."
+                                    ),
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "value": {"type": "number"},
+                                            "label": {"type": "string"},
+                                            "dash": {"type": "array", "items": {"type": "integer"}},
+                                            "color": {"type": "string"},
+                                        },
+                                        "required": ["value"],
+                                    },
+                                },
+                                "color_field": {
+                                    "type": "string",
+                                    "description": "Field for heatmap color intensity (qualified name).",
+                                },
+                                "color_values": {
+                                    "type": "object",
+                                    "description": (
+                                        "Manual color mapping: category name → hex color. "
+                                        "E.g., {\"Brand\": \"#FF8515\", \"Non-Brand\": \"#BE43C0\"}."
+                                    ),
+                                    "additionalProperties": {"type": "string"},
+                                },
+                                "show_data_labels": {
+                                    "type": "boolean",
+                                    "description": "Show data labels on chart marks.",
+                                    "default": False,
+                                },
+                                "data_label_format": {
+                                    "type": "string",
+                                    "description": "Format for data labels (e.g., 'PERCENT_1', 'BIGNUMBER_2').",
+                                },
+                                "frozen_column": {
+                                    "type": "string",
+                                    "description": "Pin a table column for horizontal scrolling (qualified field name).",
+                                },
+                                "column_formats": {
+                                    "type": "object",
+                                    "description": (
+                                        "Per-column formatting for tables. "
+                                        "E.g., {\"t.revenue\": {\"align\": \"right\", \"width\": 150}}."
+                                    ),
+                                    "additionalProperties": {
+                                        "type": "object",
+                                        "properties": {
+                                            "align": {"type": "string", "enum": ["left", "right", "center"]},
+                                            "width": {"type": "integer"},
+                                        },
+                                    },
+                                },
+                                "vegalite_spec": {
+                                    "type": "object",
+                                    "description": (
+                                        "Full Vega-Lite v5 spec for custom visualizations. "
+                                        "Use chart_type='vegalite'. Omni wraps with container width."
+                                    ),
                                 },
                             },
                         },

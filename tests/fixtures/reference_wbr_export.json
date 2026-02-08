@@ -1549,7 +1549,7 @@
                 "column_totals": {},
                 "userEditedSQL": "",
                 "default_group_by": true,
-                "model_extension_id": "369c1006-05e2-4da7-97ef-4432847ac566",
+                "model_extension_id": "00000000-0000-0000-0000-000000000000",
                 "custom_summary_types": {},
                 "join_paths_from_topic_name": "dim_identities"
               }
