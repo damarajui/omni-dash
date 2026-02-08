@@ -432,7 +432,7 @@
                 "dimensionIndex": 24,
                 "default_group_by": false,
                 "filtersUsedInSql": {},
-                "model_extension_id": "b9cd890d-9e2d-4f57-9087-02637f07f6ef",
+                "model_extension_id": "00000000-0000-0000-0000-000000000000",
                 "custom_summary_types": {}
             },
             "resultConfig": {
@@ -2052,7 +2052,7 @@
                 "sqlSortsEnabled": true,
                 "default_group_by": false,
                 "filtersUsedInSql": {},
-                "model_extension_id": "76762b68-3b75-4c73-a8f4-2e63de17ec29",
+                "model_extension_id": "00000000-0000-0000-0000-000000000000",
                 "custom_summary_types": {}
             },
             "resultConfig": {
@@ -3531,7 +3531,7 @@
                 "dimensionIndex": 2,
                 "default_group_by": true,
                 "filtersUsedInSql": {},
-                "model_extension_id": "50547543-984b-4ab7-bf12-5a1df0d27033",
+                "model_extension_id": "00000000-0000-0000-0000-000000000000",
                 "custom_summary_types": {}
             },
             "resultConfig": {
@@ -8799,7 +8799,7 @@
                         "type": "date"
                     }
                 },
-                "model_extension_id": "9da56d9e-1590-49d0-a0f1-ba56ed10f869",
+                "model_extension_id": "00000000-0000-0000-0000-000000000000",
                 "custom_summary_types": {}
             },
             "resultConfig": {
@@ -9009,7 +9009,7 @@
                         "type": "date"
                     }
                 },
-                "model_extension_id": "0b244c17-9eca-4a36-9d3f-8345c5a91a72",
+                "model_extension_id": "00000000-0000-0000-0000-000000000000",
                 "custom_summary_types": {}
             },
             "resultConfig": {
@@ -9219,7 +9219,7 @@
                         "type": "date"
                     }
                 },
-                "model_extension_id": "86b6e776-8da7-495c-8d2c-808cc3dd9066",
+                "model_extension_id": "00000000-0000-0000-0000-000000000000",
                 "custom_summary_types": {}
             },
             "resultConfig": {
@@ -9485,7 +9485,7 @@
                         "values": []
                     }
                 },
-                "model_extension_id": "a7344578-16eb-4033-9503-d64d561fe9a8",
+                "model_extension_id": "00000000-0000-0000-0000-000000000000",
                 "custom_summary_types": {}
             },
             "resultConfig": {
@@ -9708,7 +9708,7 @@
                         "values": []
                     }
                 },
-                "model_extension_id": "f96cf6ea-265b-4235-8eb1-6e1eb09de156",
+                "model_extension_id": "00000000-0000-0000-0000-000000000000",
                 "custom_summary_types": {}
             },
             "resultConfig": {
@@ -9972,7 +9972,7 @@
                         "type": "date"
                     }
                 },
-                "model_extension_id": "868c7724-42f2-4da9-9181-7f846f054e2f",
+                "model_extension_id": "00000000-0000-0000-0000-000000000000",
                 "custom_summary_types": {}
             },
             "resultConfig": {
@@ -10151,7 +10151,7 @@
                 "dimensionIndex": 11,
                 "default_group_by": false,
                 "filtersUsedInSql": {},
-                "model_extension_id": "eaf21595-a30a-4e63-aac3-3a5b30322d01",
+                "model_extension_id": "00000000-0000-0000-0000-000000000000",
                 "custom_summary_types": {}
             },
             "resultConfig": {
@@ -10456,7 +10456,7 @@
                         "type": "date"
                     }
                 },
-                "model_extension_id": "72b92b09-65bb-4823-ae4d-9eb11ceea5ac",
+                "model_extension_id": "00000000-0000-0000-0000-000000000000",
                 "custom_summary_types": {}
             },
             "resultConfig": {
@@ -12307,7 +12307,7 @@
                         "type": "date"
                     }
                 },
-                "model_extension_id": "226acb41-3a0a-4bb9-b2b1-9035a8baf204",
+                "model_extension_id": "00000000-0000-0000-0000-000000000000",
                 "custom_summary_types": {}
             },
             "resultConfig": {

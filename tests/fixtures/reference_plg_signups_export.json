@@ -87,7 +87,7 @@
                 "dimensionIndex": 4,
                 "default_group_by": false,
                 "filtersUsedInSql": {},
-                "model_extension_id": "10fb8b91-5676-4109-86c2-a258ad6a0d20",
+                "model_extension_id": "00000000-0000-0000-0000-000000000000",
                 "custom_summary_types": {}
               }
             },
@@ -200,7 +200,7 @@
                 "dimensionIndex": 0,
                 "default_group_by": true,
                 "filtersUsedInSql": {},
-                "model_extension_id": "64312ad0-2d71-44d8-b980-12901d83b62c",
+                "model_extension_id": "00000000-0000-0000-0000-000000000000",
                 "custom_summary_types": {}
               }
             },
@@ -312,7 +312,7 @@
                 "dimensionIndex": 0,
                 "default_group_by": true,
                 "filtersUsedInSql": {},
-                "model_extension_id": "734caad3-27e8-4cfc-91bd-e8063f9b36d5",
+                "model_extension_id": "00000000-0000-0000-0000-000000000000",
                 "custom_summary_types": {}
               }
             },
@@ -428,7 +428,7 @@
                 "dimensionIndex": 0,
                 "default_group_by": true,
                 "filtersUsedInSql": {},
-                "model_extension_id": "8de9e8ed-73ea-44bc-a913-cab24d53203a",
+                "model_extension_id": "00000000-0000-0000-0000-000000000000",
                 "custom_summary_types": {}
               }
             },
