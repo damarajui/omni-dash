@@ -26,6 +26,9 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.3",
 ]
+ai = [
+    "anthropic>=0.42",
+]
 mcp = [
     "mcp>=1.0",
 ]
