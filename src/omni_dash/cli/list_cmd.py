@@ -236,11 +236,15 @@ def _list_folders(fmt: str) -> None:
     table = Table(title="Folders")
     table.add_column("ID", style="dim")
     table.add_column("Name", style="cyan")
+    table.add_column("Scope", style="dim")
 
     for f in folders:
+        fid = str(f.get("id", ""))
         table.add_row(
-            str(f.get("id", ""))[:12] + "...",
+            (fid[:12] + "...") if len(fid) > 12 else fid,
             f.get("name", ""),
+            f.get("scope", ""),
         )
 
     console.print(table)
+    console.print(f"\n  Total: {len(folders)} folders")

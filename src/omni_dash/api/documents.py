@@ -13,6 +13,24 @@ from omni_dash.exceptions import DocumentNotFoundError, OmniAPIError
 logger = logging.getLogger(__name__)
 
 
+def _extract_records(result: Any) -> list[dict[str, Any]]:
+    """Extract the records list from a paginated Omni API response.
+
+    The Omni API returns ``{pageInfo: {...}, records: [...]}`` for list
+    endpoints.  Older or mock responses may return a plain list.
+    """
+    if isinstance(result, list):
+        return result
+    if isinstance(result, dict):
+        if "records" in result:
+            return result["records"]
+        # Fallback for unknown dict shapes
+        for key in ("documents", "folders"):
+            if key in result and isinstance(result[key], list):
+                return result[key]
+    return []
+
+
 # -- Response models --
 
 
@@ -119,30 +137,43 @@ class DocumentService:
         )
 
     def list_dashboards(self, folder_id: str | None = None) -> list[DocumentSummary]:
-        """List all dashboards, optionally filtered by folder."""
-        params: dict[str, str] = {}
+        """List all dashboards, optionally filtered by folder.
+
+        Handles the paginated Omni response format ``{pageInfo, records}``
+        and automatically fetches subsequent pages.
+        """
+        params: dict[str, str] = {"pageSize": "100"}
         if folder_id:
             params["folderId"] = folder_id
 
-        result = self._client.get("/api/v1/documents", params=params)
+        all_docs: list[DocumentSummary] = []
+        while True:
+            result = self._client.get("/api/v1/documents", params=params)
+            if not result:
+                break
 
-        if not result:
-            return []
+            records = _extract_records(result)
+            for d in records:
+                folder = d.get("folder") or {}
+                all_docs.append(
+                    DocumentSummary(
+                        id=d.get("identifier", d.get("id", "")),
+                        name=d.get("name", ""),
+                        document_type="dashboard" if d.get("hasDashboard") else "workbook",
+                        folder_id=folder.get("id") if folder else None,
+                        created_at=d.get("createdAt", ""),
+                        updated_at=d.get("updatedAt", ""),
+                        model_id=d.get("connectionId", ""),
+                    )
+                )
 
-        docs = result if isinstance(result, list) else result.get("documents", [])
+            page_info = result.get("pageInfo", {}) if isinstance(result, dict) else {}
+            if page_info.get("hasNextPage") and page_info.get("nextCursor"):
+                params["cursor"] = page_info["nextCursor"]
+            else:
+                break
 
-        return [
-            DocumentSummary(
-                id=d.get("id", ""),
-                name=d.get("name", ""),
-                document_type=d.get("documentType", d.get("type", "")),
-                folder_id=d.get("folderId"),
-                created_at=d.get("createdAt", ""),
-                updated_at=d.get("updatedAt", ""),
-                model_id=d.get("modelId", ""),
-            )
-            for d in docs
-        ]
+        return all_docs
 
     def export_dashboard(self, document_id: str) -> dict[str, Any]:
         """Export a dashboard's full definition (beta endpoint).
@@ -215,11 +246,26 @@ class DocumentService:
         logger.info("Deleted dashboard %s", document_id)
 
     def list_folders(self) -> list[dict[str, Any]]:
-        """List all folders in the organization."""
-        result = self._client.get("/api/v1/folders")
-        if not result:
-            return []
-        return result if isinstance(result, list) else result.get("folders", [])
+        """List all folders in the organization.
+
+        Handles the paginated ``{pageInfo, records}`` response format.
+        """
+        params: dict[str, str] = {"pageSize": "100"}
+        all_folders: list[dict[str, Any]] = []
+        while True:
+            result = self._client.get("/api/v1/folders", params=params)
+            if not result:
+                break
+
+            all_folders.extend(_extract_records(result))
+
+            page_info = result.get("pageInfo", {}) if isinstance(result, dict) else {}
+            if page_info.get("hasNextPage") and page_info.get("nextCursor"):
+                params["cursor"] = page_info["nextCursor"]
+            else:
+                break
+
+        return all_folders
 
     def download_dashboard(
         self,
