@@ -31,9 +31,11 @@ class TestListModels:
         assert isinstance(result[0], OmniModel)
         assert result[0].name == "Model 1"
 
-    def test_parses_dict_response(self, service, mock_client):
+    def test_parses_paginated_response(self, service, mock_client):
+        """Omni API returns {pageInfo, records} for list endpoints."""
         mock_client.get.return_value = {
-            "models": [{"id": "m1", "name": "Model 1"}]
+            "pageInfo": {"hasNextPage": False},
+            "records": [{"id": "m1", "name": "Model 1"}],
         }
         result = service.list_models()
         assert len(result) == 1

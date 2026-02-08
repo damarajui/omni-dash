@@ -235,7 +235,7 @@ class DocumentService:
             raise OmniAPIError(0, "Empty response from dashboard import")
 
         return ImportResponse(
-            document_id=result.get("id", result.get("documentId", "")),
+            document_id=result.get("identifier", result.get("id", result.get("documentId", ""))),
             name=result.get("name", name or ""),
             success=True,
         )

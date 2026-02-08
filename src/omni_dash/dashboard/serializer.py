@@ -441,14 +441,46 @@ class DashboardSerializer:
         """Parse an Omni dashboard export into a DashboardDefinition.
 
         Handles the JSON structure returned by GET /api/unstable/documents/:id/export.
+
+        Real Omni export structure:
+          dashboard.queryPresentationCollection.queryPresentationCollectionMemberships[].queryPresentation
+          queryPresentation.query.queryJson  (query fields, sorts, filters, etc.)
+          queryPresentation.visConfig.chartType
+          dashboard.metadata.layouts.lg[]  (tile positions)
         """
         doc = export_data.get("document", {})
         dash = export_data.get("dashboard", {})
 
+        # Extract query presentations from the real nested structure
+        qpc = dash.get("queryPresentationCollection", {})
+        memberships = qpc.get("queryPresentationCollectionMemberships", [])
+
+        # Build layout map: 1-indexed position → {x, y, w, h}
+        metadata = dash.get("metadata", {})
+        layout_items = metadata.get("layouts", {}).get("lg", [])
+        layout_map: dict[int, dict[str, int]] = {}
+        for item in layout_items:
+            idx = item.get("i")
+            if idx is not None:
+                layout_map[int(idx)] = {
+                    "x": item.get("x", 0),
+                    "y": item.get("y", 0),
+                    "w": item.get("w", 12),
+                    "h": item.get("h", 6),
+                }
+
         tiles = []
-        for qp in dash.get("queryPresentations", []):
-            query = qp.get("query", {})
-            vis = qp.get("visualization", {}).get("config", {})
+        for i, membership in enumerate(memberships):
+            qp = membership.get("queryPresentation", {})
+
+            # Query data is nested under query.queryJson
+            raw_query = qp.get("query", {})
+            query = raw_query.get("queryJson", raw_query)
+
+            # Chart type is in visConfig.chartType
+            vis_config_data = qp.get("visConfig", {})
+            omni_chart_type = vis_config_data.get("chartType", "line")
+            vis_spec = vis_config_data.get("spec", {})
 
             sorts = [
                 SortSpec(
@@ -471,6 +503,25 @@ class DashboardSerializer:
                             )
                         )
 
+            # Layout position — Omni uses a 24-col grid, we use 12-col.
+            # Scale x and w by half; height is in Omni's own units so
+            # clamp to a sensible range.
+            layout = layout_map.get(i + 1)
+            position = None
+            if layout:
+                scaled_x = max(0, min(11, layout["x"] // 2))
+                scaled_w = max(1, min(12, layout["w"] // 2))
+                if scaled_x + scaled_w > 12:
+                    scaled_w = 12 - scaled_x
+                # Omni heights are ~10x ours; scale down, minimum 2
+                scaled_h = max(2, layout["h"] // 10)
+                position = TilePosition(
+                    x=scaled_x,
+                    y=layout["y"],
+                    w=scaled_w,
+                    h=scaled_h,
+                )
+
             tiles.append(
                 Tile(
                     name=qp.get("name", ""),
@@ -484,16 +535,17 @@ class DashboardSerializer:
                         pivots=query.get("pivots", []),
                     ),
                     chart_type=_OMNI_TO_CHART_TYPE.get(
-                        qp.get("chartType", "line"), qp.get("chartType", "line")
+                        omni_chart_type, omni_chart_type
                     ),
                     vis_config=TileVisConfig(
-                        x_axis=vis.get("xAxis"),
-                        y_axis=vis.get("yAxis", []),
-                        color_by=vis.get("colorBy"),
-                        stacked=vis.get("stacked", False),
-                        show_values=vis.get("showValues", False),
-                        series_colors=vis.get("seriesColors", {}),
+                        x_axis=vis_spec.get("xAxis"),
+                        y_axis=vis_spec.get("yAxis", []),
+                        color_by=vis_spec.get("colorBy"),
+                        stacked=vis_spec.get("stacked", False),
+                        show_values=vis_spec.get("showValues", False),
+                        series_colors=vis_spec.get("seriesColors", {}),
                     ),
+                    position=position,
                 )
             )
 

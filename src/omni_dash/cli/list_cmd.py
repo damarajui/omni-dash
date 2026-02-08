@@ -169,21 +169,29 @@ def _list_omni_models(fmt: str) -> None:
         console.print_json(json.dumps([m.model_dump() for m in models], indent=2))
         return
 
+    # Filter to named models (shared/connection models) by default
+    named = [m for m in models if m.name]
+    unnamed_count = len(models) - len(named)
+
     table = Table(title="Omni Models")
     table.add_column("ID", style="dim")
     table.add_column("Name", style="cyan")
+    table.add_column("Kind", style="dim")
     table.add_column("Database")
     table.add_column("Schema")
 
-    for m in models:
+    for m in named:
         table.add_row(
             (m.id[:12] + "...") if m.id else "",
             m.name or "",
+            m.model_kind or "",
             m.database or "",
             m.schema_name or "",
         )
 
     console.print(table)
+    if unnamed_count:
+        console.print(f"\n  Showing {len(named)} named models ({unnamed_count} workbook/query models hidden)")
 
 
 def _list_topics(model_id: str | None, fmt: str) -> None:
