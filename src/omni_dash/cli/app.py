@@ -44,12 +44,14 @@ from omni_dash.cli.import_cmd import import_dashboard  # noqa: E402
 from omni_dash.cli.list_cmd import list_resources  # noqa: E402
 from omni_dash.cli.preview_cmd import preview  # noqa: E402
 from omni_dash.cli.dbt_cmd import models as dbt_models, inspect as dbt_inspect, suggest as dbt_suggest  # noqa: E402
+from omni_dash.cli.generate_cmd import generate  # noqa: E402
 
 app.command("create")(create)
 app.command("export")(export)
 app.command("import")(import_dashboard)
 app.command("list")(list_resources)
 app.command("preview")(preview)
+app.command("generate")(generate)
 
 dbt_app.command("models")(dbt_models)
 dbt_app.command("inspect")(dbt_inspect)

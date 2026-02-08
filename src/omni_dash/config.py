@@ -33,7 +33,7 @@ class OmniDashSettings(BaseSettings):
     )
 
     # Omni API credentials
-    omni_api_key: Annotated[str, Field(description="Omni API key or PAT")] = ""
+    omni_api_key: Annotated[str, Field(description="Omni API key or PAT", repr=False)] = ""
     omni_base_url: Annotated[str, Field(description="Omni org base URL")] = ""
 
     # dbt project
@@ -45,6 +45,11 @@ class OmniDashSettings(BaseSettings):
     omni_dash_template_dirs: Annotated[
         str,
         Field(default="", description="Comma-separated additional template directories"),
+    ] = ""
+
+    # AI (Claude) integration
+    anthropic_api_key: Annotated[
+        str, Field(default="", description="Anthropic API key for AI dashboard generation", repr=False)
     ] = ""
 
     # Cache
@@ -102,6 +107,14 @@ class OmniDashSettings(BaseSettings):
         if not self.omni_base_url:
             raise ConfigurationError(
                 "OMNI_BASE_URL is not set. Set it in .env or as an environment variable."
+            )
+
+    def require_ai(self) -> None:
+        """Raise if AI credentials are not configured."""
+        if not self.anthropic_api_key:
+            raise ConfigurationError(
+                "ANTHROPIC_API_KEY is not set. Set it in .env or as an environment variable. "
+                "Also install the ai extra: pip install omni-dash[ai]"
             )
 
     def require_dbt(self) -> Path:

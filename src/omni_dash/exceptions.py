@@ -91,3 +91,11 @@ class ConfigurationError(OmniDashError):
 
 class CacheError(OmniDashError):
     """Error reading or writing the local cache."""
+
+
+class AIGenerationError(OmniDashError):
+    """Claude failed to generate a valid dashboard."""
+
+
+class AINotAvailableError(OmniDashError):
+    """The anthropic package is not installed."""

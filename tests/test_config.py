@@ -66,6 +66,29 @@ class TestRequireDbt:
         assert result == tmp_path
 
 
+class TestRequireAi:
+    def test_raises_when_no_anthropic_key(self):
+        s = OmniDashSettings(anthropic_api_key="")
+        with pytest.raises(ConfigurationError, match="ANTHROPIC_API_KEY"):
+            s.require_ai()
+
+    def test_passes_when_key_set(self):
+        s = OmniDashSettings(anthropic_api_key="sk-test-123")
+        s.require_ai()  # should not raise
+
+
+class TestApiKeyReprHidden:
+    def test_omni_api_key_not_in_repr(self):
+        s = OmniDashSettings(omni_api_key="secret-key-123")
+        r = repr(s)
+        assert "secret-key-123" not in r
+
+    def test_anthropic_api_key_not_in_repr(self):
+        s = OmniDashSettings(anthropic_api_key="sk-ant-secret")
+        r = repr(s)
+        assert "sk-ant-secret" not in r
+
+
 class TestProperties:
     def test_dbt_path_none_when_empty(self):
         s = OmniDashSettings(dbt_project_path="")
