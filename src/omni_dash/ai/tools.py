@@ -255,6 +255,13 @@ def _build_dashboard_schema() -> dict[str, Any]:
                     "required": ["name", "chart_type", "query"],
                 },
             },
+            "folder_id": {
+                "type": "string",
+                "description": (
+                    "Optional Omni folder ID to place the dashboard in. "
+                    "If omitted, the dashboard will be created in the user's default location."
+                ),
+            },
             "filters": {
                 "type": "array",
                 "description": "Dashboard-level filter controls.",

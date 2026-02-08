@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -17,13 +17,13 @@ console = Console()
 
 def generate(
     description: str = typer.Argument(..., help="Natural language description of the dashboard."),
-    dbt_path: Optional[str] = typer.Option(
+    dbt_path: str | None = typer.Option(
         None, "--dbt-path", help="Path to dbt project. Defaults to DBT_PROJECT_PATH env var."
     ),
     model: str = typer.Option(
         "claude-sonnet-4-5-20250929", "--model", "-m", help="Claude model to use for generation."
     ),
-    output: Optional[str] = typer.Option(
+    output: str | None = typer.Option(
         None, "--output", "-o", help="Save dashboard definition as YAML to this path."
     ),
     preview: bool = typer.Option(
@@ -32,8 +32,11 @@ def generate(
     push: bool = typer.Option(
         False, "--push", help="Push the dashboard to Omni API."
     ),
-    omni_model_id: Optional[str] = typer.Option(
+    omni_model_id: str | None = typer.Option(
         None, "--omni-model-id", help="Omni model ID (required for --push)."
+    ),
+    folder: str | None = typer.Option(
+        None, "--folder", help="Omni folder ID to create the dashboard in."
     ),
     verbose: bool = typer.Option(
         False, "--verbose", "-V", help="Show tool calls as they happen."
@@ -127,6 +130,10 @@ def generate(
         console.print()
         console.print(Panel(result.reasoning[:1000], title="AI Reasoning", border_style="dim"))
 
+    # Apply folder if specified
+    if folder:
+        defn.folder_id = folder
+
     # Output YAML
     if output or preview:
         from omni_dash.dashboard.serializer import DashboardSerializer
@@ -152,18 +159,20 @@ def generate(
 
         settings.require_api()
 
-        # Set the model ID for the API payload
-        assert omni_model_id is not None  # guarded by check above
+        # Set the model ID for the API payload (guarded by check at line 62)
+        if not omni_model_id:
+            console.print("[red]Error:[/red] --omni-model-id is required when using --push.")
+            raise typer.Exit(1)
         defn.model_id = omni_model_id
 
         payload = DashboardSerializer.to_omni_create_payload(defn)
 
-        client = OmniClient(
+        with OmniClient(
             api_key=settings.omni_api_key,
             base_url=settings.omni_base_url,
-        )
-        doc_service = DocumentService(client)
-        result_doc = doc_service.create_dashboard(payload)
+        ) as client:
+            doc_service = DocumentService(client)
+            result_doc = doc_service.create_dashboard(payload, folder_id=defn.folder_id)
 
         console.print(
             f"\n[green]Dashboard created in Omni![/green] "

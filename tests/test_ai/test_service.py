@@ -221,6 +221,27 @@ class TestDashboardAI:
             with pytest.raises(AINotAvailableError, match="anthropic"):
                 ai.generate("Show me data")
 
+    def test_generate_api_error(self):
+        """Raises AIGenerationError when Anthropic API returns an error."""
+        mock_client_cls = MagicMock()
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+
+        # Simulate an API error
+        api_error = Exception("rate limit exceeded")
+        mock_client.messages.create.side_effect = api_error
+
+        mock_anthropic = MagicMock()
+        mock_anthropic.Anthropic = mock_client_cls
+        mock_anthropic.APIError = Exception  # Make APIError match Exception
+
+        with patch.dict(sys.modules, {"anthropic": mock_anthropic}):
+            from omni_dash.ai.service import DashboardAI
+
+            ai = DashboardAI(_mock_registry(), api_key="test-key")
+            with pytest.raises(AIGenerationError, match="Anthropic API error"):
+                ai.generate("Show me data")
+
     def test_on_tool_call_callback(self):
         """Verify the on_tool_call callback is invoked."""
         mock_client_cls = MagicMock()

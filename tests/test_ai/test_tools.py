@@ -86,6 +86,13 @@ class TestToolDefinitions:
         assert "tiles" in schema["properties"]
         assert "name" in schema["required"]
 
+    def test_create_dashboard_schema_has_folder_id(self):
+        tools = get_tool_definitions()
+        create_tool = next(t for t in tools if t["name"] == "create_dashboard")
+        schema = create_tool["input_schema"]
+        assert "folder_id" in schema["properties"]
+        assert schema["properties"]["folder_id"]["type"] == "string"
+
     def test_chart_types_in_schema(self):
         tools = get_tool_definitions()
         create_tool = next(t for t in tools if t["name"] == "create_dashboard")

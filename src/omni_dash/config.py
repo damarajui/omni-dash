@@ -33,7 +33,7 @@ class OmniDashSettings(BaseSettings):
     )
 
     # Omni API credentials
-    omni_api_key: Annotated[str, Field(description="Omni API key or PAT")] = ""
+    omni_api_key: Annotated[str, Field(description="Omni API key or PAT", repr=False)] = ""
     omni_base_url: Annotated[str, Field(description="Omni org base URL")] = ""
 
     # dbt project
@@ -49,7 +49,7 @@ class OmniDashSettings(BaseSettings):
 
     # AI (Claude) integration
     anthropic_api_key: Annotated[
-        str, Field(default="", description="Anthropic API key for AI dashboard generation")
+        str, Field(default="", description="Anthropic API key for AI dashboard generation", repr=False)
     ] = ""
 
     # Cache

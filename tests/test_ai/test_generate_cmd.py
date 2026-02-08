@@ -70,6 +70,59 @@ class TestGenerateCommand:
         result = runner.invoke(app, ["generate", "--help"])
         assert "--model" in result.output
 
+    def test_folder_flag_accepted(self):
+        result = runner.invoke(app, ["generate", "--help"])
+        assert "--folder" in result.output
+
+    def test_successful_generation_preview(self, tmp_path):
+        """Happy path: generate with --preview shows dashboard summary."""
+        (tmp_path / "dbt_project.yml").write_text("name: test")
+        mock_result = _mock_result()
+
+        with patch("omni_dash.cli.generate_cmd.get_settings") as mock_settings, \
+             patch("omni_dash.ai.service.DashboardAI") as MockAI:
+            mock_settings.return_value.dbt_project_path = str(tmp_path)
+            mock_settings.return_value.anthropic_api_key = "test-key"
+
+            mock_ai_instance = MagicMock()
+            mock_ai_instance.generate.return_value = mock_result
+            MockAI.return_value = mock_ai_instance
+
+            result = runner.invoke(app, ["generate", "Show me data", "--preview"])
+
+        assert result.exit_code == 0
+        assert "Test AI Dashboard" in result.output
+        assert "Visits" in result.output
+
+    def test_successful_generation_output(self, tmp_path):
+        """Generate with --output writes YAML file."""
+        (tmp_path / "dbt_project.yml").write_text("name: test")
+        output_file = tmp_path / "output.yml"
+        mock_result = _mock_result()
+
+        with patch("omni_dash.cli.generate_cmd.get_settings") as mock_settings, \
+             patch("omni_dash.ai.service.DashboardAI") as MockAI:
+            mock_settings.return_value.dbt_project_path = str(tmp_path)
+            mock_settings.return_value.anthropic_api_key = "test-key"
+
+            mock_ai_instance = MagicMock()
+            mock_ai_instance.generate.return_value = mock_result
+            MockAI.return_value = mock_ai_instance
+
+            result = runner.invoke(app, ["generate", "Show me data", "--output", str(output_file)])
+
+        assert result.exit_code == 0
+        assert output_file.exists()
+        content = output_file.read_text()
+        assert "Test AI Dashboard" in content
+
+    def test_dbt_path_not_exists_errors(self):
+        with patch("omni_dash.cli.generate_cmd.get_settings") as mock_settings:
+            mock_settings.return_value.dbt_project_path = "/nonexistent/path/to/dbt"
+            result = runner.invoke(app, ["generate", "Show me data"])
+            assert result.exit_code != 0
+            assert "does not exist" in result.output
+
     def test_help_shows_description(self):
         result = runner.invoke(app, ["generate", "--help"])
         assert "natural language" in result.output.lower()
