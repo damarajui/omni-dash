@@ -76,6 +76,121 @@ _OMNI_TO_CHART_TYPE: dict[str, str] = {
 }
 
 
+def _to_omni_filter(f: FilterSpec) -> dict[str, Any]:
+    """Convert an internal FilterSpec to Omni's filter format.
+
+    Omni filters use ``{kind, type, values/right_side, ...}`` instead of
+    our simple ``{operator, value}``.  Maps common operators to Omni
+    equivalents learned from real working dashboards.
+    """
+    op = f.operator.lower() if f.operator else "is"
+    value = f.value
+
+    # Map common operator names to Omni's kind/type system
+    if op in ("date_range", "between", "date_between"):
+        return {
+            "kind": "BETWEEN",
+            "type": "date",
+            "ui_type": "BETWEEN",
+            "isFiscal": False,
+            "left_side": str(value) if value else "this year",
+            "right_side": "now",
+            "is_negative": False,
+        }
+    elif op in ("before", "date_before"):
+        return {
+            "kind": "BEFORE",
+            "type": "date",
+            "ui_type": "BEFORE",
+            "isFiscal": False,
+            "right_side": str(value) if value else "1 weeks ago",
+            "is_negative": False,
+        }
+    elif op in ("past", "last", "date_past"):
+        return {
+            "kind": "TIME_FOR_INTERVAL_DURATION",
+            "type": "date",
+            "ui_type": "PAST",
+            "isFiscal": False,
+            "left_side": str(value) if value else "12 complete weeks ago",
+            "right_side": str(value).replace("ago", "").strip() if value else "12 weeks",
+            "is_negative": False,
+        }
+    elif op in ("is", "equals", "="):
+        if isinstance(value, list):
+            return {
+                "kind": "EQUALS",
+                "type": "string",
+                "values": [str(v) for v in value],
+                "is_negative": False,
+                "appliedLabels": {},
+            }
+        return {
+            "kind": "EQUALS",
+            "type": "string",
+            "values": [str(value)] if value is not None else [],
+            "is_negative": False,
+            "appliedLabels": {},
+        }
+    elif op in ("is_not", "not_equals", "!="):
+        if isinstance(value, list):
+            return {
+                "kind": "EQUALS",
+                "type": "string",
+                "values": [str(v) for v in value],
+                "is_negative": True,
+                "appliedLabels": {},
+            }
+        return {
+            "kind": "EQUALS",
+            "type": "string",
+            "values": [str(value)] if value is not None else [],
+            "is_negative": True,
+            "appliedLabels": {},
+        }
+    elif op in ("gt", ">", "greater_than"):
+        return {
+            "kind": "GREATER_THAN",
+            "type": "number",
+            "right_side": str(value) if value is not None else "0",
+            "is_negative": False,
+        }
+    elif op in ("lt", "<", "less_than"):
+        return {
+            "kind": "LESS_THAN",
+            "type": "number",
+            "right_side": str(value) if value is not None else "0",
+            "is_negative": False,
+        }
+    elif op in ("contains", "like"):
+        return {
+            "kind": "CONTAINS",
+            "type": "string",
+            "right_side": str(value) if value is not None else "",
+            "is_negative": False,
+        }
+    elif op in ("is_null", "null"):
+        return {
+            "kind": "IS_NULL",
+            "type": "string",
+            "is_negative": False,
+        }
+    elif op in ("is_not_null", "not_null"):
+        return {
+            "kind": "IS_NULL",
+            "type": "string",
+            "is_negative": True,
+        }
+    else:
+        # Fallback: pass through as equals
+        return {
+            "kind": "EQUALS",
+            "type": "string",
+            "values": [str(value)] if value is not None else [],
+            "is_negative": False,
+        }
+
+
 class DashboardSerializer:
     """Convert DashboardDefinition to/from various formats."""
 
@@ -84,6 +199,12 @@ class DashboardSerializer:
         """Convert a DashboardDefinition to the Omni POST /api/v1/documents payload.
 
         This is the primary serialization target for creating dashboards via API.
+
+        Applies Omni-specific rules learned from real working dashboards:
+        - KPI tiles must NOT have sorts (they're single-value aggregations)
+        - Sort column_names MUST appear in the fields list
+        - Filters use Omni's ``{kind, type, values}`` format
+        - Default limit is 1000 (Omni's standard)
         """
         if not definition.model_id:
             raise DashboardDefinitionError(
@@ -93,40 +214,57 @@ class DashboardSerializer:
 
         query_presentations = []
         for tile in definition.tiles:
+            omni_chart_type = _CHART_TYPE_TO_OMNI.get(tile.chart_type, tile.chart_type)
+            is_kpi = omni_chart_type in ("kpi", "summaryValue")
+
+            # Build fields list — ensure sort columns are included
+            fields = list(tile.query.fields)
+
+            # KPI tiles: no sorts (working KPIs in Omni always have sorts=[])
+            # Other tiles: validate sort columns are in fields
+            sorts: list[dict[str, Any]] = []
+            if not is_kpi and tile.query.sorts:
+                for s in tile.query.sorts:
+                    if s.column_name not in fields:
+                        fields.append(s.column_name)
+                    sorts.append({
+                        "column_name": s.column_name,
+                        "sort_descending": s.sort_descending,
+                        "null_sort": "DIALECT_DEFAULT",
+                        "is_column_sort": False,
+                    })
+
+            # Determine limit — KPI tiles use 1, others default to 1000
+            limit = tile.query.limit
+            if is_kpi and limit > 1:
+                limit = 1
+            elif limit == 200:
+                # Upgrade old default (200) to Omni's standard (1000)
+                limit = 1000
+
             qp: dict[str, Any] = {
                 "name": tile.name,
                 "description": tile.description,
                 "query": {
                     "table": tile.query.table,
-                    "fields": tile.query.fields,
+                    "fields": fields,
                     "modelId": definition.model_id,
-                    "limit": tile.query.limit,
+                    "limit": limit,
+                    "sorts": sorts,
                 },
             }
 
-            # Sorts
-            if tile.query.sorts:
-                qp["query"]["sorts"] = [
-                    {
-                        "columnName": s.column_name,
-                        "sortDescending": s.sort_descending,
-                    }
-                    for s in tile.query.sorts
-                ]
-
-            # Filters
+            # Filters — convert to Omni's format
             if tile.query.filters:
-                qp["query"]["filters"] = {
-                    f.field: {"operator": f.operator, "value": f.value}
-                    for f in tile.query.filters
-                }
+                omni_filters: dict[str, Any] = {}
+                for f in tile.query.filters:
+                    omni_filters[f.field] = _to_omni_filter(f)
+                qp["query"]["filters"] = omni_filters
 
             # Pivots
             if tile.query.pivots:
                 qp["query"]["pivots"] = tile.query.pivots
 
-            # Chart type — map internal names to Omni API names
-            omni_chart_type = _CHART_TYPE_TO_OMNI.get(tile.chart_type, tile.chart_type)
             qp["chartType"] = omni_chart_type
             qp["prefersChart"] = omni_chart_type not in ("table", "markdown")
 
@@ -441,19 +579,51 @@ class DashboardSerializer:
         """Parse an Omni dashboard export into a DashboardDefinition.
 
         Handles the JSON structure returned by GET /api/unstable/documents/:id/export.
+
+        Real Omni export structure:
+          dashboard.queryPresentationCollection.queryPresentationCollectionMemberships[].queryPresentation
+          queryPresentation.query.queryJson  (query fields, sorts, filters, etc.)
+          queryPresentation.visConfig.chartType
+          dashboard.metadata.layouts.lg[]  (tile positions)
         """
         doc = export_data.get("document", {})
         dash = export_data.get("dashboard", {})
 
+        # Extract query presentations from the real nested structure
+        qpc = dash.get("queryPresentationCollection", {})
+        memberships = qpc.get("queryPresentationCollectionMemberships", [])
+
+        # Build layout map: 1-indexed position → {x, y, w, h}
+        metadata = dash.get("metadata", {})
+        layout_items = metadata.get("layouts", {}).get("lg", [])
+        layout_map: dict[int, dict[str, int]] = {}
+        for item in layout_items:
+            idx = item.get("i")
+            if idx is not None:
+                layout_map[int(idx)] = {
+                    "x": item.get("x", 0),
+                    "y": item.get("y", 0),
+                    "w": item.get("w", 12),
+                    "h": item.get("h", 6),
+                }
+
         tiles = []
-        for qp in dash.get("queryPresentations", []):
-            query = qp.get("query", {})
-            vis = qp.get("visualization", {}).get("config", {})
+        for i, membership in enumerate(memberships):
+            qp = membership.get("queryPresentation", {})
+
+            # Query data is nested under query.queryJson
+            raw_query = qp.get("query", {})
+            query = raw_query.get("queryJson", raw_query)
+
+            # Chart type is in visConfig.chartType
+            vis_config_data = qp.get("visConfig", {})
+            omni_chart_type = vis_config_data.get("chartType", "line")
+            vis_spec = vis_config_data.get("spec", {})
 
             sorts = [
                 SortSpec(
-                    column_name=s.get("columnName", ""),
-                    sort_descending=s.get("sortDescending", False),
+                    column_name=s.get("column_name", s.get("columnName", "")),
+                    sort_descending=s.get("sort_descending", s.get("sortDescending", False)),
                 )
                 for s in query.get("sorts", [])
             ]
@@ -471,6 +641,25 @@ class DashboardSerializer:
                             )
                         )
 
+            # Layout position — Omni uses a 24-col grid, we use 12-col.
+            # Scale x and w by half; height is in Omni's own units so
+            # clamp to a sensible range.
+            layout = layout_map.get(i + 1)
+            position = None
+            if layout:
+                scaled_x = max(0, min(11, layout["x"] // 2))
+                scaled_w = max(1, min(12, layout["w"] // 2))
+                if scaled_x + scaled_w > 12:
+                    scaled_w = 12 - scaled_x
+                # Omni heights are ~10x ours; scale down, minimum 2
+                scaled_h = max(2, layout["h"] // 10)
+                position = TilePosition(
+                    x=scaled_x,
+                    y=layout["y"],
+                    w=scaled_w,
+                    h=scaled_h,
+                )
+
             tiles.append(
                 Tile(
                     name=qp.get("name", ""),
@@ -484,16 +673,17 @@ class DashboardSerializer:
                         pivots=query.get("pivots", []),
                     ),
                     chart_type=_OMNI_TO_CHART_TYPE.get(
-                        qp.get("chartType", "line"), qp.get("chartType", "line")
+                        omni_chart_type, omni_chart_type
                     ),
                     vis_config=TileVisConfig(
-                        x_axis=vis.get("xAxis"),
-                        y_axis=vis.get("yAxis", []),
-                        color_by=vis.get("colorBy"),
-                        stacked=vis.get("stacked", False),
-                        show_values=vis.get("showValues", False),
-                        series_colors=vis.get("seriesColors", {}),
+                        x_axis=vis_spec.get("xAxis"),
+                        y_axis=vis_spec.get("yAxis", []),
+                        color_by=vis_spec.get("colorBy"),
+                        stacked=vis_spec.get("stacked", False),
+                        show_values=vis_spec.get("showValues", False),
+                        series_colors=vis_spec.get("seriesColors", {}),
                     ),
+                    position=position,
                 )
             )
 

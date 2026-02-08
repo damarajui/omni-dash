@@ -3,6 +3,10 @@
 import pytest
 
 from omni_dash.dashboard.builder import DashboardBuilder
+from omni_dash.dashboard.definition import (
+    DashboardDefinition,
+    SortSpec,
+)
 from omni_dash.dashboard.serializer import DashboardSerializer
 from omni_dash.exceptions import DashboardDefinitionError
 
@@ -46,6 +50,11 @@ def test_to_omni_payload(sample_definition):
     assert qp0["query"]["modelId"] == "abc-123"
     assert "mart_seo_weekly_funnel.week_start" in qp0["query"]["fields"]
 
+    # Sorts use snake_case (Omni queryJson format)
+    assert qp0["query"]["sorts"][0]["column_name"] == "mart_seo_weekly_funnel.week_start"
+    assert qp0["query"]["sorts"][0]["sort_descending"] is False
+    assert qp0["query"]["sorts"][0]["null_sort"] == "DIALECT_DEFAULT"
+
     # Number tile → mapped to "kpi" for Omni API
     qp2 = payload["queryPresentations"][2]
     assert qp2["chartType"] == "kpi"
@@ -72,31 +81,46 @@ def test_chart_type_mapping_all():
         assert omni in omni_valid, f"Internal '{internal}' maps to invalid Omni type '{omni}'"
 
 
+def _make_omni_export_qp(name: str, chart_type: str, table: str, fields: list,
+                          sorts=None, filters=None, vis_spec=None):
+    """Helper to build a realistic Omni export queryPresentation structure."""
+    query_json = {
+        "table": table,
+        "fields": fields,
+        "sorts": sorts or [],
+        "filters": filters or {},
+        "limit": 200,
+        "modelId": "model-123",
+    }
+    return {
+        "queryPresentation": {
+            "name": name,
+            "description": "",
+            "query": {
+                "id": "q-1",
+                "queryJson": query_json,
+            },
+            "visConfig": {
+                "chartType": chart_type,
+                "spec": vis_spec or {},
+            },
+        }
+    }
+
+
 def test_from_omni_export_reverse_maps_chart_types():
     """Verify Omni chart types are reverse-mapped when importing."""
     export_data = {
         "document": {"name": "Test", "modelId": "m1"},
         "dashboard": {
-            "queryPresentations": [
-                {
-                    "name": "KPI",
-                    "chartType": "kpi",
-                    "query": {"table": "t", "fields": ["t.a"]},
-                    "visualization": {"config": {}},
-                },
-                {
-                    "name": "Stacked",
-                    "chartType": "barStacked",
-                    "query": {"table": "t", "fields": ["t.a", "t.b"]},
-                    "visualization": {"config": {}},
-                },
-                {
-                    "name": "Scatter",
-                    "chartType": "point",
-                    "query": {"table": "t", "fields": ["t.x", "t.y"]},
-                    "visualization": {"config": {}},
-                },
-            ],
+            "queryPresentationCollection": {
+                "queryPresentationCollectionMemberships": [
+                    _make_omni_export_qp("KPI", "kpi", "t", ["t.a"]),
+                    _make_omni_export_qp("Stacked", "barStacked", "t", ["t.a", "t.b"]),
+                    _make_omni_export_qp("Scatter", "point", "t", ["t.x", "t.y"]),
+                ],
+            },
+            "metadata": {"layouts": {"lg": []}},
         },
     }
     defn = DashboardSerializer.from_omni_export(export_data)
@@ -148,31 +172,28 @@ def test_yaml_preserves_positions(sample_definition):
 
 
 def test_from_omni_export():
+    """Test parsing a real Omni export structure with sorts, layout, and vis config."""
     export_data = {
         "document": {
             "name": "Exported Dashboard",
             "modelId": "model-456",
         },
         "dashboard": {
-            "queryPresentations": [
-                {
-                    "name": "Chart 1",
-                    "chartType": "bar",
-                    "query": {
-                        "table": "my_table",
-                        "fields": ["my_table.col1", "my_table.col2"],
-                        "sorts": [{"columnName": "my_table.col1", "sortDescending": True}],
-                        "limit": 100,
-                    },
-                    "visualization": {
-                        "config": {
-                            "xAxis": "my_table.col1",
-                            "yAxis": ["my_table.col2"],
-                            "stacked": True,
-                        }
-                    },
-                }
-            ]
+            "queryPresentationCollection": {
+                "queryPresentationCollectionMemberships": [
+                    _make_omni_export_qp(
+                        "Chart 1", "bar", "my_table",
+                        ["my_table.col1", "my_table.col2"],
+                        sorts=[{"column_name": "my_table.col1", "sort_descending": True, "null_sort": "DIALECT_DEFAULT", "is_column_sort": False}],
+                        vis_spec={"xAxis": "my_table.col1", "yAxis": ["my_table.col2"], "stacked": True},
+                    ),
+                ],
+            },
+            "metadata": {
+                "layouts": {
+                    "lg": [{"i": 1, "x": 0, "y": 0, "w": 24, "h": 8}],
+                },
+            },
         },
         "exportVersion": "0.1",
     }
@@ -183,6 +204,126 @@ def test_from_omni_export():
     assert len(definition.tiles) == 1
     assert definition.tiles[0].chart_type == "bar"
     assert definition.tiles[0].vis_config.stacked is True
+    # Verify sorts are parsed from camelCase
+    assert len(definition.tiles[0].query.sorts) == 1
+    assert definition.tiles[0].query.sorts[0].column_name == "my_table.col1"
+    assert definition.tiles[0].query.sorts[0].sort_descending is True
+    # Verify layout position (Omni 24-col → our 12-col: w=24//2=12)
+    assert definition.tiles[0].position is not None
+    assert definition.tiles[0].position.x == 0
+    assert definition.tiles[0].position.w == 12
+
+
+def test_kpi_tiles_have_no_sorts():
+    """KPI tiles must NOT have sorts — Omni rejects sort fields not in the fields list."""
+    definition = (
+        DashboardBuilder("KPI Test")
+        .model("m-1")
+        .dbt_source("my_table")
+        .add_number_tile("Metric A", metric_col="value_a")
+        .build()
+    )
+    # Manually add a sort that references a column not in fields
+    definition.tiles[0].query.sorts = [
+        SortSpec(column_name="my_table.date_col", sort_descending=True)
+    ]
+
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    kpi_qp = payload["queryPresentations"][0]
+
+    # KPI tiles must have empty sorts
+    assert kpi_qp["query"]["sorts"] == []
+    assert kpi_qp["chartType"] == "kpi"
+    # The sort column should NOT be added to fields for KPI tiles
+    assert "my_table.date_col" not in kpi_qp["query"]["fields"]
+
+
+def test_sort_columns_added_to_fields():
+    """Sort columns not in the fields list should be automatically added."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, SortSpec as SS
+
+    definition = DashboardDefinition(
+        name="Sort Fix Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Chart",
+                chart_type="line",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.metric"],
+                    sorts=[SS(column_name="t.date_col", sort_descending=False)],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    qp = payload["queryPresentations"][0]
+
+    # sort column should be added to fields automatically
+    assert "t.date_col" in qp["query"]["fields"]
+    assert "t.metric" in qp["query"]["fields"]
+    assert qp["query"]["sorts"][0]["column_name"] == "t.date_col"
+
+
+def test_kpi_limit_capped_at_1():
+    """KPI tiles should have limit=1."""
+    definition = (
+        DashboardBuilder("Limit Test")
+        .model("m-1")
+        .dbt_source("t")
+        .add_number_tile("KPI", metric_col="val")
+        .build()
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    assert payload["queryPresentations"][0]["query"]["limit"] == 1
+
+
+def test_default_limit_upgraded_to_1000():
+    """Default limit of 200 should be upgraded to Omni's standard 1000."""
+    definition = (
+        DashboardBuilder("Limit Test")
+        .model("m-1")
+        .dbt_source("t")
+        .add_line_chart("Chart", time_col="d", metric_cols=["v"])
+        .build()
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    assert payload["queryPresentations"][0]["query"]["limit"] == 1000
+
+
+def test_filter_format_omni():
+    """Filters should be converted to Omni's {kind, type, values} format."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, FilterSpec as FS
+
+    definition = DashboardDefinition(
+        name="Filter Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Filtered",
+                chart_type="bar",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.dim", "t.val"],
+                    filters=[
+                        FS(field="t.status", operator="is", value="active"),
+                        FS(field="t.date", operator="before", value="1 weeks ago"),
+                    ],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    filters = payload["queryPresentations"][0]["query"]["filters"]
+
+    assert "t.status" in filters
+    assert filters["t.status"]["kind"] == "EQUALS"
+    assert filters["t.status"]["values"] == ["active"]
+
+    assert "t.date" in filters
+    assert filters["t.date"]["kind"] == "BEFORE"
+    assert filters["t.date"]["type"] == "date"
 
 
 def test_from_yaml_invalid():

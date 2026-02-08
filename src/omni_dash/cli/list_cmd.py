@@ -169,21 +169,29 @@ def _list_omni_models(fmt: str) -> None:
         console.print_json(json.dumps([m.model_dump() for m in models], indent=2))
         return
 
+    # Filter to named models (shared/connection models) by default
+    named = [m for m in models if m.name]
+    unnamed_count = len(models) - len(named)
+
     table = Table(title="Omni Models")
     table.add_column("ID", style="dim")
     table.add_column("Name", style="cyan")
+    table.add_column("Kind", style="dim")
     table.add_column("Database")
     table.add_column("Schema")
 
-    for m in models:
+    for m in named:
         table.add_row(
             (m.id[:12] + "...") if m.id else "",
             m.name or "",
+            m.model_kind or "",
             m.database or "",
             m.schema_name or "",
         )
 
     console.print(table)
+    if unnamed_count:
+        console.print(f"\n  Showing {len(named)} named models ({unnamed_count} workbook/query models hidden)")
 
 
 def _list_topics(model_id: str | None, fmt: str) -> None:
@@ -236,11 +244,15 @@ def _list_folders(fmt: str) -> None:
     table = Table(title="Folders")
     table.add_column("ID", style="dim")
     table.add_column("Name", style="cyan")
+    table.add_column("Scope", style="dim")
 
     for f in folders:
+        fid = str(f.get("id", ""))
         table.add_row(
-            str(f.get("id", ""))[:12] + "...",
+            (fid[:12] + "...") if len(fid) > 12 else fid,
             f.get("name", ""),
+            f.get("scope", ""),
         )
 
     console.print(table)
+    console.print(f"\n  Total: {len(folders)} folders")

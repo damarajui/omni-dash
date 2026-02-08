@@ -1,0 +1,1722 @@
+{
+  "dashboard": {
+    "dashboardCustomTheme": null,
+    "facetFilters": false,
+    "id": "a6e4d47e-0426-44a6-88a9-6d6863521789",
+    "organizationId": "2ec98ea6-a79b-43ad-a6b8-421484a0a8af",
+    "queryPresentationCollection": {
+      "filterConfig": {},
+      "filterConfigVersion": 0,
+      "filterOrder": [],
+      "id": "7a2ad88e-7fbf-4f81-9f14-7686821d2800",
+      "queryPresentationCollectionMemberships": [
+        {
+          "queryPresentation": {
+            "id": "23e146cc-f8a8-40e2-8a05-3edda49d7b18",
+            "createdAt": "2026-02-02T16:44:57.858Z",
+            "updatedAt": "2026-02-02T16:44:57.858Z",
+            "type": "query",
+            "name": "Weekly Breakdown",
+            "subTitle": null,
+            "description": "",
+            "organizationId": "2ec98ea6-a79b-43ad-a6b8-421484a0a8af",
+            "queryId": "a37f5187-c8b9-4292-a4da-436a355d1916",
+            "miniUuid": "MmQbWrTU",
+            "modelId": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+            "fileUploadId": null,
+            "prefersChart": true,
+            "automaticVis": true,
+            "visConfigId": "ff0be8a8-3e39-4243-8ecf-b831db393773",
+            "topicName": null,
+            "editingModelObjectName": null,
+            "editingModelObjectNameChange": null,
+            "filterOrder": [],
+            "isSql": true,
+            "resultConfig": {
+              "tableType": "spreadsheet",
+              "rowBanding": {
+                "enabled": false,
+                "bandSize": 1
+              },
+              "expandedRows": {},
+              "hideIndexColumn": false,
+              "truncateHeaders": true,
+              "showDescriptions": true,
+              "visColumnDisplay": "hide-view-name"
+            },
+            "aiConfig": {},
+            "sourceQueryPresentationTabIdx": null,
+            "allowedPrivateToWorkbookModelId": null,
+            "query": {
+              "id": "a37f5187-c8b9-4292-a4da-436a355d1916",
+              "createdAt": "2026-02-02T16:44:58.070Z",
+              "jsonHash": "QuoRcwBdedtqxFcyd1dvIEMjiQ6hYkZCZo+sJEhTaek=",
+              "modelId": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+              "queryJson": {
+                "limit": 1000,
+                "sorts": [
+                  {
+                    "null_sort": "DIALECT_DEFAULT",
+                    "column_name": "mtd_signups.week_start",
+                    "is_column_sort": false,
+                    "sort_descending": false
+                  }
+                ],
+                "table": "mtd_signups",
+                "fields": [
+                  "mtd_signups.week_start",
+                  "mtd_signups.total_signups",
+                  "mtd_signups.qualified_signups",
+                  "mtd_signups.qualified_pct"
+                ],
+                "parsed": true,
+                "pivots": [],
+                "dbtMode": false,
+                "filters": {},
+                "modelId": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+                "version": 8,
+                "controls": [],
+                "rewriteSql": false,
+                "row_totals": {},
+                "fill_fields": [],
+                "calculations": [],
+                "column_limit": 50,
+                "join_via_map": {},
+                "column_totals": {},
+                "userEditedSQL": "WITH mtd_signups AS (\n    SELECT \n        DATE_TRUNC('week', created_at_utc)::DATE AS week_start,\n        COUNT(*) AS total_signups,\n        SUM(CASE WHEN email_type = 'Professional' THEN 1 ELSE 0 END) AS qualified_signups\n    FROM TRAINING_DATABASE.PUBLIC.IDENTITIES_ADDENDUM\n    WHERE created_at_utc >= DATE_TRUNC('month', CURRENT_DATE)\n      AND created_at_utc < CURRENT_DATE + 1\n      AND filtered_core = 'true'\n    GROUP BY 1\n)\nSELECT \n    week_start,\n    total_signups,\n    qualified_signups,\n    ROUND(qualified_signups * 100.0 / NULLIF(total_signups, 0), 1) AS qualified_pct\nFROM mtd_signups\nORDER BY week_start",
+                "dimensionIndex": 4,
+                "default_group_by": false,
+                "filtersUsedInSql": {},
+                "model_extension_id": "10fb8b91-5676-4109-86c2-a258ad6a0d20",
+                "custom_summary_types": {}
+              }
+            },
+            "visConfig": {
+              "id": "ff0be8a8-3e39-4243-8ecf-b831db393773",
+              "createdAt": "2026-01-13T00:20:39.300Z",
+              "visType": "omni-table",
+              "chartType": "table",
+              "jsonHash": "SjG5E8xcxYzGTIC/lrz1flqYSKFdWLJWASDGTX9v97A=",
+              "spec": {
+                "tableType": "spreadsheet",
+                "rowBanding": {
+                  "enabled": false,
+                  "bandSize": 1
+                },
+                "expandedRows": {},
+                "columnFormats": {
+                  "WEEK_START": {
+                    "align": "left"
+                  },
+                  "QUALIFIED_PCT": {
+                    "align": "right"
+                  },
+                  "TOTAL_SIGNUPS": {
+                    "align": "right"
+                  },
+                  "QUALIFIED_SIGNUPS": {
+                    "align": "right"
+                  }
+                },
+                "hideIndexColumn": false,
+                "truncateHeaders": true,
+                "showDescriptions": true,
+                "visColumnDisplay": "hide-view-name"
+              },
+              "fields": [
+                "WEEK_START",
+                "TOTAL_SIGNUPS",
+                "QUALIFIED_SIGNUPS",
+                "QUALIFIED_PCT"
+              ],
+              "version": 0
+            }
+          }
+        },
+        {
+          "queryPresentation": {
+            "id": "ee4b2daa-6981-4c80-a916-b2f409bbab16",
+            "createdAt": "2026-02-02T16:44:57.858Z",
+            "updatedAt": "2026-02-02T16:44:57.858Z",
+            "type": "query",
+            "name": "\ud83c\udf6f Query",
+            "subTitle": null,
+            "description": "",
+            "organizationId": "2ec98ea6-a79b-43ad-a6b8-421484a0a8af",
+            "queryId": "e2dc97c8-222a-4fdf-9a18-5ff1b86974cc",
+            "miniUuid": "tDyZwE0L",
+            "modelId": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+            "fileUploadId": null,
+            "prefersChart": true,
+            "automaticVis": true,
+            "visConfigId": "2ac5b602-abf6-4806-8bd2-80802ad8e670",
+            "topicName": null,
+            "editingModelObjectName": null,
+            "editingModelObjectNameChange": null,
+            "filterOrder": [],
+            "isSql": true,
+            "resultConfig": {
+              "tableType": "spreadsheet",
+              "rowBanding": {
+                "enabled": false,
+                "bandSize": 1
+              },
+              "expandedRows": {},
+              "hideIndexColumn": false,
+              "truncateHeaders": true,
+              "showDescriptions": true,
+              "visColumnDisplay": "hide-view-name"
+            },
+            "aiConfig": {},
+            "sourceQueryPresentationTabIdx": null,
+            "allowedPrivateToWorkbookModelId": null,
+            "query": {
+              "id": "e2dc97c8-222a-4fdf-9a18-5ff1b86974cc",
+              "createdAt": "2026-02-02T16:44:58.070Z",
+              "jsonHash": "szN4uzPPDtx435z9lj/u6jjgFJpY67JjQPhIbCQuKbE=",
+              "modelId": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+              "queryJson": {
+                "limit": 1000,
+                "sorts": [],
+                "table": "identities_addendum",
+                "fields": [
+                  "identities_addendum.total_signups_mtd"
+                ],
+                "parsed": true,
+                "pivots": [],
+                "dbtMode": false,
+                "filters": {},
+                "modelId": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+                "version": 8,
+                "controls": [],
+                "rewriteSql": false,
+                "row_totals": {},
+                "fill_fields": [],
+                "calculations": [],
+                "column_limit": 50,
+                "join_via_map": {},
+                "column_totals": {},
+                "userEditedSQL": "SELECT \n    COUNT(*) AS total_signups_mtd\nFROM TRAINING_DATABASE.PUBLIC.IDENTITIES_ADDENDUM\nWHERE created_at_utc >= DATE_TRUNC('month', CURRENT_DATE)\n  AND created_at_utc < CURRENT_DATE + 1\n  AND filtered_core = 'true'",
+                "dimensionIndex": 0,
+                "default_group_by": true,
+                "filtersUsedInSql": {},
+                "model_extension_id": "64312ad0-2d71-44d8-b980-12901d83b62c",
+                "custom_summary_types": {}
+              }
+            },
+            "visConfig": {
+              "id": "2ac5b602-abf6-4806-8bd2-80802ad8e670",
+              "createdAt": "2026-01-13T00:24:38.769Z",
+              "visType": "omni-kpi",
+              "chartType": "kpi",
+              "jsonHash": "tpMNOzheGpH9YA0+h1kQ8w+2ZnfyYoWlkFKnqaX8UP8=",
+              "spec": {
+                "alignment": "left",
+                "fontKPISize": "",
+                "fontBodySize": "",
+                "fontLabelSize": "",
+                "markdownConfig": [
+                  {
+                    "id": "3b67dbc1-94f2-4600-aaae-5a758d6eb41d",
+                    "type": "number",
+                    "config": {
+                      "field": {
+                        "row": "_first",
+                        "field": {
+                          "name": "TOTAL_SIGNUPS_MTD",
+                          "manual": true,
+                          "pivotMap": {}
+                        },
+                        "label": {
+                          "value": "TOTAL SIGNUPS MTD"
+                        }
+                      },
+                      "descriptionBefore": ""
+                    },
+                    "lastModified": 1768263755887
+                  }
+                ],
+                "verticalAlignment": "top"
+              },
+              "fields": [
+                "TOTAL_SIGNUPS_MTD"
+              ],
+              "version": 0
+            }
+          }
+        },
+        {
+          "queryPresentation": {
+            "id": "d0f35e8f-40f4-4fc5-9a1a-c278f1f0b17f",
+            "createdAt": "2026-02-02T16:44:57.858Z",
+            "updatedAt": "2026-02-02T16:44:57.858Z",
+            "type": "query",
+            "name": "\ud83d\udc6e Query",
+            "subTitle": null,
+            "description": "",
+            "organizationId": "2ec98ea6-a79b-43ad-a6b8-421484a0a8af",
+            "queryId": "49660432-64b0-4b0f-af0a-e74a453fdc13",
+            "miniUuid": "tqMCuVj4",
+            "modelId": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+            "fileUploadId": null,
+            "prefersChart": true,
+            "automaticVis": true,
+            "visConfigId": "af5eb0ec-fef8-4fa6-b11f-0712199c4c3b",
+            "topicName": null,
+            "editingModelObjectName": null,
+            "editingModelObjectNameChange": null,
+            "filterOrder": [],
+            "isSql": true,
+            "resultConfig": {
+              "tableType": "spreadsheet",
+              "rowBanding": {
+                "enabled": false,
+                "bandSize": 1
+              },
+              "expandedRows": {},
+              "hideIndexColumn": false,
+              "truncateHeaders": true,
+              "showDescriptions": true,
+              "visColumnDisplay": "hide-view-name"
+            },
+            "aiConfig": {},
+            "sourceQueryPresentationTabIdx": null,
+            "allowedPrivateToWorkbookModelId": null,
+            "query": {
+              "id": "49660432-64b0-4b0f-af0a-e74a453fdc13",
+              "createdAt": "2026-02-02T16:44:58.070Z",
+              "jsonHash": "MG3UOUvq82nWSf5qxIDB62rELMcyHoM+rKVukf4mZN0=",
+              "modelId": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+              "queryJson": {
+                "limit": 1000,
+                "sorts": [],
+                "table": "identities_addendum",
+                "fields": [
+                  "identities_addendum.qualified_signups_mtd"
+                ],
+                "parsed": true,
+                "pivots": [],
+                "dbtMode": false,
+                "filters": {},
+                "modelId": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+                "version": 8,
+                "controls": [],
+                "rewriteSql": false,
+                "row_totals": {},
+                "fill_fields": [],
+                "calculations": [],
+                "column_limit": 50,
+                "join_via_map": {},
+                "column_totals": {},
+                "userEditedSQL": "SELECT \n    SUM(CASE WHEN email_type = 'Professional' THEN 1 ELSE 0 END) AS qualified_signups_mtd\nFROM TRAINING_DATABASE.PUBLIC.IDENTITIES_ADDENDUM\nWHERE created_at_utc >= DATE_TRUNC('month', CURRENT_DATE)\n  AND created_at_utc < CURRENT_DATE + 1\n  AND filtered_core = 'true'",
+                "dimensionIndex": 0,
+                "default_group_by": true,
+                "filtersUsedInSql": {},
+                "model_extension_id": "734caad3-27e8-4cfc-91bd-e8063f9b36d5",
+                "custom_summary_types": {}
+              }
+            },
+            "visConfig": {
+              "id": "af5eb0ec-fef8-4fa6-b11f-0712199c4c3b",
+              "createdAt": "2026-01-13T00:25:25.986Z",
+              "visType": "omni-kpi",
+              "chartType": null,
+              "jsonHash": "GcAqDUf1DVZrLzHIcrWaKLuYR8qOfhzwvJEbJouoJIk=",
+              "spec": {
+                "alignment": "left",
+                "fontKPISize": "",
+                "fontBodySize": "",
+                "fontLabelSize": "",
+                "markdownConfig": [
+                  {
+                    "id": "64c7bc2e-d88c-42a7-a268-d1e565cd3e68",
+                    "type": "number",
+                    "config": {
+                      "field": {
+                        "row": "_first",
+                        "field": {
+                          "name": "QUALIFIED_SIGNUPS_MTD",
+                          "pivotMap": {}
+                        },
+                        "label": {
+                          "value": "QUALIFIED SIGNUPS MTD"
+                        }
+                      },
+                      "descriptionBefore": ""
+                    },
+                    "lastModified": 1768263925649
+                  }
+                ],
+                "verticalAlignment": "top"
+              },
+              "fields": [
+                "QUALIFIED_SIGNUPS_MTD"
+              ],
+              "version": 0
+            }
+          }
+        },
+        {
+          "queryPresentation": {
+            "id": "a6711218-e7a1-492e-8352-2596ea35252f",
+            "createdAt": "2026-02-02T16:44:57.858Z",
+            "updatedAt": "2026-02-02T16:44:57.858Z",
+            "type": "query",
+            "name": "\ud83d\udc10 Query",
+            "subTitle": null,
+            "description": "",
+            "organizationId": "2ec98ea6-a79b-43ad-a6b8-421484a0a8af",
+            "queryId": "1b0e8ab3-4edb-41b2-bbf9-7969557eaab0",
+            "miniUuid": "kf0F7A83",
+            "modelId": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+            "fileUploadId": null,
+            "prefersChart": true,
+            "automaticVis": true,
+            "visConfigId": "02e86421-599a-43cb-8d3e-852894a7b359",
+            "topicName": null,
+            "editingModelObjectName": null,
+            "editingModelObjectNameChange": null,
+            "filterOrder": [],
+            "isSql": true,
+            "resultConfig": {
+              "tableType": "spreadsheet",
+              "rowBanding": {
+                "enabled": false,
+                "bandSize": 1
+              },
+              "expandedRows": {},
+              "columnFormats": {
+                "QUALIFIED_RATE_PCT": {
+                  "align": "right"
+                }
+              },
+              "hideIndexColumn": false,
+              "truncateHeaders": true,
+              "showDescriptions": true,
+              "visColumnDisplay": "hide-view-name"
+            },
+            "aiConfig": {},
+            "sourceQueryPresentationTabIdx": null,
+            "allowedPrivateToWorkbookModelId": null,
+            "query": {
+              "id": "1b0e8ab3-4edb-41b2-bbf9-7969557eaab0",
+              "createdAt": "2026-02-02T16:44:58.070Z",
+              "jsonHash": "OZBWLpQMhSFhJOfTs6gMhk81voKeWMWdTdp5KhSpCcc=",
+              "modelId": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+              "queryJson": {
+                "limit": 1000,
+                "sorts": [],
+                "table": "identities_addendum",
+                "fields": [
+                  "identities_addendum.qualified_rate_pct"
+                ],
+                "parsed": true,
+                "pivots": [],
+                "dbtMode": false,
+                "filters": {},
+                "modelId": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+                "version": 8,
+                "controls": [],
+                "rewriteSql": false,
+                "row_totals": {},
+                "fill_fields": [],
+                "calculations": [],
+                "column_limit": 50,
+                "join_via_map": {},
+                "column_totals": {},
+                "userEditedSQL": "SELECT \n    ROUND(\n        100.0 * SUM(CASE WHEN email_type = 'Professional' THEN 1 ELSE 0 END) / \n        NULLIF(COUNT(*), 0)\n    , 1) AS qualified_rate_pct\nFROM TRAINING_DATABASE.PUBLIC.IDENTITIES_ADDENDUM\nWHERE created_at_utc >= DATE_TRUNC('month', CURRENT_DATE)\n  AND created_at_utc < CURRENT_DATE + 1\n  AND filtered_core = 'true'",
+                "dimensionIndex": 0,
+                "default_group_by": true,
+                "filtersUsedInSql": {},
+                "model_extension_id": "8de9e8ed-73ea-44bc-a913-cab24d53203a",
+                "custom_summary_types": {}
+              }
+            },
+            "visConfig": {
+              "id": "02e86421-599a-43cb-8d3e-852894a7b359",
+              "createdAt": "2026-01-13T00:28:34.854Z",
+              "visType": "omni-kpi",
+              "chartType": null,
+              "jsonHash": "sAlF9Er3Mv8FhSn+uUUYH5yGin9fPLCu7MCZ1h0GI10=",
+              "spec": {
+                "alignment": "left",
+                "fontKPISize": "",
+                "fontBodySize": "",
+                "fontLabelSize": "",
+                "markdownConfig": [
+                  {
+                    "id": "a3c3ad44-d7ef-4e31-b2bf-cd9a2dfb6554",
+                    "type": "number",
+                    "config": {
+                      "field": {
+                        "row": "_first",
+                        "field": {
+                          "name": "QUALIFIED_RATE_PCT",
+                          "pivotMap": {}
+                        },
+                        "label": {
+                          "value": "QUALIFIED RATE PCT"
+                        }
+                      },
+                      "descriptionBefore": ""
+                    },
+                    "lastModified": 1768264114553
+                  }
+                ],
+                "verticalAlignment": "top"
+              },
+              "fields": [
+                "QUALIFIED_RATE_PCT"
+              ],
+              "version": 0
+            }
+          }
+        },
+        {
+          "queryPresentation": {
+            "id": "41c9fc89-4935-49d6-ba2b-360baf90d531",
+            "createdAt": "2026-02-02T16:49:21.424Z",
+            "updatedAt": "2026-02-02T16:49:21.424Z",
+            "type": "query",
+            "name": "Monthly Breakdown - Qualified Sign Ups",
+            "subTitle": "",
+            "description": "",
+            "organizationId": "2ec98ea6-a79b-43ad-a6b8-421484a0a8af",
+            "queryId": "c8c24dbf-c859-4a75-add1-5e52e7b41602",
+            "miniUuid": "8osW6G18",
+            "modelId": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+            "fileUploadId": null,
+            "prefersChart": false,
+            "automaticVis": false,
+            "visConfigId": "27d7d9c7-139e-437b-bcc5-ea31d49c9e38",
+            "topicName": "dim_identities",
+            "editingModelObjectName": null,
+            "editingModelObjectNameChange": null,
+            "filterOrder": [
+              "int_identities.email_type",
+              "dim_identities.created_at_pt"
+            ],
+            "isSql": false,
+            "resultConfig": {
+              "tableType": "spreadsheet",
+              "rowBanding": {
+                "enabled": false,
+                "bandSize": 1
+              },
+              "expandedRows": {},
+              "hideIndexColumn": false,
+              "truncateHeaders": true,
+              "showDescriptions": true,
+              "visColumnDisplay": "hide-view-name"
+            },
+            "aiConfig": {},
+            "sourceQueryPresentationTabIdx": null,
+            "allowedPrivateToWorkbookModelId": null,
+            "query": {
+              "id": "c8c24dbf-c859-4a75-add1-5e52e7b41602",
+              "createdAt": "2026-02-02T16:47:14.199Z",
+              "jsonHash": "DQEL6duz94hkkvSMF9K9mjkcjgUN/imbuYGm2DQS2ZE=",
+              "modelId": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+              "queryJson": {
+                "limit": 1000,
+                "sorts": [
+                  {
+                    "column_name": "dim_identities.created_at_pt[month]",
+                    "sort_descending": true
+                  }
+                ],
+                "table": "dim_identities",
+                "fields": [
+                  "dim_identities.created_at_pt[month]",
+                  "fct_customer_daily_ts.num_of_signups"
+                ],
+                "pivots": [],
+                "dbtMode": false,
+                "filters": {
+                  "int_identities.email_type": {
+                    "kind": "EQUALS",
+                    "type": "string",
+                    "values": [
+                      "Professional"
+                    ],
+                    "is_negative": false,
+                    "appliedLabels": {}
+                  },
+                  "dim_identities.created_at_pt": {
+                    "kind": "TIME_FOR_INTERVAL_DURATION",
+                    "type": "date",
+                    "ui_type": "PAST",
+                    "isFiscal": false,
+                    "left_side": "3 months ago",
+                    "right_side": "3 months",
+                    "is_negative": false,
+                    "offset_interval_string": null
+                  }
+                },
+                "modelId": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+                "version": 8,
+                "manualSort": true,
+                "rewriteSql": true,
+                "row_totals": {},
+                "fill_fields": [],
+                "calculations": [],
+                "column_limit": 50,
+                "join_via_map": {},
+                "column_totals": {},
+                "userEditedSQL": "",
+                "dimensionIndex": 1,
+                "default_group_by": true,
+                "custom_summary_types": {},
+                "join_paths_from_topic_name": "dim_identities"
+              }
+            },
+            "visConfig": {
+              "id": "27d7d9c7-139e-437b-bcc5-ea31d49c9e38",
+              "createdAt": "2023-03-21T21:03:05.786Z",
+              "visType": null,
+              "chartType": null,
+              "jsonHash": "RBNvo1WzZ4oRRq0W9+hknpT7T8If536DEMBg9hyq/4o=",
+              "spec": {},
+              "fields": [],
+              "version": 0
+            }
+          }
+        }
+      ]
+    },
+    "queryPresentationCollectionId": "7a2ad88e-7fbf-4f81-9f14-7686821d2800",
+    "refreshInterval": null,
+    "updater": {
+      "id": "fcaaa5bf-cd8e-467e-af49-14113519f31b",
+      "name": "Ryan Kaldani"
+    },
+    "metadata": {
+      "hiddenTiles": [],
+      "layouts": {
+        "lg": [
+          {
+            "i": "1",
+            "h": 29,
+            "w": 6,
+            "x": 0,
+            "y": 17,
+            "moved": false,
+            "static": false
+          },
+          {
+            "i": "2",
+            "h": 17,
+            "w": 2,
+            "x": 0,
+            "y": 0,
+            "moved": false,
+            "static": false
+          },
+          {
+            "i": "3",
+            "h": 17,
+            "w": 2,
+            "x": 2,
+            "y": 0,
+            "moved": false,
+            "static": false
+          },
+          {
+            "i": "4",
+            "h": 17,
+            "w": 2,
+            "x": 4,
+            "y": 0,
+            "moved": false,
+            "static": false
+          },
+          {
+            "i": "5",
+            "h": 46,
+            "w": 7,
+            "x": 6,
+            "y": 0,
+            "moved": false,
+            "static": false
+          }
+        ],
+        "sm": [
+          {
+            "i": "1",
+            "h": 51,
+            "w": 1,
+            "x": 0,
+            "y": 0,
+            "moved": false,
+            "static": false
+          },
+          {
+            "i": "2",
+            "h": 51,
+            "w": 1,
+            "x": 0,
+            "y": 51
+          },
+          {
+            "i": "3",
+            "h": 51,
+            "w": 1,
+            "x": 0,
+            "y": 102
+          },
+          {
+            "i": "4",
+            "h": 51,
+            "w": 1,
+            "x": 0,
+            "y": 153
+          },
+          {
+            "i": "5",
+            "h": 51,
+            "w": 1,
+            "x": 0,
+            "y": 204
+          }
+        ]
+      },
+      "textTiles": [],
+      "tileControlMap": {},
+      "tileFilterMap": {},
+      "tileSettings": {}
+    },
+    "metadataVersion": 2,
+    "ephemeral": "1:MmQbWrTU,5:8osW6G18,2:tDyZwE0L,3:tqMCuVj4,4:kf0F7A83",
+    "identifier": "3147c4ef",
+    "model": {
+      "baseModelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+      "connectionId": "ac96c9fd-a1a3-4399-b71d-e73e3fb94043",
+      "deletedAt": null,
+      "id": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+      "modelKind": "WORKBOOK"
+    },
+    "modelId": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+    "name": "PLG Sign-Ups: Qualified Vs. Total",
+    "sharedModelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+    "workbook": {
+      "identifier": "3147c4ef",
+      "organizationRole": "VIEWER",
+      "folder": {
+        "id": "c2f4eac2-a41b-4eb1-94c7-77af483ca1af",
+        "name": "Marketing",
+        "organizationRole": "VIEWER",
+        "path": "marketing",
+        "scope": "organization"
+      }
+    },
+    "workbookId": "f3407216-702e-4d8f-b5b3-d28284f0e791"
+  },
+  "document": {
+    "baseModel": {
+      "baseModelId": "ac96c9fd-a1a3-4399-b71d-e73e3fb94043",
+      "disableAutoSync": null,
+      "gitFollower": false,
+      "gitInSync": null,
+      "hasGit": false,
+      "id": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+      "modelKind": "SHARED",
+      "name": "Lindy Snowflake",
+      "pullRequestRequired": false
+    },
+    "connection": {
+      "allowBranchConnectionEnvironments": true,
+      "branchConnectionEnvironmentOverridesUserAttr": false,
+      "database": "TRAINING_DATABASE",
+      "deletedAt": null,
+      "dialect": "snowflake",
+      "environmentConnectionSwitchesSchemaModel": false,
+      "id": "ac96c9fd-a1a3-4399-b71d-e73e3fb94043",
+      "includeOtherCatalogs": [
+        "dbt_dev"
+      ],
+      "name": "Lindy Snowflake",
+      "userAttributeValuesForDefaultEnvironment": null,
+      "connectionEnvironments": null,
+      "userAttributeNameForConnectionEnvironments": null
+    },
+    "connectionId": "ac96c9fd-a1a3-4399-b71d-e73e3fb94043",
+    "createdAt": "2026-02-02T16:44:58.103Z",
+    "deletedAt": null,
+    "documentId": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+    "identifier": "3147c4ef",
+    "isConnectionDeleted": false,
+    "isDeleted": false,
+    "lastItemIndex": 5,
+    "modelId": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+    "owner": {
+      "id": "ab9b9e6b-d10d-4249-a77d-886a06a23ac7",
+      "name": "Inaan Damaraju"
+    },
+    "sharedModelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+    "updatedAt": "2026-02-02T16:49:21.472Z",
+    "updater": {
+      "id": "fcaaa5bf-cd8e-467e-af49-14113519f31b",
+      "name": "Ryan Kaldani"
+    },
+    "workbookId": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+    "dashboardId": "a6e4d47e-0426-44a6-88a9-6d6863521789",
+    "dashboardMiniUuid": "3147c4ef",
+    "hasDashboard": true,
+    "ephemeral": "1:MmQbWrTU,5:8osW6G18,2:tDyZwE0L,3:tqMCuVj4,4:kf0F7A83",
+    "folder": {
+      "id": "c2f4eac2-a41b-4eb1-94c7-77af483ca1af",
+      "name": "Marketing",
+      "path": "marketing",
+      "scope": "organization"
+    },
+    "isDocument": true,
+    "isDraft": false,
+    "name": "PLG Sign-Ups: Qualified Vs. Total",
+    "publishedAt": "2026-02-02T16:49:54.021Z",
+    "scope": "organization",
+    "type": "published"
+  },
+  "exportVersion": "0.1",
+  "fileUploads": {},
+  "queryModels": {
+    "10fb8b91-5676-4109-86c2-a258ad6a0d20": {
+      "id": "10fb8b91-5676-4109-86c2-a258ad6a0d20",
+      "connection_id": "ac96c9fd-a1a3-4399-b71d-e73e3fb94043",
+      "views": [
+        {
+          "name": "mtd_signups",
+          "dimensions": [
+            {
+              "field_name": "qualified_pct",
+              "view_name": "mtd_signups",
+              "data_type": "UNKNOWN",
+              "expr": {
+                "type": "call",
+                "operator": "SqlStdOperatorTable.ROUND",
+                "operands": [
+                  {
+                    "type": "call",
+                    "operator": "SqlStdOperatorTable.DIVIDE",
+                    "operands": [
+                      {
+                        "type": "call",
+                        "operator": "SqlStdOperatorTable.MULTIPLY",
+                        "operands": [
+                          {
+                            "type": "reference",
+                            "column_ref": [
+                              "identities_addendum.qualified_signups"
+                            ],
+                            "is_default_alias_scoped": true
+                          },
+                          {
+                            "type": "literal",
+                            "value": 100,
+                            "string_value": "100.0"
+                          }
+                        ],
+                        "distinct": false
+                      },
+                      {
+                        "type": "call",
+                        "operator": "SqlStdOperatorTable.NULLIF",
+                        "operands": [
+                          {
+                            "type": "reference",
+                            "column_ref": [
+                              "identities_addendum.total_signups"
+                            ],
+                            "is_default_alias_scoped": true
+                          },
+                          {
+                            "type": "literal",
+                            "value": 0,
+                            "string_value": "0"
+                          }
+                        ],
+                        "distinct": false
+                      }
+                    ],
+                    "distinct": false
+                  },
+                  {
+                    "type": "literal",
+                    "value": 1,
+                    "string_value": "1"
+                  }
+                ],
+                "distinct": false
+              },
+              "sql": "ROUND(\"identities_addendum.qualified_signups\" * 100.0 / NULLIF(\"identities_addendum.total_signups\", 0), 1)",
+              "extension_model_id": "10fb8b91-5676-4109-86c2-a258ad6a0d20",
+              "is_dimension": true,
+              "fully_qualified_name": "mtd_signups.qualified_pct"
+            },
+            {
+              "field_name": "qualified_signups",
+              "view_name": "mtd_signups",
+              "data_type": "UNKNOWN",
+              "expr": {
+                "type": "reference",
+                "column_ref": [
+                  "identities_addendum.qualified_signups"
+                ],
+                "is_default_alias_scoped": true
+              },
+              "sql": "\"identities_addendum.qualified_signups\"",
+              "extension_model_id": "10fb8b91-5676-4109-86c2-a258ad6a0d20",
+              "is_dimension": true,
+              "fully_qualified_name": "mtd_signups.qualified_signups"
+            },
+            {
+              "field_name": "total_signups",
+              "view_name": "mtd_signups",
+              "data_type": "UNKNOWN",
+              "expr": {
+                "type": "reference",
+                "column_ref": [
+                  "identities_addendum.total_signups"
+                ],
+                "is_default_alias_scoped": true
+              },
+              "sql": "\"identities_addendum.total_signups\"",
+              "extension_model_id": "10fb8b91-5676-4109-86c2-a258ad6a0d20",
+              "is_dimension": true,
+              "fully_qualified_name": "mtd_signups.total_signups"
+            },
+            {
+              "field_name": "week_start",
+              "view_name": "mtd_signups",
+              "data_type": "UNKNOWN",
+              "expr": {
+                "type": "reference",
+                "column_ref": [
+                  "identities_addendum.week_start"
+                ],
+                "is_default_alias_scoped": true
+              },
+              "sql": "\"identities_addendum.week_start\"",
+              "extension_model_id": "10fb8b91-5676-4109-86c2-a258ad6a0d20",
+              "is_dimension": true,
+              "fully_qualified_name": "mtd_signups.week_start"
+            }
+          ],
+          "measures": [],
+          "query": {
+            "table": "identities_addendum",
+            "fields": [
+              "identities_addendum.week_start",
+              "identities_addendum.total_signups",
+              "identities_addendum.qualified_signups"
+            ],
+            "calculations": [],
+            "filters": {
+              "identities_addendum.custom_field_0": {
+                "type": "boolean",
+                "is_negative": false,
+                "treat_nulls_as_false": false
+              }
+            },
+            "sorts": [],
+            "pivots": [],
+            "fill_fields": [],
+            "column_totals": {},
+            "row_totals": {},
+            "default_group_by": true,
+            "join_via_map": {}
+          },
+          "label": "Mtd Signups",
+          "extension_model_id": "10fb8b91-5676-4109-86c2-a258ad6a0d20",
+          "ide_file_name": "mtd_signups.query.view",
+          "ignored_props": [
+            "TABLE_NAME",
+            "TYPED_SQL"
+          ],
+          "filter_only_fields": [],
+          "is_pseudo_display_view": false,
+          "yaml_path": "mtd_signups.view"
+        },
+        {
+          "name": "identities_addendum",
+          "dimensions": [
+            {
+              "field_name": "custom_field_0",
+              "view_name": "identities_addendum",
+              "data_type": "BOOLEAN",
+              "expr": {
+                "type": "call",
+                "operator": "SqlStdOperatorTable.AND",
+                "operands": [
+                  {
+                    "type": "call",
+                    "operator": "SqlStdOperatorTable.AND",
+                    "operands": [
+                      {
+                        "type": "call",
+                        "operator": "SqlStdOperatorTable.GREATER_THAN_OR_EQUAL",
+                        "operands": [
+                          {
+                            "type": "field",
+                            "field_name": "identities_addendum.created_at_utc"
+                          },
+                          {
+                            "type": "call",
+                            "operator": "CustomDialectOperators.DATE_TRUNC1",
+                            "operands": [
+                              {
+                                "type": "literal",
+                                "value": "month"
+                              },
+                              {
+                                "type": "call",
+                                "operator": "SqlStdOperatorTable.CURRENT_DATE",
+                                "operands": [],
+                                "distinct": false
+                              }
+                            ],
+                            "distinct": false
+                          }
+                        ],
+                        "distinct": false
+                      },
+                      {
+                        "type": "call",
+                        "operator": "SqlStdOperatorTable.LESS_THAN",
+                        "operands": [
+                          {
+                            "type": "field",
+                            "field_name": "identities_addendum.created_at_utc"
+                          },
+                          {
+                            "type": "call",
+                            "operator": "SqlStdOperatorTable.PLUS",
+                            "operands": [
+                              {
+                                "type": "call",
+                                "operator": "SqlStdOperatorTable.CURRENT_DATE",
+                                "operands": [],
+                                "distinct": false
+                              },
+                              {
+                                "type": "literal",
+                                "value": 1,
+                                "string_value": "1"
+                              }
+                            ],
+                            "distinct": false
+                          }
+                        ],
+                        "distinct": false
+                      }
+                    ],
+                    "distinct": false
+                  },
+                  {
+                    "type": "call",
+                    "operator": "SqlStdOperatorTable.EQUALS",
+                    "operands": [
+                      {
+                        "type": "field",
+                        "field_name": "identities_addendum.filtered_core"
+                      },
+                      {
+                        "type": "literal",
+                        "value": "true"
+                      }
+                    ],
+                    "distinct": false
+                  }
+                ],
+                "distinct": false
+              },
+              "sql": "${identities_addendum.created_at_utc} >= DATE_TRUNC('month', CURRENT_DATE) AND ${identities_addendum.created_at_utc} < CURRENT_DATE + 1 AND ${identities_addendum.filtered_core} = 'true'",
+              "extension_model_id": "10fb8b91-5676-4109-86c2-a258ad6a0d20",
+              "is_dimension": true,
+              "fully_qualified_name": "identities_addendum.custom_field_0"
+            },
+            {
+              "field_name": "week_start",
+              "view_name": "identities_addendum",
+              "data_type": "UNKNOWN",
+              "expr": {
+                "type": "call",
+                "operator": "SqlLibraryOperators.INFIX_CAST",
+                "operands": [
+                  {
+                    "type": "call",
+                    "operator": "CustomDialectOperators.DATE_TRUNC1",
+                    "operands": [
+                      {
+                        "type": "literal",
+                        "value": "week"
+                      },
+                      {
+                        "type": "field",
+                        "field_name": "identities_addendum.created_at_utc"
+                      }
+                    ],
+                    "distinct": false
+                  },
+                  {
+                    "type": "sql_type",
+                    "type_name_name": "DATE",
+                    "precision": -1,
+                    "scale": -2147483648
+                  }
+                ],
+                "distinct": false
+              },
+              "sql": "DATE_TRUNC('week', ${identities_addendum.created_at_utc}) :: DATE",
+              "extension_model_id": "10fb8b91-5676-4109-86c2-a258ad6a0d20",
+              "is_dimension": true,
+              "fully_qualified_name": "identities_addendum.week_start"
+            }
+          ],
+          "measures": [
+            {
+              "type": "metric",
+              "field_name": "qualified_signups",
+              "view_name": "identities_addendum",
+              "expr": {
+                "type": "call",
+                "operator": "SqlStdOperatorTable.SUM",
+                "operands": [
+                  {
+                    "type": "call",
+                    "operator": "SqlStdOperatorTable.CASE",
+                    "operands": [
+                      {
+                        "type": "call",
+                        "operator": "SqlStdOperatorTable.EQUALS",
+                        "operands": [
+                          {
+                            "type": "field",
+                            "field_name": "identities_addendum.email_type"
+                          },
+                          {
+                            "type": "literal",
+                            "value": "Professional"
+                          }
+                        ],
+                        "distinct": false
+                      },
+                      {
+                        "type": "literal",
+                        "value": 1,
+                        "string_value": "1"
+                      },
+                      {
+                        "type": "literal",
+                        "value": 0,
+                        "string_value": "0"
+                      }
+                    ],
+                    "distinct": false
+                  }
+                ],
+                "distinct": false
+              },
+              "data_type": "UNKNOWN",
+              "sql": "SUM(CASE WHEN ${identities_addendum.email_type} = 'Professional' THEN 1 ELSE 0 END)",
+              "ignored": false,
+              "extension_model_id": "10fb8b91-5676-4109-86c2-a258ad6a0d20",
+              "fully_qualified_name": "identities_addendum.qualified_signups"
+            },
+            {
+              "type": "aggregation",
+              "field_name": "total_signups",
+              "view_name": "identities_addendum",
+              "aggregate_type": "COUNT",
+              "data_type": "NUMBER",
+              "ignored": false,
+              "label": "Total Signups",
+              "format": "NUMBER_0",
+              "extension_model_id": "10fb8b91-5676-4109-86c2-a258ad6a0d20",
+              "display_sql": "COUNT(*)",
+              "fully_qualified_name": "identities_addendum.total_signups"
+            }
+          ],
+          "schema": "PUBLIC",
+          "schema_label": "PUBLIC",
+          "label": "Identities Addendum",
+          "extension_model_id": "10fb8b91-5676-4109-86c2-a258ad6a0d20",
+          "ide_file_name": "PUBLIC/identities_addendum.view",
+          "filter_only_fields": [],
+          "is_pseudo_display_view": false,
+          "yaml_path": "identities_addendum.view"
+        }
+      ],
+      "relationships": [],
+      "model_kind": "QUERY",
+      "base_model_id": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+      "topics": [],
+      "ignored_schemas": [],
+      "ignored_views": [],
+      "all_schema_names": [
+        "PUBLIC"
+      ],
+      "virtualized_schemas": [],
+      "deleted_topics": [],
+      "dbt_virtualization_enabled": true
+    },
+    "64312ad0-2d71-44d8-b980-12901d83b62c": {
+      "id": "64312ad0-2d71-44d8-b980-12901d83b62c",
+      "connection_id": "ac96c9fd-a1a3-4399-b71d-e73e3fb94043",
+      "views": [
+        {
+          "name": "identities_addendum",
+          "dimensions": [
+            {
+              "field_name": "custom_field_0",
+              "view_name": "identities_addendum",
+              "data_type": "BOOLEAN",
+              "expr": {
+                "type": "call",
+                "operator": "SqlStdOperatorTable.AND",
+                "operands": [
+                  {
+                    "type": "call",
+                    "operator": "SqlStdOperatorTable.AND",
+                    "operands": [
+                      {
+                        "type": "call",
+                        "operator": "SqlStdOperatorTable.GREATER_THAN_OR_EQUAL",
+                        "operands": [
+                          {
+                            "type": "field",
+                            "field_name": "identities_addendum.created_at_utc"
+                          },
+                          {
+                            "type": "call",
+                            "operator": "CustomDialectOperators.DATE_TRUNC1",
+                            "operands": [
+                              {
+                                "type": "literal",
+                                "value": "month"
+                              },
+                              {
+                                "type": "call",
+                                "operator": "SqlStdOperatorTable.CURRENT_DATE",
+                                "operands": [],
+                                "distinct": false
+                              }
+                            ],
+                            "distinct": false
+                          }
+                        ],
+                        "distinct": false
+                      },
+                      {
+                        "type": "call",
+                        "operator": "SqlStdOperatorTable.LESS_THAN",
+                        "operands": [
+                          {
+                            "type": "field",
+                            "field_name": "identities_addendum.created_at_utc"
+                          },
+                          {
+                            "type": "call",
+                            "operator": "SqlStdOperatorTable.PLUS",
+                            "operands": [
+                              {
+                                "type": "call",
+                                "operator": "SqlStdOperatorTable.CURRENT_DATE",
+                                "operands": [],
+                                "distinct": false
+                              },
+                              {
+                                "type": "literal",
+                                "value": 1,
+                                "string_value": "1"
+                              }
+                            ],
+                            "distinct": false
+                          }
+                        ],
+                        "distinct": false
+                      }
+                    ],
+                    "distinct": false
+                  },
+                  {
+                    "type": "call",
+                    "operator": "SqlStdOperatorTable.EQUALS",
+                    "operands": [
+                      {
+                        "type": "field",
+                        "field_name": "identities_addendum.filtered_core"
+                      },
+                      {
+                        "type": "literal",
+                        "value": "true"
+                      }
+                    ],
+                    "distinct": false
+                  }
+                ],
+                "distinct": false
+              },
+              "sql": "${identities_addendum.created_at_utc} >= DATE_TRUNC('month', CURRENT_DATE) AND ${identities_addendum.created_at_utc} < CURRENT_DATE + 1 AND ${identities_addendum.filtered_core} = 'true'",
+              "extension_model_id": "64312ad0-2d71-44d8-b980-12901d83b62c",
+              "is_dimension": true,
+              "fully_qualified_name": "identities_addendum.custom_field_0"
+            }
+          ],
+          "measures": [
+            {
+              "type": "aggregation",
+              "field_name": "total_signups_mtd",
+              "view_name": "identities_addendum",
+              "aggregate_type": "COUNT",
+              "data_type": "NUMBER",
+              "ignored": false,
+              "label": "Total Signups Mtd",
+              "format": "NUMBER_0",
+              "extension_model_id": "64312ad0-2d71-44d8-b980-12901d83b62c",
+              "display_sql": "COUNT(*)",
+              "fully_qualified_name": "identities_addendum.total_signups_mtd"
+            }
+          ],
+          "schema": "PUBLIC",
+          "schema_label": "PUBLIC",
+          "label": "Identities Addendum",
+          "extension_model_id": "64312ad0-2d71-44d8-b980-12901d83b62c",
+          "ide_file_name": "PUBLIC/identities_addendum.view",
+          "filter_only_fields": [],
+          "is_pseudo_display_view": false,
+          "yaml_path": "identities_addendum.view"
+        }
+      ],
+      "relationships": [],
+      "model_kind": "QUERY",
+      "base_model_id": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+      "topics": [],
+      "ignored_schemas": [],
+      "ignored_views": [],
+      "all_schema_names": [
+        "PUBLIC"
+      ],
+      "virtualized_schemas": [],
+      "deleted_topics": [],
+      "dbt_virtualization_enabled": true
+    },
+    "734caad3-27e8-4cfc-91bd-e8063f9b36d5": {
+      "id": "734caad3-27e8-4cfc-91bd-e8063f9b36d5",
+      "connection_id": "ac96c9fd-a1a3-4399-b71d-e73e3fb94043",
+      "views": [
+        {
+          "name": "identities_addendum",
+          "dimensions": [
+            {
+              "field_name": "custom_field_0",
+              "view_name": "identities_addendum",
+              "data_type": "BOOLEAN",
+              "expr": {
+                "type": "call",
+                "operator": "SqlStdOperatorTable.AND",
+                "operands": [
+                  {
+                    "type": "call",
+                    "operator": "SqlStdOperatorTable.AND",
+                    "operands": [
+                      {
+                        "type": "call",
+                        "operator": "SqlStdOperatorTable.GREATER_THAN_OR_EQUAL",
+                        "operands": [
+                          {
+                            "type": "field",
+                            "field_name": "identities_addendum.created_at_utc"
+                          },
+                          {
+                            "type": "call",
+                            "operator": "CustomDialectOperators.DATE_TRUNC1",
+                            "operands": [
+                              {
+                                "type": "literal",
+                                "value": "month"
+                              },
+                              {
+                                "type": "call",
+                                "operator": "SqlStdOperatorTable.CURRENT_DATE",
+                                "operands": [],
+                                "distinct": false
+                              }
+                            ],
+                            "distinct": false
+                          }
+                        ],
+                        "distinct": false
+                      },
+                      {
+                        "type": "call",
+                        "operator": "SqlStdOperatorTable.LESS_THAN",
+                        "operands": [
+                          {
+                            "type": "field",
+                            "field_name": "identities_addendum.created_at_utc"
+                          },
+                          {
+                            "type": "call",
+                            "operator": "SqlStdOperatorTable.PLUS",
+                            "operands": [
+                              {
+                                "type": "call",
+                                "operator": "SqlStdOperatorTable.CURRENT_DATE",
+                                "operands": [],
+                                "distinct": false
+                              },
+                              {
+                                "type": "literal",
+                                "value": 1,
+                                "string_value": "1"
+                              }
+                            ],
+                            "distinct": false
+                          }
+                        ],
+                        "distinct": false
+                      }
+                    ],
+                    "distinct": false
+                  },
+                  {
+                    "type": "call",
+                    "operator": "SqlStdOperatorTable.EQUALS",
+                    "operands": [
+                      {
+                        "type": "field",
+                        "field_name": "identities_addendum.filtered_core"
+                      },
+                      {
+                        "type": "literal",
+                        "value": "true"
+                      }
+                    ],
+                    "distinct": false
+                  }
+                ],
+                "distinct": false
+              },
+              "sql": "${identities_addendum.created_at_utc} >= DATE_TRUNC('month', CURRENT_DATE) AND ${identities_addendum.created_at_utc} < CURRENT_DATE + 1 AND ${identities_addendum.filtered_core} = 'true'",
+              "extension_model_id": "734caad3-27e8-4cfc-91bd-e8063f9b36d5",
+              "is_dimension": true,
+              "fully_qualified_name": "identities_addendum.custom_field_0"
+            }
+          ],
+          "measures": [
+            {
+              "type": "metric",
+              "field_name": "qualified_signups_mtd",
+              "view_name": "identities_addendum",
+              "expr": {
+                "type": "call",
+                "operator": "SqlStdOperatorTable.SUM",
+                "operands": [
+                  {
+                    "type": "call",
+                    "operator": "SqlStdOperatorTable.CASE",
+                    "operands": [
+                      {
+                        "type": "call",
+                        "operator": "SqlStdOperatorTable.EQUALS",
+                        "operands": [
+                          {
+                            "type": "field",
+                            "field_name": "identities_addendum.email_type"
+                          },
+                          {
+                            "type": "literal",
+                            "value": "Professional"
+                          }
+                        ],
+                        "distinct": false
+                      },
+                      {
+                        "type": "literal",
+                        "value": 1,
+                        "string_value": "1"
+                      },
+                      {
+                        "type": "literal",
+                        "value": 0,
+                        "string_value": "0"
+                      }
+                    ],
+                    "distinct": false
+                  }
+                ],
+                "distinct": false
+              },
+              "data_type": "UNKNOWN",
+              "sql": "SUM(CASE WHEN ${identities_addendum.email_type} = 'Professional' THEN 1 ELSE 0 END)",
+              "ignored": false,
+              "extension_model_id": "734caad3-27e8-4cfc-91bd-e8063f9b36d5",
+              "fully_qualified_name": "identities_addendum.qualified_signups_mtd"
+            }
+          ],
+          "schema": "PUBLIC",
+          "schema_label": "PUBLIC",
+          "label": "Identities Addendum",
+          "extension_model_id": "734caad3-27e8-4cfc-91bd-e8063f9b36d5",
+          "ide_file_name": "PUBLIC/identities_addendum.view",
+          "filter_only_fields": [],
+          "is_pseudo_display_view": false,
+          "yaml_path": "identities_addendum.view"
+        }
+      ],
+      "relationships": [],
+      "model_kind": "QUERY",
+      "base_model_id": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+      "topics": [],
+      "ignored_schemas": [],
+      "ignored_views": [],
+      "all_schema_names": [
+        "PUBLIC"
+      ],
+      "virtualized_schemas": [],
+      "deleted_topics": [],
+      "dbt_virtualization_enabled": true
+    },
+    "8de9e8ed-73ea-44bc-a913-cab24d53203a": {
+      "id": "8de9e8ed-73ea-44bc-a913-cab24d53203a",
+      "connection_id": "ac96c9fd-a1a3-4399-b71d-e73e3fb94043",
+      "views": [
+        {
+          "name": "identities_addendum",
+          "dimensions": [
+            {
+              "field_name": "custom_field_0",
+              "view_name": "identities_addendum",
+              "data_type": "BOOLEAN",
+              "expr": {
+                "type": "call",
+                "operator": "SqlStdOperatorTable.AND",
+                "operands": [
+                  {
+                    "type": "call",
+                    "operator": "SqlStdOperatorTable.AND",
+                    "operands": [
+                      {
+                        "type": "call",
+                        "operator": "SqlStdOperatorTable.GREATER_THAN_OR_EQUAL",
+                        "operands": [
+                          {
+                            "type": "field",
+                            "field_name": "identities_addendum.created_at_utc"
+                          },
+                          {
+                            "type": "call",
+                            "operator": "CustomDialectOperators.DATE_TRUNC1",
+                            "operands": [
+                              {
+                                "type": "literal",
+                                "value": "month"
+                              },
+                              {
+                                "type": "call",
+                                "operator": "SqlStdOperatorTable.CURRENT_DATE",
+                                "operands": [],
+                                "distinct": false
+                              }
+                            ],
+                            "distinct": false
+                          }
+                        ],
+                        "distinct": false
+                      },
+                      {
+                        "type": "call",
+                        "operator": "SqlStdOperatorTable.LESS_THAN",
+                        "operands": [
+                          {
+                            "type": "field",
+                            "field_name": "identities_addendum.created_at_utc"
+                          },
+                          {
+                            "type": "call",
+                            "operator": "SqlStdOperatorTable.PLUS",
+                            "operands": [
+                              {
+                                "type": "call",
+                                "operator": "SqlStdOperatorTable.CURRENT_DATE",
+                                "operands": [],
+                                "distinct": false
+                              },
+                              {
+                                "type": "literal",
+                                "value": 1,
+                                "string_value": "1"
+                              }
+                            ],
+                            "distinct": false
+                          }
+                        ],
+                        "distinct": false
+                      }
+                    ],
+                    "distinct": false
+                  },
+                  {
+                    "type": "call",
+                    "operator": "SqlStdOperatorTable.EQUALS",
+                    "operands": [
+                      {
+                        "type": "field",
+                        "field_name": "identities_addendum.filtered_core"
+                      },
+                      {
+                        "type": "literal",
+                        "value": "true"
+                      }
+                    ],
+                    "distinct": false
+                  }
+                ],
+                "distinct": false
+              },
+              "sql": "${identities_addendum.created_at_utc} >= DATE_TRUNC('month', CURRENT_DATE) AND ${identities_addendum.created_at_utc} < CURRENT_DATE + 1 AND ${identities_addendum.filtered_core} = 'true'",
+              "extension_model_id": "8de9e8ed-73ea-44bc-a913-cab24d53203a",
+              "is_dimension": true,
+              "fully_qualified_name": "identities_addendum.custom_field_0"
+            }
+          ],
+          "measures": [
+            {
+              "type": "metric",
+              "field_name": "qualified_rate_pct",
+              "view_name": "identities_addendum",
+              "expr": {
+                "type": "call",
+                "operator": "SqlStdOperatorTable.ROUND",
+                "operands": [
+                  {
+                    "type": "call",
+                    "operator": "SqlStdOperatorTable.DIVIDE",
+                    "operands": [
+                      {
+                        "type": "call",
+                        "operator": "SqlStdOperatorTable.MULTIPLY",
+                        "operands": [
+                          {
+                            "type": "literal",
+                            "value": 100,
+                            "string_value": "100.0"
+                          },
+                          {
+                            "type": "call",
+                            "operator": "SqlStdOperatorTable.SUM",
+                            "operands": [
+                              {
+                                "type": "call",
+                                "operator": "SqlStdOperatorTable.CASE",
+                                "operands": [
+                                  {
+                                    "type": "call",
+                                    "operator": "SqlStdOperatorTable.EQUALS",
+                                    "operands": [
+                                      {
+                                        "type": "field",
+                                        "field_name": "identities_addendum.email_type"
+                                      },
+                                      {
+                                        "type": "literal",
+                                        "value": "Professional"
+                                      }
+                                    ],
+                                    "distinct": false
+                                  },
+                                  {
+                                    "type": "literal",
+                                    "value": 1,
+                                    "string_value": "1"
+                                  },
+                                  {
+                                    "type": "literal",
+                                    "value": 0,
+                                    "string_value": "0"
+                                  }
+                                ],
+                                "distinct": false
+                              }
+                            ],
+                            "distinct": false
+                          }
+                        ],
+                        "distinct": false
+                      },
+                      {
+                        "type": "call",
+                        "operator": "SqlStdOperatorTable.NULLIF",
+                        "operands": [
+                          {
+                            "type": "call",
+                            "operator": "SqlStdOperatorTable.COUNT",
+                            "operands": [],
+                            "distinct": false
+                          },
+                          {
+                            "type": "literal",
+                            "value": 0,
+                            "string_value": "0"
+                          }
+                        ],
+                        "distinct": false
+                      }
+                    ],
+                    "distinct": false
+                  },
+                  {
+                    "type": "literal",
+                    "value": 1,
+                    "string_value": "1"
+                  }
+                ],
+                "distinct": false
+              },
+              "data_type": "UNKNOWN",
+              "sql": "ROUND(100.0 * SUM(CASE WHEN ${identities_addendum.email_type} = 'Professional' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 1)",
+              "ignored": false,
+              "extension_model_id": "8de9e8ed-73ea-44bc-a913-cab24d53203a",
+              "fully_qualified_name": "identities_addendum.qualified_rate_pct"
+            }
+          ],
+          "schema": "PUBLIC",
+          "schema_label": "PUBLIC",
+          "label": "Identities Addendum",
+          "extension_model_id": "8de9e8ed-73ea-44bc-a913-cab24d53203a",
+          "ide_file_name": "PUBLIC/identities_addendum.view",
+          "filter_only_fields": [],
+          "is_pseudo_display_view": false,
+          "yaml_path": "identities_addendum.view"
+        }
+      ],
+      "relationships": [],
+      "model_kind": "QUERY",
+      "base_model_id": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+      "topics": [],
+      "ignored_schemas": [],
+      "ignored_views": [],
+      "all_schema_names": [
+        "PUBLIC"
+      ],
+      "virtualized_schemas": [],
+      "deleted_topics": [],
+      "dbt_virtualization_enabled": true
+    }
+  },
+  "workbookModel": {
+    "id": "f3407216-702e-4d8f-b5b3-d28284f0e791",
+    "connection_id": "ac96c9fd-a1a3-4399-b71d-e73e3fb94043",
+    "views": [],
+    "relationships": [],
+    "model_kind": "WORKBOOK",
+    "base_model_id": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+    "topics": [],
+    "ignored_schemas": [],
+    "ignored_views": [],
+    "all_schema_names": [],
+    "virtualized_schemas": [],
+    "deleted_topics": [],
+    "dbt_virtualization_enabled": true
+  }
+}

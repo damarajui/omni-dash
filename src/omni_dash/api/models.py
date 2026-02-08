@@ -11,6 +11,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from omni_dash.api.client import OmniClient
+from omni_dash.api.documents import _extract_records
 from omni_dash.exceptions import ModelNotFoundError, OmniAPIError
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,8 @@ class OmniModel(BaseModel):
     connection_id: str = ""
     database: str = ""
     schema_name: str = ""
+    model_kind: str = ""
+    base_model_id: str = ""
 
 
 class TopicSummary(BaseModel):
@@ -61,23 +64,38 @@ class ModelService:
         self._cache_ts: float = 0.0
 
     def list_models(self) -> list[OmniModel]:
-        """List all models in the organization."""
-        result = self._client.get("/api/v1/models")
-        if not result:
-            return []
+        """List all models in the organization.
 
-        models_data = result if isinstance(result, list) else result.get("models", [])
+        Handles the paginated ``{pageInfo, records}`` response format.
+        """
+        params: dict[str, str] = {"pageSize": "100"}
+        all_models: list[OmniModel] = []
+        while True:
+            result = self._client.get("/api/v1/models", params=params)
+            if not result:
+                break
 
-        return [
-            OmniModel(
-                id=m.get("id", ""),
-                name=m.get("name", ""),
-                connection_id=m.get("connectionId", ""),
-                database=m.get("database", ""),
-                schema_name=m.get("schemaName", m.get("schema", "")),
-            )
-            for m in models_data
-        ]
+            models_data = _extract_records(result)
+            for m in models_data:
+                all_models.append(
+                    OmniModel(
+                        id=m.get("id", ""),
+                        name=m.get("name") or "",
+                        connection_id=m.get("connectionId", ""),
+                        database=m.get("database") or "",
+                        schema_name=m.get("schemaName") or m.get("schema") or "",
+                        model_kind=m.get("modelKind") or "",
+                        base_model_id=m.get("baseModelId") or "",
+                    )
+                )
+
+            page_info = result.get("pageInfo", {}) if isinstance(result, dict) else {}
+            if page_info.get("hasNextPage") and page_info.get("nextCursor"):
+                params["cursor"] = page_info["nextCursor"]
+            else:
+                break
+
+        return all_models
 
     def get_model(self, model_id: str) -> OmniModel:
         """Get a specific model by ID."""
@@ -136,21 +154,36 @@ class ModelService:
         )
 
     def list_topics(self, model_id: str) -> list[TopicSummary]:
-        """List all topics in a model."""
-        result = self._client.get(f"/api/v1/models/{model_id}/topics")
-        if not result:
-            return []
+        """List all topics in a model.
 
-        topics_data = result if isinstance(result, list) else result.get("topics", [])
-
-        return [
-            TopicSummary(
-                name=t.get("name", ""),
-                label=t.get("label", ""),
-                description=t.get("description", ""),
+        Handles the paginated ``{pageInfo, records}`` response format.
+        """
+        params: dict[str, str] = {"pageSize": "100"}
+        all_topics: list[TopicSummary] = []
+        while True:
+            result = self._client.get(
+                f"/api/v1/models/{model_id}/topics", params=params
             )
-            for t in topics_data
-        ]
+            if not result:
+                break
+
+            topics_data = _extract_records(result)
+            for t in topics_data:
+                all_topics.append(
+                    TopicSummary(
+                        name=t.get("name", ""),
+                        label=t.get("label", ""),
+                        description=t.get("description", ""),
+                    )
+                )
+
+            page_info = result.get("pageInfo", {}) if isinstance(result, dict) else {}
+            if page_info.get("hasNextPage") and page_info.get("nextCursor"):
+                params["cursor"] = page_info["nextCursor"]
+            else:
+                break
+
+        return all_topics
 
     def get_topic(self, model_id: str, topic_name: str) -> TopicDetail:
         """Get full topic details including views and fields."""

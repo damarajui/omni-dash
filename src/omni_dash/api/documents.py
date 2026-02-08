@@ -13,6 +13,24 @@ from omni_dash.exceptions import DocumentNotFoundError, OmniAPIError
 logger = logging.getLogger(__name__)
 
 
+def _extract_records(result: Any) -> list[dict[str, Any]]:
+    """Extract the records list from a paginated Omni API response.
+
+    The Omni API returns ``{pageInfo: {...}, records: [...]}`` for list
+    endpoints.  Older or mock responses may return a plain list.
+    """
+    if isinstance(result, list):
+        return result
+    if isinstance(result, dict):
+        if "records" in result:
+            return result["records"]
+        # Fallback for unknown dict shapes
+        for key in ("documents", "folders"):
+            if key in result and isinstance(result[key], list):
+                return result[key]
+    return []
+
+
 # -- Response models --
 
 
@@ -88,16 +106,32 @@ class DocumentService:
         if not result or not isinstance(result, dict):
             raise OmniAPIError(0, "Empty response from document creation")
 
+        # The create endpoint returns {dashboard: {...}, workbook: {...}}.
+        # The document ID is workbook.identifier (short ID for URLs),
+        # the full UUID is workbook.id, and the name is workbook.name.
+        workbook = result.get("workbook", {})
+        dashboard = result.get("dashboard", {})
+
+        # Use workbook.identifier (short URL ID) as primary, fall back
+        # to nested IDs, then top-level fields for backwards compat.
+        doc_id = (
+            workbook.get("identifier")
+            or workbook.get("id")
+            or dashboard.get("dashboardId")
+            or result.get("identifier")
+            or result.get("id", "")
+        )
+
         return DashboardResponse(
-            document_id=result.get("id", result.get("documentId", "")),
-            name=result.get("name", payload.get("name", "")),
-            model_id=result.get("modelId", payload.get("modelId", "")),
+            document_id=doc_id,
+            name=workbook.get("name", result.get("name", payload.get("name", ""))),
+            model_id=payload.get("modelId", ""),
             query_presentations=result.get("queryPresentations", []),
-            layouts=result.get("layouts", []),
-            text_tiles=result.get("textTiles", []),
-            tile_settings=result.get("tileSettings", {}),
-            created_at=result.get("createdAt", ""),
-            updated_at=result.get("updatedAt", ""),
+            layouts=dashboard.get("metadata", {}).get("layouts", {}).get("lg", []),
+            text_tiles=dashboard.get("metadata", {}).get("textTiles", []),
+            tile_settings=dashboard.get("metadata", {}).get("tileSettings", {}),
+            created_at=workbook.get("createdAt", result.get("createdAt", "")),
+            updated_at=workbook.get("updatedAt", result.get("updatedAt", "")),
         )
 
     def get_dashboard(self, document_id: str) -> DashboardResponse:
@@ -119,30 +153,43 @@ class DocumentService:
         )
 
     def list_dashboards(self, folder_id: str | None = None) -> list[DocumentSummary]:
-        """List all dashboards, optionally filtered by folder."""
-        params: dict[str, str] = {}
+        """List all dashboards, optionally filtered by folder.
+
+        Handles the paginated Omni response format ``{pageInfo, records}``
+        and automatically fetches subsequent pages.
+        """
+        params: dict[str, str] = {"pageSize": "100"}
         if folder_id:
             params["folderId"] = folder_id
 
-        result = self._client.get("/api/v1/documents", params=params)
+        all_docs: list[DocumentSummary] = []
+        while True:
+            result = self._client.get("/api/v1/documents", params=params)
+            if not result:
+                break
 
-        if not result:
-            return []
+            records = _extract_records(result)
+            for d in records:
+                folder = d.get("folder") or {}
+                all_docs.append(
+                    DocumentSummary(
+                        id=d.get("identifier", d.get("id", "")),
+                        name=d.get("name", ""),
+                        document_type="dashboard" if d.get("hasDashboard") else "workbook",
+                        folder_id=folder.get("id") if folder else None,
+                        created_at=d.get("createdAt", ""),
+                        updated_at=d.get("updatedAt", ""),
+                        model_id=d.get("connectionId", ""),
+                    )
+                )
 
-        docs = result if isinstance(result, list) else result.get("documents", [])
+            page_info = result.get("pageInfo", {}) if isinstance(result, dict) else {}
+            if page_info.get("hasNextPage") and page_info.get("nextCursor"):
+                params["cursor"] = page_info["nextCursor"]
+            else:
+                break
 
-        return [
-            DocumentSummary(
-                id=d.get("id", ""),
-                name=d.get("name", ""),
-                document_type=d.get("documentType", d.get("type", "")),
-                folder_id=d.get("folderId"),
-                created_at=d.get("createdAt", ""),
-                updated_at=d.get("updatedAt", ""),
-                model_id=d.get("modelId", ""),
-            )
-            for d in docs
-        ]
+        return all_docs
 
     def export_dashboard(self, document_id: str) -> dict[str, Any]:
         """Export a dashboard's full definition (beta endpoint).
@@ -204,7 +251,7 @@ class DocumentService:
             raise OmniAPIError(0, "Empty response from dashboard import")
 
         return ImportResponse(
-            document_id=result.get("id", result.get("documentId", "")),
+            document_id=result.get("identifier", result.get("id", result.get("documentId", ""))),
             name=result.get("name", name or ""),
             success=True,
         )
@@ -215,11 +262,26 @@ class DocumentService:
         logger.info("Deleted dashboard %s", document_id)
 
     def list_folders(self) -> list[dict[str, Any]]:
-        """List all folders in the organization."""
-        result = self._client.get("/api/v1/folders")
-        if not result:
-            return []
-        return result if isinstance(result, list) else result.get("folders", [])
+        """List all folders in the organization.
+
+        Handles the paginated ``{pageInfo, records}`` response format.
+        """
+        params: dict[str, str] = {"pageSize": "100"}
+        all_folders: list[dict[str, Any]] = []
+        while True:
+            result = self._client.get("/api/v1/folders", params=params)
+            if not result:
+                break
+
+            all_folders.extend(_extract_records(result))
+
+            page_info = result.get("pageInfo", {}) if isinstance(result, dict) else {}
+            if page_info.get("hasNextPage") and page_info.get("nextCursor"):
+                params["cursor"] = page_info["nextCursor"]
+            else:
+                break
+
+        return all_folders
 
     def download_dashboard(
         self,
