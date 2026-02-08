@@ -326,6 +326,209 @@ def test_filter_format_omni():
     assert filters["t.date"]["type"] == "date"
 
 
+def test_cartesian_spec_generated_for_line_chart():
+    """Line chart with axis formatting should generate a cartesian spec."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Cartesian Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Revenue Trend",
+                chart_type="line",
+                query=TileQuery(table="t", fields=["t.date", "t.revenue"]),
+                vis_config=TileVisConfig(
+                    x_axis="t.date",
+                    y_axis=["t.revenue"],
+                    x_axis_format="%-m/%-d/%-Y",
+                    x_axis_rotation=270,
+                    y_axis_format="USDCURRENCY_0",
+                    axis_label_y="Revenue ($)",
+                    tooltip_fields=["t.date", "t.revenue"],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visualization"]
+
+    assert vis["visType"] == "cartesian"
+    assert vis["chartType"] == "line"
+
+    spec = vis["spec"]
+    assert spec["configType"] == "cartesian"
+    assert spec["x"]["field"]["name"] == "t.date"
+    assert spec["x"]["axis"]["label"]["format"]["format"] == "%-m/%-d/%-Y"
+    assert spec["x"]["axis"]["label"]["format"]["angle"] == 270
+    assert spec["y"]["axis"]["title"]["value"] == "Revenue ($)"
+    assert spec["y"]["axis"]["label"]["format"]["format"] == "USDCURRENCY_0"
+    assert spec["mark"]["type"] == "line"
+    assert len(spec["tooltip"]) == 2
+
+
+def test_kpi_vis_generates_markdown_config():
+    """KPI tiles should generate omni-kpi visType with markdownConfig."""
+    definition = (
+        DashboardBuilder("KPI Vis Test")
+        .model("m-1")
+        .dbt_source("t")
+        .add_number_tile("Total Revenue", metric_col="revenue", value_format="USDCURRENCY_0")
+        .build()
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visualization"]
+
+    assert vis["visType"] == "omni-kpi"
+    assert vis["chartType"] == "kpi"
+    assert "markdownConfig" in vis["spec"]
+    mc = vis["spec"]["markdownConfig"]
+    assert len(mc) >= 1
+    assert mc[0]["type"] == "number"
+    assert mc[0]["config"]["field"]["field"]["name"] == "t.revenue"
+    assert mc[0]["config"]["field"]["label"]["value"] == "Total Revenue"
+
+
+def test_kpi_with_sparkline():
+    """KPI tile with sparkline should include chart component in markdownConfig."""
+    definition = (
+        DashboardBuilder("Sparkline Test")
+        .model("m-1")
+        .dbt_source("t")
+        .add_kpi_tile("Revenue", metric_col="rev", sparkline=True, sparkline_type="bar")
+        .build()
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    mc = payload["queryPresentations"][0]["visualization"]["spec"]["markdownConfig"]
+
+    assert len(mc) == 2
+    assert mc[1]["type"] == "chart"
+    assert mc[1]["config"]["type"] == "bar"
+
+
+def test_markdown_tile_vis():
+    """Markdown tiles should generate omni-markdown visType."""
+    definition = (
+        DashboardBuilder("Markdown Test")
+        .model("m-1")
+        .dbt_source("t")
+        .add_markdown_tile("Header", template="<h1>Dashboard Title</h1>")
+        .build()
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visualization"]
+
+    assert vis["visType"] == "omni-markdown"
+    assert vis["chartType"] == "markdown"
+    assert vis["spec"]["markdown"] == "<h1>Dashboard Title</h1>"
+
+
+def test_table_vis_generates_spreadsheet_config():
+    """Table tiles should generate omni-table visType with spreadsheet config."""
+    definition = (
+        DashboardBuilder("Table Test")
+        .model("m-1")
+        .dbt_source("t")
+        .add_table("Data Table", columns=["col1", "col2"])
+        .build()
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visualization"]
+
+    assert vis["visType"] == "omni-table"
+    assert vis["chartType"] == "table"
+    assert vis["spec"]["tableType"] == "spreadsheet"
+    assert vis["spec"]["visColumnDisplay"] == "hide-view-name"
+
+
+def test_dashboard_filters_applied_to_matching_tiles():
+    """Dashboard-level filters should be propagated to matching tile queries."""
+    definition = (
+        DashboardBuilder("Filter Propagation")
+        .model("m-1")
+        .dbt_source("my_table")
+        .add_line_chart("Chart", time_col="date", metric_cols=["visits"])
+        .add_number_tile("KPI", metric_col="total")
+        .add_filter("date", filter_type="date_range", default="last 12 weeks")
+        .build()
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+
+    # Both tiles should have the dashboard filter applied
+    for qp in payload["queryPresentations"]:
+        filters = qp["query"].get("filters", {})
+        assert "my_table.date" in filters
+        assert filters["my_table.date"]["kind"] == "BETWEEN"
+        assert filters["my_table.date"]["type"] == "date"
+
+
+def test_series_config_dual_axis():
+    """Combo chart with series_config should generate dual-axis cartesian spec."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Dual Axis Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Revenue & Count",
+                chart_type="combo",
+                query=TileQuery(table="t", fields=["t.date", "t.revenue", "t.count"]),
+                vis_config=TileVisConfig(
+                    x_axis="t.date",
+                    y2_axis=True,
+                    y2_axis_format="BIGNUMBER_0",
+                    series_config=[
+                        {"field": "t.revenue", "mark_type": "bar", "y_axis": "y"},
+                        {"field": "t.count", "mark_type": "line", "y_axis": "y2"},
+                    ],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visualization"]
+    spec = vis["spec"]
+
+    assert vis["visType"] == "cartesian"
+    assert "y2" in spec
+    assert spec["y2"]["axis"]["label"]["format"]["format"] == "BIGNUMBER_0"
+    assert len(spec["series"]) == 2
+    assert spec["series"][0]["mark"]["type"] == "bar"
+    assert spec["series"][0]["yAxis"] == "y"
+    assert spec["series"][1]["mark"]["type"] == "line"
+    assert spec["series"][1]["yAxis"] == "y2"
+
+
+def test_value_format_in_kpi():
+    """KPI value_format should propagate to markdownConfig."""
+    definition = (
+        DashboardBuilder("Format Test")
+        .model("m-1")
+        .dbt_source("t")
+        .add_kpi_tile("Revenue", metric_col="rev", value_format="USDCURRENCY_0", label="Total Rev")
+        .build()
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    mc = payload["queryPresentations"][0]["visualization"]["spec"]["markdownConfig"]
+    assert mc[0]["config"]["field"]["format"] == "USDCURRENCY_0"
+    assert mc[0]["config"]["field"]["label"]["value"] == "Total Rev"
+
+
+def test_basic_vis_used_when_no_advanced_config():
+    """Line chart without advanced config should use basic visType."""
+    definition = (
+        DashboardBuilder("Basic Test")
+        .model("m-1")
+        .dbt_source("t")
+        .add_line_chart("Simple", time_col="d", metric_cols=["v"])
+        .build()
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visualization"]
+    assert vis["visType"] == "basic"
+
+
 def test_from_yaml_invalid():
     with pytest.raises(DashboardDefinitionError):
         DashboardSerializer.from_yaml("")

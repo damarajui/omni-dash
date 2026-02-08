@@ -191,6 +191,277 @@ def _to_omni_filter(f: FilterSpec) -> dict[str, Any]:
         }
 
 
+def _to_omni_filter_from_dashboard(dash_filter: DashboardFilter) -> dict[str, Any]:
+    """Convert a DashboardFilter to Omni's per-tile query filter format.
+
+    DashboardFilter uses ``filter_type`` (date_range, select, etc.) instead of
+    the operator-based ``FilterSpec``.
+    """
+    ft = dash_filter.filter_type
+    value = dash_filter.default_value
+
+    if ft == "date_range":
+        return {
+            "kind": "BETWEEN",
+            "type": "date",
+            "ui_type": "BETWEEN",
+            "isFiscal": False,
+            "left_side": str(value) if value else "this year",
+            "right_side": "now",
+            "is_negative": False,
+        }
+    elif ft == "select":
+        return {
+            "kind": "EQUALS",
+            "type": "string",
+            "values": [str(value)] if value else [],
+            "is_negative": False,
+            "appliedLabels": {},
+        }
+    elif ft == "multi_select":
+        vals = value if isinstance(value, list) else ([str(value)] if value else [])
+        return {
+            "kind": "EQUALS",
+            "type": "string",
+            "values": [str(v) for v in vals],
+            "is_negative": False,
+            "appliedLabels": {},
+        }
+    elif ft == "number_range":
+        return {
+            "kind": "BETWEEN",
+            "type": "number",
+            "left_side": str(value) if value else "0",
+            "right_side": "999999999",
+            "is_negative": False,
+        }
+    elif ft == "text":
+        return {
+            "kind": "CONTAINS",
+            "type": "string",
+            "right_side": str(value) if value else "",
+            "is_negative": False,
+        }
+    else:
+        return {
+            "kind": "EQUALS",
+            "type": "string",
+            "values": [str(value)] if value else [],
+            "is_negative": False,
+        }
+
+
+# -- Cartesian chart types that use _build_cartesian_spec --
+_CARTESIAN_CHART_TYPES = frozenset({
+    "line", "lineColor", "bar", "barStacked", "barGrouped",
+    "barLine", "area", "areaStacked", "point", "heatmap",
+})
+
+# Map Omni chart type names to mark types for Vega-Lite spec
+_OMNI_TO_MARK: dict[str, str] = {
+    "line": "line",
+    "lineColor": "line",
+    "bar": "bar",
+    "barStacked": "bar",
+    "barGrouped": "bar",
+    "barLine": "bar",
+    "area": "area",
+    "areaStacked": "area",
+    "point": "point",
+    "heatmap": "rect",
+}
+
+
+def _build_series_entry(s: dict[str, Any]) -> dict[str, Any]:
+    """Convert an internal series_config dict to an Omni spec series entry."""
+    entry: dict[str, Any] = {}
+    if "field" in s:
+        entry["field"] = {"name": s["field"]}
+    if "mark_type" in s:
+        entry["mark"] = {"type": s["mark_type"]}
+    if "color" in s:
+        entry["color"] = s["color"]
+    if "y_axis" in s:
+        entry["yAxis"] = s["y_axis"]
+    if "dash" in s:
+        entry["strokeDash"] = s["dash"]
+    if "show_data_labels" in s:
+        entry["dataLabel"] = {"show": s["show_data_labels"]}
+        if "data_label_format" in s:
+            entry["dataLabel"]["format"] = {"format": s["data_label_format"]}
+    return entry
+
+
+def _build_cartesian_spec(tile: Tile, omni_chart_type: str, fields: list[str]) -> dict[str, Any]:
+    """Build Omni cartesian visConfig.spec for series charts.
+
+    Structure matches working Omni dashboards (WBR, User Activation, etc.):
+    ``{version, configType, x, y, y2, mark, series, tooltip, _dependentAxis}``
+    """
+    vc = tile.vis_config
+    spec: dict[str, Any] = {"version": 0, "configType": "cartesian"}
+
+    # X axis
+    if vc.x_axis:
+        x_config: dict[str, Any] = {"field": {"name": vc.x_axis}}
+        if vc.x_axis_format or vc.x_axis_rotation is not None:
+            axis_label: dict[str, Any] = {"format": {}}
+            if vc.x_axis_format:
+                axis_label["format"]["format"] = vc.x_axis_format
+            if vc.x_axis_rotation is not None:
+                axis_label["format"]["angle"] = vc.x_axis_rotation
+            x_config["axis"] = {"label": axis_label}
+        if vc.axis_label_x:
+            x_config.setdefault("axis", {})["title"] = {"value": vc.axis_label_x}
+        spec["x"] = x_config
+
+    # Y axis
+    y_config: dict[str, Any] = {}
+    if vc.axis_label_y:
+        y_config["axis"] = {"title": {"value": vc.axis_label_y}}
+    if vc.y_axis_format:
+        y_config.setdefault("axis", {}).setdefault("label", {})["format"] = {
+            "format": vc.y_axis_format,
+        }
+    if y_config:
+        spec["y"] = y_config
+
+    # Y2 axis (dual-axis for combo charts)
+    if vc.y2_axis:
+        y2_config: dict[str, Any] = {}
+        if vc.y2_axis_format:
+            y2_config["axis"] = {"label": {"format": {"format": vc.y2_axis_format}}}
+        spec["y2"] = y2_config or {}
+
+    # Mark type
+    mark_type = _OMNI_TO_MARK.get(omni_chart_type, "line")
+    spec["mark"] = {"type": mark_type}
+
+    # Series config
+    if vc.series_config:
+        spec["series"] = [_build_series_entry(s) for s in vc.series_config]
+
+    # Tooltips
+    if vc.tooltip_fields:
+        spec["tooltip"] = [{"field": {"name": f}} for f in vc.tooltip_fields]
+
+    # Color
+    if vc.color_by:
+        spec["color"] = {"field": {"name": vc.color_by}}
+
+    spec["_dependentAxis"] = "y"
+    return spec
+
+
+def _build_kpi_vis(tile: Tile) -> dict[str, Any]:
+    """Build Omni KPI visConfig matching working PLG Sign-Ups pattern.
+
+    Uses ``omni-kpi`` visType with ``markdownConfig`` for rich rendering.
+    """
+    vc = tile.vis_config
+    field_name = tile.query.fields[0] if tile.query.fields else ""
+
+    markdown_config: list[dict[str, Any]] = [{
+        "type": "number",
+        "config": {
+            "field": {
+                "row": "_first",
+                "field": {"name": field_name, "manual": True, "pivotMap": {}},
+                "label": {"value": vc.kpi_label or tile.name},
+            },
+            "descriptionBefore": tile.description or "",
+        },
+    }]
+
+    # Optional comparison component
+    if vc.kpi_comparison_field:
+        comp: dict[str, Any] = {
+            "type": "comparison",
+            "config": {
+                "field": {
+                    "row": "_first",
+                    "field": {"name": vc.kpi_comparison_field, "manual": True, "pivotMap": {}},
+                },
+            },
+        }
+        if vc.kpi_comparison_type:
+            comp["config"]["comparisonType"] = vc.kpi_comparison_type
+        if vc.kpi_comparison_format:
+            comp["config"]["format"] = vc.kpi_comparison_format
+        markdown_config.append(comp)
+
+    # Optional sparkline
+    if vc.kpi_sparkline:
+        markdown_config.append({
+            "type": "chart",
+            "config": {"type": vc.kpi_sparkline_type or "bar"},
+        })
+
+    vis: dict[str, Any] = {
+        "visType": "omni-kpi",
+        "chartType": "kpi",
+        "spec": {
+            "alignment": "left",
+            "fontKPISize": "",
+            "fontBodySize": "",
+            "fontLabelSize": "",
+            "verticalAlignment": "top",
+            "markdownConfig": markdown_config,
+        },
+        "fields": [field_name],
+    }
+
+    if vc.value_format:
+        vis["spec"]["markdownConfig"][0]["config"]["field"]["format"] = vc.value_format
+
+    return vis
+
+
+def _build_markdown_vis(tile: Tile) -> dict[str, Any]:
+    """Build Omni markdown tile visConfig.
+
+    Uses ``omni-markdown`` visType with raw markdown/HTML content.
+    Supports Mustache ``{{result._last.field.value}}`` template syntax.
+    """
+    return {
+        "visType": "omni-markdown",
+        "chartType": "markdown",
+        "spec": {
+            "markdown": tile.vis_config.markdown_template or tile.description or "",
+        },
+    }
+
+
+def _build_table_vis(tile: Tile) -> dict[str, Any]:
+    """Build Omni table visConfig matching working spreadsheet tables."""
+    return {
+        "visType": "omni-table",
+        "chartType": "table",
+        "spec": {
+            "tableType": "spreadsheet",
+            "rowBanding": {"enabled": False, "bandSize": 1},
+            "hideIndexColumn": False,
+            "truncateHeaders": True,
+            "showDescriptions": True,
+            "visColumnDisplay": "hide-view-name",
+        },
+    }
+
+
+def _has_advanced_vis(tile: Tile) -> bool:
+    """Check if a tile has any advanced vis config that needs a rich spec."""
+    vc = tile.vis_config
+    return bool(
+        vc.x_axis_format
+        or vc.x_axis_rotation is not None
+        or vc.y_axis_format
+        or vc.y2_axis
+        or vc.series_config
+        or vc.tooltip_fields
+        or vc.show_trendline
+    )
+
+
 class DashboardSerializer:
     """Convert DashboardDefinition to/from various formats."""
 
@@ -205,6 +476,11 @@ class DashboardSerializer:
         - Sort column_names MUST appear in the fields list
         - Filters use Omni's ``{kind, type, values}`` format
         - Default limit is 1000 (Omni's standard)
+        - KPI tiles use ``omni-kpi`` visType with ``markdownConfig``
+        - Markdown tiles use ``omni-markdown`` visType
+        - Table tiles use ``omni-table`` visType
+        - Cartesian charts generate rich ``spec`` when advanced vis config is set
+        - Dashboard-level filters are propagated to matching tile queries
         """
         if not definition.model_id:
             raise DashboardDefinitionError(
@@ -216,6 +492,8 @@ class DashboardSerializer:
         for tile in definition.tiles:
             omni_chart_type = _CHART_TYPE_TO_OMNI.get(tile.chart_type, tile.chart_type)
             is_kpi = omni_chart_type in ("kpi", "summaryValue")
+            is_markdown = omni_chart_type == "markdown"
+            is_table = omni_chart_type == "table"
 
             # Build fields list — ensure sort columns are included
             fields = list(tile.query.fields)
@@ -255,10 +533,22 @@ class DashboardSerializer:
             }
 
             # Filters — convert to Omni's format
+            omni_filters: dict[str, Any] = {}
             if tile.query.filters:
-                omni_filters: dict[str, Any] = {}
                 for f in tile.query.filters:
                     omni_filters[f.field] = _to_omni_filter(f)
+
+            # Dashboard-level filters → propagate to matching tile queries
+            if definition.filters:
+                table = tile.query.table
+                for dash_filter in definition.filters:
+                    fld = dash_filter.field
+                    # Apply if field belongs to this tile's table or is unqualified
+                    if fld.startswith(table + ".") or "." not in fld:
+                        if dash_filter.default_value is not None:
+                            omni_filters[fld] = _to_omni_filter_from_dashboard(dash_filter)
+
+            if omni_filters:
                 qp["query"]["filters"] = omni_filters
 
             # Pivots
@@ -268,36 +558,49 @@ class DashboardSerializer:
             qp["chartType"] = omni_chart_type
             qp["prefersChart"] = omni_chart_type not in ("table", "markdown")
 
-            # Visualization config
-            vis: dict[str, Any] = {"visType": "basic", "config": {}}
-            if tile.vis_config.x_axis:
-                vis["config"]["xAxis"] = tile.vis_config.x_axis
-            if tile.vis_config.y_axis:
-                vis["config"]["yAxis"] = tile.vis_config.y_axis
-            if tile.vis_config.color_by:
-                vis["config"]["colorBy"] = tile.vis_config.color_by
-            if tile.vis_config.stacked:
-                vis["config"]["stacked"] = True
-            if not tile.vis_config.show_labels:
-                vis["config"]["showLabels"] = False
-            if not tile.vis_config.show_legend:
-                vis["config"]["showLegend"] = False
-            if not tile.vis_config.show_grid:
-                vis["config"]["showGrid"] = False
-            if tile.vis_config.show_values:
-                vis["config"]["showValues"] = True
-            if tile.vis_config.value_format:
-                vis["config"]["valueFormat"] = tile.vis_config.value_format
-            if tile.vis_config.axis_label_x:
-                vis["config"]["axisLabelX"] = tile.vis_config.axis_label_x
-            if tile.vis_config.axis_label_y:
-                vis["config"]["axisLabelY"] = tile.vis_config.axis_label_y
-            if tile.vis_config.series_colors:
-                vis["config"]["seriesColors"] = tile.vis_config.series_colors
-            if tile.vis_config.custom:
-                vis["config"].update(tile.vis_config.custom)
-
-            qp["visualization"] = vis
+            # Visualization config — use rich Omni visTypes when appropriate
+            if is_kpi:
+                qp["visualization"] = _build_kpi_vis(tile)
+            elif is_markdown:
+                qp["visualization"] = _build_markdown_vis(tile)
+            elif is_table:
+                qp["visualization"] = _build_table_vis(tile)
+            elif omni_chart_type in _CARTESIAN_CHART_TYPES and _has_advanced_vis(tile):
+                qp["visualization"] = {
+                    "visType": "cartesian",
+                    "chartType": omni_chart_type,
+                    "spec": _build_cartesian_spec(tile, omni_chart_type, fields),
+                }
+            else:
+                # Basic visualization config (backwards compatible)
+                vis: dict[str, Any] = {"visType": "basic", "config": {}}
+                if tile.vis_config.x_axis:
+                    vis["config"]["xAxis"] = tile.vis_config.x_axis
+                if tile.vis_config.y_axis:
+                    vis["config"]["yAxis"] = tile.vis_config.y_axis
+                if tile.vis_config.color_by:
+                    vis["config"]["colorBy"] = tile.vis_config.color_by
+                if tile.vis_config.stacked:
+                    vis["config"]["stacked"] = True
+                if not tile.vis_config.show_labels:
+                    vis["config"]["showLabels"] = False
+                if not tile.vis_config.show_legend:
+                    vis["config"]["showLegend"] = False
+                if not tile.vis_config.show_grid:
+                    vis["config"]["showGrid"] = False
+                if tile.vis_config.show_values:
+                    vis["config"]["showValues"] = True
+                if tile.vis_config.value_format:
+                    vis["config"]["valueFormat"] = tile.vis_config.value_format
+                if tile.vis_config.axis_label_x:
+                    vis["config"]["axisLabelX"] = tile.vis_config.axis_label_x
+                if tile.vis_config.axis_label_y:
+                    vis["config"]["axisLabelY"] = tile.vis_config.axis_label_y
+                if tile.vis_config.series_colors:
+                    vis["config"]["seriesColors"] = tile.vis_config.series_colors
+                if tile.vis_config.custom:
+                    vis["config"].update(tile.vis_config.custom)
+                qp["visualization"] = vis
 
             # Position (layout)
             if tile.position:

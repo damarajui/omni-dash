@@ -172,3 +172,98 @@ def test_labels_and_folder():
     assert dashboard.folder_id == "folder-123"
     assert "seo" in dashboard.labels
     assert "weekly" in dashboard.labels
+
+
+def test_add_combo_chart():
+    dashboard = (
+        DashboardBuilder("Combo")
+        .model("m")
+        .table("t")
+        .add_combo_chart(
+            "Revenue & Count",
+            time_col="date",
+            bar_cols=["revenue"],
+            line_cols=["count"],
+            y_format="USDCURRENCY_0",
+            y2_format="BIGNUMBER_0",
+        )
+        .build()
+    )
+    tile = dashboard.tiles[0]
+    assert tile.chart_type == "combo"
+    assert tile.vis_config.y2_axis is True
+    assert tile.vis_config.y_axis_format == "USDCURRENCY_0"
+    assert tile.vis_config.y2_axis_format == "BIGNUMBER_0"
+    assert len(tile.vis_config.series_config) == 2
+    assert tile.vis_config.series_config[0]["mark_type"] == "bar"
+    assert tile.vis_config.series_config[1]["mark_type"] == "line"
+
+
+def test_add_markdown_tile():
+    dashboard = (
+        DashboardBuilder("Markdown")
+        .model("m")
+        .table("t")
+        .add_markdown_tile(
+            "Header",
+            template="<h1>Dashboard</h1><p>{{result._last.field.value}}</p>",
+        )
+        .build()
+    )
+    tile = dashboard.tiles[0]
+    assert tile.chart_type == "text"
+    assert tile.vis_config.markdown_template == "<h1>Dashboard</h1><p>{{result._last.field.value}}</p>"
+
+
+def test_add_kpi_tile_with_sparkline():
+    dashboard = (
+        DashboardBuilder("KPI")
+        .model("m")
+        .table("t")
+        .add_kpi_tile(
+            "Revenue",
+            metric_col="total_revenue",
+            label="Total Revenue",
+            value_format="USDCURRENCY_0",
+            comparison_col="prev_revenue",
+            comparison_type="number_percent",
+            sparkline=True,
+            sparkline_type="bar",
+        )
+        .build()
+    )
+    tile = dashboard.tiles[0]
+    assert tile.chart_type == "number"
+    assert tile.vis_config.kpi_label == "Total Revenue"
+    assert tile.vis_config.value_format == "USDCURRENCY_0"
+    assert tile.vis_config.kpi_comparison_field == "t.prev_revenue"
+    assert tile.vis_config.kpi_comparison_type == "number_percent"
+    assert tile.vis_config.kpi_sparkline is True
+    assert tile.vis_config.kpi_sparkline_type == "bar"
+    # comparison_col should be in fields
+    assert "t.prev_revenue" in tile.query.fields
+
+
+def test_line_chart_with_axis_format():
+    dashboard = (
+        DashboardBuilder("Formatted")
+        .model("m")
+        .table("t")
+        .add_line_chart(
+            "Revenue",
+            time_col="date",
+            metric_cols=["revenue"],
+            axis_title_y="Revenue ($)",
+            date_format="%-m/%-d/%-Y",
+            label_rotation=270,
+            value_format="USDCURRENCY_0",
+            tooltip_fields=["date", "revenue"],
+        )
+        .build()
+    )
+    tile = dashboard.tiles[0]
+    assert tile.vis_config.axis_label_y == "Revenue ($)"
+    assert tile.vis_config.x_axis_format == "%-m/%-d/%-Y"
+    assert tile.vis_config.x_axis_rotation == 270
+    assert tile.vis_config.y_axis_format == "USDCURRENCY_0"
+    assert "t.date" in tile.vis_config.tooltip_fields

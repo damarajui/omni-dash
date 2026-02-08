@@ -147,6 +147,7 @@ class TileQuery(BaseModel):
 class TileVisConfig(BaseModel):
     """Visualization configuration for a tile."""
 
+    # Core axis & display
     x_axis: str | None = None
     y_axis: list[str] = Field(default_factory=list)
     color_by: str | None = None
@@ -160,6 +161,38 @@ class TileVisConfig(BaseModel):
     axis_label_x: str | None = None
     axis_label_y: str | None = None
     custom: dict[str, Any] = Field(default_factory=dict)
+
+    # Axis formatting
+    x_axis_format: str | None = None  # Date format: "%-m/%-d/%-Y", "MMM-DD-YY"
+    x_axis_rotation: int | None = None  # Label angle: 0, 45, 270
+    y_axis_format: str | None = None  # Number format: "USDCURRENCY_0", "PERCENT_0"
+    y2_axis: bool = False  # Enable secondary Y axis (combo charts)
+    y2_axis_format: str | None = None  # Format for secondary axis
+
+    # Series customization (for multi-series or combo charts)
+    # Each entry: {"field": "table.col", "mark_type": "line"|"bar",
+    #   "color": "#hex", "y_axis": "y"|"y2", "dash": [8,8],
+    #   "data_label_format": "BIGNUMBER_2", "show_data_labels": True}
+    series_config: list[dict[str, Any]] = Field(default_factory=list)
+
+    # Trendlines & analytics
+    show_trendline: bool = False
+    trendline_type: str | None = None  # "linear", "moving_average"
+    moving_average_window: int | None = None
+
+    # Tooltips
+    tooltip_fields: list[str] = Field(default_factory=list)
+
+    # KPI-specific
+    kpi_comparison_field: str | None = None  # Field for comparison (e.g., previous period)
+    kpi_comparison_type: str | None = None  # "number_percent", "number", "percent"
+    kpi_comparison_format: str | None = None  # "USDCURRENCY_0"
+    kpi_label: str | None = None  # Override display label
+    kpi_sparkline: bool = False  # Show sparkline in KPI tile
+    kpi_sparkline_type: str | None = None  # "bar" or "line"
+
+    # Markdown tile content
+    markdown_template: str | None = None  # Raw markdown/HTML with Mustache syntax
 
 
 class Tile(BaseModel):

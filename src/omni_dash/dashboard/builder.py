@@ -119,6 +119,12 @@ class DashboardBuilder:
         description: str = "",
         show_labels: bool = True,
         stacked: bool = False,
+        axis_title_y: str | None = None,
+        date_format: str | None = None,
+        label_rotation: int | None = None,
+        value_format: str | None = None,
+        series_config: list[dict[str, Any]] | None = None,
+        tooltip_fields: list[str] | None = None,
     ) -> DashboardBuilder:
         """Add a line chart tile."""
         fields = [time_col] + metric_cols
@@ -138,6 +144,12 @@ class DashboardBuilder:
                     y_axis=self._qualify_fields(metric_cols),
                     show_labels=show_labels,
                     stacked=stacked,
+                    axis_label_y=axis_title_y,
+                    x_axis_format=date_format,
+                    x_axis_rotation=label_rotation,
+                    y_axis_format=value_format,
+                    series_config=series_config or [],
+                    tooltip_fields=self._qualify_fields(tooltip_fields) if tooltip_fields else [],
                 ),
                 size=size,
             )
@@ -153,6 +165,9 @@ class DashboardBuilder:
         stacked: bool = True,
         size: str = "half",
         description: str = "",
+        axis_title_y: str | None = None,
+        date_format: str | None = None,
+        value_format: str | None = None,
     ) -> DashboardBuilder:
         """Add an area chart tile."""
         fields = [time_col] + metric_cols
@@ -170,6 +185,9 @@ class DashboardBuilder:
                     x_axis=self._qualify_field(time_col),
                     y_axis=self._qualify_fields(metric_cols),
                     stacked=stacked,
+                    axis_label_y=axis_title_y,
+                    x_axis_format=date_format,
+                    y_axis_format=value_format,
                 ),
                 size=size,
             )
@@ -189,6 +207,9 @@ class DashboardBuilder:
         limit: int = 50,
         size: str = "half",
         description: str = "",
+        axis_title_y: str | None = None,
+        value_format: str | None = None,
+        label_rotation: int | None = None,
     ) -> DashboardBuilder:
         """Add a bar chart tile."""
         fields = [dimension_col] + metric_cols
@@ -210,6 +231,9 @@ class DashboardBuilder:
                     x_axis=self._qualify_field(dimension_col),
                     y_axis=self._qualify_fields(metric_cols),
                     stacked=stacked,
+                    axis_label_y=axis_title_y,
+                    y_axis_format=value_format,
+                    x_axis_rotation=label_rotation,
                 ),
                 size=size,
             )
@@ -336,6 +360,147 @@ class DashboardBuilder:
                     x_axis=self._qualify_field(x_col),
                     y_axis=[self._qualify_field(y_col)],
                     color_by=self._qualify_field(color_by) if color_by else None,
+                ),
+                size=size,
+            )
+        )
+        return self
+
+    def add_combo_chart(
+        self,
+        name: str,
+        *,
+        time_col: str,
+        bar_cols: list[str],
+        line_cols: list[str],
+        sort_asc: bool = True,
+        limit: int = 200,
+        size: str = "half",
+        description: str = "",
+        y_format: str | None = None,
+        y2_format: str | None = None,
+        axis_title_y: str | None = None,
+        tooltip_fields: list[str] | None = None,
+    ) -> DashboardBuilder:
+        """Add a dual-axis combo chart (bar + line on same tile)."""
+        fields = [time_col] + bar_cols + line_cols
+
+        # Build series config: bars on y, lines on y2
+        series_cfg: list[dict[str, Any]] = []
+        for col in bar_cols:
+            series_cfg.append({
+                "field": self._qualify_field(col),
+                "mark_type": "bar",
+                "y_axis": "y",
+            })
+        for col in line_cols:
+            series_cfg.append({
+                "field": self._qualify_field(col),
+                "mark_type": "line",
+                "y_axis": "y2",
+            })
+
+        self._tiles.append(
+            Tile(
+                name=name,
+                description=description,
+                query=TileQuery(
+                    table=self._table or "",
+                    fields=self._qualify_fields(fields),
+                    sorts=[SortSpec(column_name=self._qualify_field(time_col), sort_descending=not sort_asc)],
+                    limit=limit,
+                ),
+                chart_type="combo",
+                vis_config=TileVisConfig(
+                    x_axis=self._qualify_field(time_col),
+                    y_axis=self._qualify_fields(bar_cols + line_cols),
+                    axis_label_y=axis_title_y,
+                    y_axis_format=y_format,
+                    y2_axis=True,
+                    y2_axis_format=y2_format,
+                    series_config=series_cfg,
+                    tooltip_fields=self._qualify_fields(tooltip_fields) if tooltip_fields else [],
+                ),
+                size=size,
+            )
+        )
+        return self
+
+    def add_markdown_tile(
+        self,
+        name: str,
+        *,
+        template: str,
+        query_table: str | None = None,
+        query_fields: list[str] | None = None,
+        size: str = "full",
+        description: str = "",
+    ) -> DashboardBuilder:
+        """Add a markdown/HTML tile with Mustache data binding.
+
+        Use ``{{result._last.field.value}}`` syntax in the template for dynamic data.
+        """
+        table = query_table or self._table or ""
+        fields = self._qualify_fields(query_fields) if query_fields else [f"{table}.id"]
+
+        self._tiles.append(
+            Tile(
+                name=name,
+                description=description,
+                query=TileQuery(
+                    table=table,
+                    fields=fields,
+                    limit=1,
+                ),
+                chart_type="text",
+                vis_config=TileVisConfig(
+                    markdown_template=template,
+                ),
+                size=size,
+            )
+        )
+        return self
+
+    def add_kpi_tile(
+        self,
+        name: str,
+        *,
+        metric_col: str,
+        filters: list[FilterSpec] | None = None,
+        value_format: str | None = None,
+        label: str | None = None,
+        comparison_col: str | None = None,
+        comparison_type: str | None = None,
+        comparison_format: str | None = None,
+        sparkline: bool = False,
+        sparkline_type: str | None = None,
+        size: str = "quarter",
+        description: str = "",
+    ) -> DashboardBuilder:
+        """Add a rich KPI tile with optional comparison and sparkline."""
+        fields = [self._qualify_field(metric_col)]
+        if comparison_col:
+            fields.append(self._qualify_field(comparison_col))
+
+        self._tiles.append(
+            Tile(
+                name=name,
+                description=description,
+                query=TileQuery(
+                    table=self._table or "",
+                    fields=fields,
+                    filters=filters or [],
+                    limit=1,
+                ),
+                chart_type="number",
+                vis_config=TileVisConfig(
+                    value_format=value_format,
+                    kpi_label=label,
+                    kpi_comparison_field=self._qualify_field(comparison_col) if comparison_col else None,
+                    kpi_comparison_type=comparison_type,
+                    kpi_comparison_format=comparison_format,
+                    kpi_sparkline=sparkline,
+                    kpi_sparkline_type=sparkline_type,
                 ),
                 size=size,
             )
