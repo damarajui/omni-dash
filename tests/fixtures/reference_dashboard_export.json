@@ -1,0 +1,767 @@
+{
+  "dashboard": {
+    "dashboardCustomTheme": null,
+    "facetFilters": false,
+    "id": "3dfb6776-c47f-4f43-a1f7-a62518ec0d76",
+    "organizationId": "2ec98ea6-a79b-43ad-a6b8-421484a0a8af",
+    "queryPresentationCollection": {
+      "filterConfig": {},
+      "filterConfigVersion": 0,
+      "filterOrder": [],
+      "id": "1ecc448e-1941-4eb3-9b0c-9bb45db250a5",
+      "queryPresentationCollectionMemberships": [
+        {
+          "queryPresentation": {
+            "id": "739c1d25-8740-4b00-9d3e-cb2a0c261501",
+            "createdAt": "2026-02-08T17:48:22.074Z",
+            "updatedAt": "2026-02-08T17:48:22.074Z",
+            "type": "query",
+            "name": "Total Signups",
+            "subTitle": null,
+            "description": "",
+            "organizationId": "2ec98ea6-a79b-43ad-a6b8-421484a0a8af",
+            "queryId": "52cb986f-e14d-461a-941e-d6be7cc04932",
+            "miniUuid": "0fhTwpih",
+            "modelId": "76e956f2-9f91-4144-972a-995297bcc8ff",
+            "fileUploadId": null,
+            "prefersChart": true,
+            "automaticVis": true,
+            "visConfigId": "c7635cfd-e9a6-4caf-9b86-f465d5f490a0",
+            "topicName": null,
+            "editingModelObjectName": null,
+            "editingModelObjectNameChange": null,
+            "filterOrder": [],
+            "isSql": false,
+            "resultConfig": {},
+            "aiConfig": {},
+            "sourceQueryPresentationTabIdx": null,
+            "allowedPrivateToWorkbookModelId": null,
+            "query": {
+              "id": "52cb986f-e14d-461a-941e-d6be7cc04932",
+              "createdAt": "2026-02-08T17:47:39.062Z",
+              "jsonHash": "xGXcGofjmxKyIkn2h8GLfSMkfI6Hm3ZRxYl/2Jn5MPw=",
+              "modelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+              "queryJson": {
+                "limit": 1,
+                "sorts": [],
+                "table": "mart_seo_weekly_funnel",
+                "fields": [
+                  "mart_seo_weekly_funnel.organic_signups"
+                ],
+                "pivots": [],
+                "dbtMode": false,
+                "filters": {},
+                "modelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+                "version": 8,
+                "rewriteSql": true,
+                "row_totals": {},
+                "fill_fields": [],
+                "calculations": [],
+                "column_limit": 50,
+                "join_via_map": {},
+                "column_totals": {},
+                "userEditedSQL": "",
+                "dimensionIndex": 0,
+                "default_group_by": true,
+                "custom_summary_types": {}
+              }
+            },
+            "visConfig": {
+              "id": "c7635cfd-e9a6-4caf-9b86-f465d5f490a0",
+              "createdAt": "2026-01-10T00:55:58.978Z",
+              "visType": null,
+              "chartType": "kpi",
+              "jsonHash": "GGNaOvbHcK6KNKj11tdg2slSNJurRjtEMrwhFWUTYGQ=",
+              "spec": {},
+              "fields": [],
+              "version": 0
+            }
+          }
+        },
+        {
+          "queryPresentation": {
+            "id": "f6f8c241-4e58-4920-a19e-0e0eddd46038",
+            "createdAt": "2026-02-08T17:48:22.076Z",
+            "updatedAt": "2026-02-08T17:48:22.076Z",
+            "type": "query",
+            "name": "Weekly Funnel Details",
+            "subTitle": null,
+            "description": "",
+            "organizationId": "2ec98ea6-a79b-43ad-a6b8-421484a0a8af",
+            "queryId": "a8b0d86e-13e9-4767-9cc8-a2fac57fb090",
+            "miniUuid": "s_WZAfhK",
+            "modelId": "76e956f2-9f91-4144-972a-995297bcc8ff",
+            "fileUploadId": null,
+            "prefersChart": false,
+            "automaticVis": false,
+            "visConfigId": "a888cfb9-0d64-4ab5-b7f8-b3e8e1d8b157",
+            "topicName": null,
+            "editingModelObjectName": null,
+            "editingModelObjectNameChange": null,
+            "filterOrder": [],
+            "isSql": false,
+            "resultConfig": {},
+            "aiConfig": {},
+            "sourceQueryPresentationTabIdx": null,
+            "allowedPrivateToWorkbookModelId": null,
+            "query": {
+              "id": "a8b0d86e-13e9-4767-9cc8-a2fac57fb090",
+              "createdAt": "2026-02-08T17:47:39.069Z",
+              "jsonHash": "zRkdSDJzd4Tju3gKDHZU41Pj3QskUGI6rUr0iSWQHtc=",
+              "modelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+              "queryJson": {
+                "limit": 100,
+                "sorts": [
+                  {
+                    "null_sort": "DIALECT_DEFAULT",
+                    "column_name": "mart_seo_weekly_funnel.week_start",
+                    "is_column_sort": false,
+                    "sort_descending": true
+                  }
+                ],
+                "table": "mart_seo_weekly_funnel",
+                "fields": [
+                  "mart_seo_weekly_funnel.week_start",
+                  "mart_seo_weekly_funnel.organic_visits_total",
+                  "mart_seo_weekly_funnel.organic_signups",
+                  "mart_seo_weekly_funnel.organic_qualified_signups",
+                  "mart_seo_weekly_funnel.visit_to_signup_rate",
+                  "mart_seo_weekly_funnel.overall_bounce_rate"
+                ],
+                "pivots": [],
+                "dbtMode": false,
+                "filters": {},
+                "modelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+                "version": 8,
+                "rewriteSql": true,
+                "row_totals": {},
+                "fill_fields": [],
+                "calculations": [],
+                "column_limit": 50,
+                "join_via_map": {},
+                "column_totals": {},
+                "userEditedSQL": "",
+                "dimensionIndex": 0,
+                "default_group_by": true,
+                "custom_summary_types": {}
+              }
+            },
+            "visConfig": {
+              "id": "a888cfb9-0d64-4ab5-b7f8-b3e8e1d8b157",
+              "createdAt": "2024-04-12T18:24:00.900Z",
+              "visType": null,
+              "chartType": "table",
+              "jsonHash": "YNB3tZ8c8uVTA22ISkqqRudH7ScIg48r021/383gnxs=",
+              "spec": {},
+              "fields": [],
+              "version": 0
+            }
+          }
+        },
+        {
+          "queryPresentation": {
+            "id": "4d7158f2-92ac-44c0-8bad-941e24d0d238",
+            "createdAt": "2026-02-08T17:48:22.080Z",
+            "updatedAt": "2026-02-08T17:48:22.080Z",
+            "type": "query",
+            "name": "Total Organic Visits",
+            "subTitle": null,
+            "description": "",
+            "organizationId": "2ec98ea6-a79b-43ad-a6b8-421484a0a8af",
+            "queryId": "e878005c-e412-416f-b34f-1676596c173d",
+            "miniUuid": "ecYPPwXE",
+            "modelId": "76e956f2-9f91-4144-972a-995297bcc8ff",
+            "fileUploadId": null,
+            "prefersChart": true,
+            "automaticVis": true,
+            "visConfigId": "c7635cfd-e9a6-4caf-9b86-f465d5f490a0",
+            "topicName": null,
+            "editingModelObjectName": null,
+            "editingModelObjectNameChange": null,
+            "filterOrder": [],
+            "isSql": false,
+            "resultConfig": {},
+            "aiConfig": {},
+            "sourceQueryPresentationTabIdx": null,
+            "allowedPrivateToWorkbookModelId": null,
+            "query": {
+              "id": "e878005c-e412-416f-b34f-1676596c173d",
+              "createdAt": "2026-02-08T17:47:39.056Z",
+              "jsonHash": "kIBYoEY8Ymjs+SqUgQvpVmKQ5XU4qi+COSZf9+wC9TA=",
+              "modelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+              "queryJson": {
+                "limit": 1,
+                "sorts": [],
+                "table": "mart_seo_weekly_funnel",
+                "fields": [
+                  "mart_seo_weekly_funnel.organic_visits_total"
+                ],
+                "pivots": [],
+                "dbtMode": false,
+                "filters": {},
+                "modelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+                "version": 8,
+                "rewriteSql": true,
+                "row_totals": {},
+                "fill_fields": [],
+                "calculations": [],
+                "column_limit": 50,
+                "join_via_map": {},
+                "column_totals": {},
+                "userEditedSQL": "",
+                "dimensionIndex": 0,
+                "default_group_by": true,
+                "custom_summary_types": {}
+              }
+            },
+            "visConfig": {
+              "id": "c7635cfd-e9a6-4caf-9b86-f465d5f490a0",
+              "createdAt": "2026-01-10T00:55:58.978Z",
+              "visType": null,
+              "chartType": "kpi",
+              "jsonHash": "GGNaOvbHcK6KNKj11tdg2slSNJurRjtEMrwhFWUTYGQ=",
+              "spec": {},
+              "fields": [],
+              "version": 0
+            }
+          }
+        },
+        {
+          "queryPresentation": {
+            "id": "ad233cb9-4a1b-450f-b08d-a063f147b9d5",
+            "createdAt": "2026-02-08T17:48:22.082Z",
+            "updatedAt": "2026-02-08T17:48:22.082Z",
+            "type": "query",
+            "name": "Organic Visits Over Time",
+            "subTitle": null,
+            "description": "",
+            "organizationId": "2ec98ea6-a79b-43ad-a6b8-421484a0a8af",
+            "queryId": "8be8cd59-0c44-41c0-8af7-138e106aed79",
+            "miniUuid": "R5hKe8p8",
+            "modelId": "76e956f2-9f91-4144-972a-995297bcc8ff",
+            "fileUploadId": null,
+            "prefersChart": true,
+            "automaticVis": true,
+            "visConfigId": "acfd38da-158a-40b2-bd46-6feb1a48d6da",
+            "topicName": null,
+            "editingModelObjectName": null,
+            "editingModelObjectNameChange": null,
+            "filterOrder": [],
+            "isSql": false,
+            "resultConfig": {},
+            "aiConfig": {},
+            "sourceQueryPresentationTabIdx": null,
+            "allowedPrivateToWorkbookModelId": null,
+            "query": {
+              "id": "8be8cd59-0c44-41c0-8af7-138e106aed79",
+              "createdAt": "2026-02-08T17:47:39.057Z",
+              "jsonHash": "jJzYN3XmbSJTyqyABkeXyd+Tm3MVZuBvRjbj7H0Hc+c=",
+              "modelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+              "queryJson": {
+                "limit": 1000,
+                "sorts": [
+                  {
+                    "null_sort": "DIALECT_DEFAULT",
+                    "column_name": "mart_seo_weekly_funnel.week_start",
+                    "is_column_sort": false,
+                    "sort_descending": false
+                  }
+                ],
+                "table": "mart_seo_weekly_funnel",
+                "fields": [
+                  "mart_seo_weekly_funnel.week_start",
+                  "mart_seo_weekly_funnel.organic_visits_total"
+                ],
+                "pivots": [],
+                "dbtMode": false,
+                "filters": {},
+                "modelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+                "version": 8,
+                "rewriteSql": true,
+                "row_totals": {},
+                "fill_fields": [],
+                "calculations": [],
+                "column_limit": 50,
+                "join_via_map": {},
+                "column_totals": {},
+                "userEditedSQL": "",
+                "dimensionIndex": 0,
+                "default_group_by": true,
+                "custom_summary_types": {}
+              }
+            },
+            "visConfig": {
+              "id": "acfd38da-158a-40b2-bd46-6feb1a48d6da",
+              "createdAt": "2026-01-27T21:02:13.183Z",
+              "visType": null,
+              "chartType": "line",
+              "jsonHash": "6HTHAKciMV3sxOcJ/b7H29VcJQziIyfXs44H2KKsEv4=",
+              "spec": {},
+              "fields": [],
+              "version": 0
+            }
+          }
+        },
+        {
+          "queryPresentation": {
+            "id": "921be5be-73eb-479d-9c84-e4c48a22e39b",
+            "createdAt": "2026-02-08T17:48:22.084Z",
+            "updatedAt": "2026-02-08T17:48:22.084Z",
+            "type": "query",
+            "name": "Visit-to-Signup Rate",
+            "subTitle": null,
+            "description": "",
+            "organizationId": "2ec98ea6-a79b-43ad-a6b8-421484a0a8af",
+            "queryId": "a5e83626-e8ce-440e-aa1b-c37e545da159",
+            "miniUuid": "4XHMnI0_",
+            "modelId": "76e956f2-9f91-4144-972a-995297bcc8ff",
+            "fileUploadId": null,
+            "prefersChart": true,
+            "automaticVis": true,
+            "visConfigId": "c7635cfd-e9a6-4caf-9b86-f465d5f490a0",
+            "topicName": null,
+            "editingModelObjectName": null,
+            "editingModelObjectNameChange": null,
+            "filterOrder": [],
+            "isSql": false,
+            "resultConfig": {},
+            "aiConfig": {},
+            "sourceQueryPresentationTabIdx": null,
+            "allowedPrivateToWorkbookModelId": null,
+            "query": {
+              "id": "a5e83626-e8ce-440e-aa1b-c37e545da159",
+              "createdAt": "2026-02-08T17:47:39.069Z",
+              "jsonHash": "WIsuI9Fpl5J0/98xyYkox/OuINw5WGXaSuG3zAorrR0=",
+              "modelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+              "queryJson": {
+                "limit": 1,
+                "sorts": [],
+                "table": "mart_seo_weekly_funnel",
+                "fields": [
+                  "mart_seo_weekly_funnel.visit_to_signup_rate"
+                ],
+                "pivots": [],
+                "dbtMode": false,
+                "filters": {},
+                "modelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+                "version": 8,
+                "rewriteSql": true,
+                "row_totals": {},
+                "fill_fields": [],
+                "calculations": [],
+                "column_limit": 50,
+                "join_via_map": {},
+                "column_totals": {},
+                "userEditedSQL": "",
+                "dimensionIndex": 0,
+                "default_group_by": true,
+                "custom_summary_types": {}
+              }
+            },
+            "visConfig": {
+              "id": "c7635cfd-e9a6-4caf-9b86-f465d5f490a0",
+              "createdAt": "2026-01-10T00:55:58.978Z",
+              "visType": null,
+              "chartType": "kpi",
+              "jsonHash": "GGNaOvbHcK6KNKj11tdg2slSNJurRjtEMrwhFWUTYGQ=",
+              "spec": {},
+              "fields": [],
+              "version": 0
+            }
+          }
+        },
+        {
+          "queryPresentation": {
+            "id": "3e9642ee-8252-4835-8cba-26852b134be4",
+            "createdAt": "2026-02-08T17:48:22.086Z",
+            "updatedAt": "2026-02-08T17:48:22.086Z",
+            "type": "query",
+            "name": "Signups & Qualified Over Time",
+            "subTitle": null,
+            "description": "",
+            "organizationId": "2ec98ea6-a79b-43ad-a6b8-421484a0a8af",
+            "queryId": "c0f8b9c4-7a3c-4226-94a2-8362a53f8323",
+            "miniUuid": "GzapZaha",
+            "modelId": "76e956f2-9f91-4144-972a-995297bcc8ff",
+            "fileUploadId": null,
+            "prefersChart": true,
+            "automaticVis": true,
+            "visConfigId": "acfd38da-158a-40b2-bd46-6feb1a48d6da",
+            "topicName": null,
+            "editingModelObjectName": null,
+            "editingModelObjectNameChange": null,
+            "filterOrder": [],
+            "isSql": false,
+            "resultConfig": {},
+            "aiConfig": {},
+            "sourceQueryPresentationTabIdx": null,
+            "allowedPrivateToWorkbookModelId": null,
+            "query": {
+              "id": "c0f8b9c4-7a3c-4226-94a2-8362a53f8323",
+              "createdAt": "2026-02-08T17:47:39.113Z",
+              "jsonHash": "100HfKZZtyhBbn2oiMh9GVqy6HcG0ThiuS4oG+oU4Ng=",
+              "modelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+              "queryJson": {
+                "limit": 1000,
+                "sorts": [
+                  {
+                    "null_sort": "DIALECT_DEFAULT",
+                    "column_name": "mart_seo_weekly_funnel.week_start",
+                    "is_column_sort": false,
+                    "sort_descending": false
+                  }
+                ],
+                "table": "mart_seo_weekly_funnel",
+                "fields": [
+                  "mart_seo_weekly_funnel.week_start",
+                  "mart_seo_weekly_funnel.organic_signups",
+                  "mart_seo_weekly_funnel.organic_qualified_signups"
+                ],
+                "pivots": [],
+                "dbtMode": false,
+                "filters": {},
+                "modelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+                "version": 8,
+                "rewriteSql": true,
+                "row_totals": {},
+                "fill_fields": [],
+                "calculations": [],
+                "column_limit": 50,
+                "join_via_map": {},
+                "column_totals": {},
+                "userEditedSQL": "",
+                "dimensionIndex": 0,
+                "default_group_by": true,
+                "custom_summary_types": {}
+              }
+            },
+            "visConfig": {
+              "id": "acfd38da-158a-40b2-bd46-6feb1a48d6da",
+              "createdAt": "2026-01-27T21:02:13.183Z",
+              "visType": null,
+              "chartType": "line",
+              "jsonHash": "6HTHAKciMV3sxOcJ/b7H29VcJQziIyfXs44H2KKsEv4=",
+              "spec": {},
+              "fields": [],
+              "version": 0
+            }
+          }
+        },
+        {
+          "queryPresentation": {
+            "id": "8b5a98f7-0796-4415-ba0c-f6caa82169c4",
+            "createdAt": "2026-02-08T17:48:22.089Z",
+            "updatedAt": "2026-02-08T17:48:22.089Z",
+            "type": "query",
+            "name": "Qualified Signups",
+            "subTitle": null,
+            "description": "",
+            "organizationId": "2ec98ea6-a79b-43ad-a6b8-421484a0a8af",
+            "queryId": "aadc09f5-dd42-4ebf-b46c-a5af5fde5753",
+            "miniUuid": "CMmDO8f1",
+            "modelId": "76e956f2-9f91-4144-972a-995297bcc8ff",
+            "fileUploadId": null,
+            "prefersChart": true,
+            "automaticVis": true,
+            "visConfigId": "c7635cfd-e9a6-4caf-9b86-f465d5f490a0",
+            "topicName": null,
+            "editingModelObjectName": null,
+            "editingModelObjectNameChange": null,
+            "filterOrder": [],
+            "isSql": false,
+            "resultConfig": {},
+            "aiConfig": {},
+            "sourceQueryPresentationTabIdx": null,
+            "allowedPrivateToWorkbookModelId": null,
+            "query": {
+              "id": "aadc09f5-dd42-4ebf-b46c-a5af5fde5753",
+              "createdAt": "2026-02-08T17:47:39.066Z",
+              "jsonHash": "MTPfkxVi2dsFsuqAkfRyerWJc+pj80A75n9snucdztA=",
+              "modelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+              "queryJson": {
+                "limit": 1,
+                "sorts": [],
+                "table": "mart_seo_weekly_funnel",
+                "fields": [
+                  "mart_seo_weekly_funnel.organic_qualified_signups"
+                ],
+                "pivots": [],
+                "dbtMode": false,
+                "filters": {},
+                "modelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+                "version": 8,
+                "rewriteSql": true,
+                "row_totals": {},
+                "fill_fields": [],
+                "calculations": [],
+                "column_limit": 50,
+                "join_via_map": {},
+                "column_totals": {},
+                "userEditedSQL": "",
+                "dimensionIndex": 0,
+                "default_group_by": true,
+                "custom_summary_types": {}
+              }
+            },
+            "visConfig": {
+              "id": "c7635cfd-e9a6-4caf-9b86-f465d5f490a0",
+              "createdAt": "2026-01-10T00:55:58.978Z",
+              "visType": null,
+              "chartType": "kpi",
+              "jsonHash": "GGNaOvbHcK6KNKj11tdg2slSNJurRjtEMrwhFWUTYGQ=",
+              "spec": {},
+              "fields": [],
+              "version": 0
+            }
+          }
+        },
+        {
+          "queryPresentation": {
+            "id": "dadf7eac-fe2d-4c32-9dcc-51defa325a7c",
+            "createdAt": "2026-02-08T17:48:22.090Z",
+            "updatedAt": "2026-02-08T17:48:22.090Z",
+            "type": "query",
+            "name": "Bounce Rate Over Time",
+            "subTitle": null,
+            "description": "",
+            "organizationId": "2ec98ea6-a79b-43ad-a6b8-421484a0a8af",
+            "queryId": "3cfdf17f-e517-48fd-ab5c-3082488549b3",
+            "miniUuid": "wFbTRvfz",
+            "modelId": "76e956f2-9f91-4144-972a-995297bcc8ff",
+            "fileUploadId": null,
+            "prefersChart": true,
+            "automaticVis": true,
+            "visConfigId": "acfd38da-158a-40b2-bd46-6feb1a48d6da",
+            "topicName": null,
+            "editingModelObjectName": null,
+            "editingModelObjectNameChange": null,
+            "filterOrder": [],
+            "isSql": false,
+            "resultConfig": {},
+            "aiConfig": {},
+            "sourceQueryPresentationTabIdx": null,
+            "allowedPrivateToWorkbookModelId": null,
+            "query": {
+              "id": "3cfdf17f-e517-48fd-ab5c-3082488549b3",
+              "createdAt": "2026-02-08T17:48:22.077Z",
+              "jsonHash": "WqnKQNRm2R2zfaiAzF2/aheG9nkkIHRA55LtxyE7WGQ=",
+              "modelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+              "queryJson": {
+                "limit": 1000,
+                "sorts": [
+                  {
+                    "null_sort": "DIALECT_DEFAULT",
+                    "column_name": "mart_seo_weekly_funnel.week_start",
+                    "is_column_sort": false,
+                    "sort_descending": false
+                  }
+                ],
+                "table": "mart_seo_weekly_funnel",
+                "fields": [
+                  "mart_seo_weekly_funnel.week_start",
+                  "mart_seo_weekly_funnel.overall_bounce_rate"
+                ],
+                "pivots": [],
+                "dbtMode": false,
+                "filters": {},
+                "modelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+                "version": 8,
+                "rewriteSql": true,
+                "row_totals": {},
+                "fill_fields": [],
+                "calculations": [],
+                "column_limit": 50,
+                "join_via_map": {},
+                "column_totals": {},
+                "userEditedSQL": "",
+                "dimensionIndex": 0,
+                "default_group_by": true,
+                "custom_summary_types": {}
+              }
+            },
+            "visConfig": {
+              "id": "acfd38da-158a-40b2-bd46-6feb1a48d6da",
+              "createdAt": "2026-01-27T21:02:13.183Z",
+              "visType": null,
+              "chartType": "line",
+              "jsonHash": "6HTHAKciMV3sxOcJ/b7H29VcJQziIyfXs44H2KKsEv4=",
+              "spec": {},
+              "fields": [],
+              "version": 0
+            }
+          }
+        }
+      ]
+    },
+    "queryPresentationCollectionId": "1ecc448e-1941-4eb3-9b0c-9bb45db250a5",
+    "refreshInterval": null,
+    "updater": {
+      "id": "ab9b9e6b-d10d-4249-a77d-886a06a23ac7",
+      "name": "Inaan Damaraju"
+    },
+    "metadata": {
+      "hiddenTiles": [],
+      "layouts": {
+        "lg": [
+          {
+            "i": "1",
+            "h": 51,
+            "w": 12,
+            "x": 0,
+            "y": 0
+          },
+          {
+            "i": "2",
+            "h": 51,
+            "w": 12,
+            "x": 12,
+            "y": 0
+          },
+          {
+            "i": "3",
+            "h": 51,
+            "w": 12,
+            "x": 0,
+            "y": 51
+          },
+          {
+            "i": "4",
+            "h": 51,
+            "w": 12,
+            "x": 12,
+            "y": 51
+          },
+          {
+            "i": "5",
+            "h": 51,
+            "w": 12,
+            "x": 0,
+            "y": 102
+          },
+          {
+            "i": "6",
+            "h": 51,
+            "w": 12,
+            "x": 12,
+            "y": 102
+          },
+          {
+            "i": "7",
+            "h": 51,
+            "w": 12,
+            "x": 0,
+            "y": 153
+          },
+          {
+            "i": "8",
+            "h": 51,
+            "w": 12,
+            "x": 12,
+            "y": 153
+          }
+        ]
+      },
+      "textTiles": [],
+      "tileControlMap": {},
+      "tileFilterMap": {},
+      "tileSettings": {}
+    },
+    "metadataVersion": 2,
+    "ephemeral": "1:ecYPPwXE,2:0fhTwpih,3:CMmDO8f1,4:4XHMnI0_,5:R5hKe8p8,6:GzapZaha,7:wFbTRvfz,8:s_WZAfhK",
+    "identifier": "86a587ca",
+    "model": {
+      "baseModelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+      "connectionId": "ac96c9fd-a1a3-4399-b71d-e73e3fb94043",
+      "deletedAt": null,
+      "id": "76e956f2-9f91-4144-972a-995297bcc8ff",
+      "modelKind": "WORKBOOK"
+    },
+    "modelId": "76e956f2-9f91-4144-972a-995297bcc8ff",
+    "name": "SEO Funnel (Fixed v3)",
+    "sharedModelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+    "workbook": {
+      "identifier": "86a587ca",
+      "organizationRole": null,
+      "folder": null
+    },
+    "workbookId": "76e956f2-9f91-4144-972a-995297bcc8ff"
+  },
+  "document": {
+    "baseModel": {
+      "baseModelId": "ac96c9fd-a1a3-4399-b71d-e73e3fb94043",
+      "disableAutoSync": null,
+      "gitFollower": false,
+      "gitInSync": null,
+      "hasGit": false,
+      "id": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+      "modelKind": "SHARED",
+      "name": "Lindy Snowflake",
+      "pullRequestRequired": false
+    },
+    "connection": {
+      "allowBranchConnectionEnvironments": true,
+      "branchConnectionEnvironmentOverridesUserAttr": false,
+      "database": "TRAINING_DATABASE",
+      "deletedAt": null,
+      "dialect": "snowflake",
+      "environmentConnectionSwitchesSchemaModel": false,
+      "id": "ac96c9fd-a1a3-4399-b71d-e73e3fb94043",
+      "includeOtherCatalogs": [
+        "dbt_dev"
+      ],
+      "name": "Lindy Snowflake",
+      "userAttributeValuesForDefaultEnvironment": null,
+      "connectionEnvironments": null,
+      "userAttributeNameForConnectionEnvironments": null
+    },
+    "connectionId": "ac96c9fd-a1a3-4399-b71d-e73e3fb94043",
+    "createdAt": "2026-02-08T17:48:22.107Z",
+    "deletedAt": null,
+    "documentId": "76e956f2-9f91-4144-972a-995297bcc8ff",
+    "identifier": "86a587ca",
+    "isConnectionDeleted": false,
+    "isDeleted": false,
+    "lastItemIndex": 8,
+    "modelId": "76e956f2-9f91-4144-972a-995297bcc8ff",
+    "owner": {
+      "id": "ab9b9e6b-d10d-4249-a77d-886a06a23ac7",
+      "name": "Inaan Damaraju"
+    },
+    "sharedModelId": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+    "updatedAt": "2026-02-08T17:48:22.107Z",
+    "updater": {
+      "id": "ab9b9e6b-d10d-4249-a77d-886a06a23ac7",
+      "name": "Inaan Damaraju"
+    },
+    "workbookId": "76e956f2-9f91-4144-972a-995297bcc8ff",
+    "dashboardId": "3dfb6776-c47f-4f43-a1f7-a62518ec0d76",
+    "dashboardMiniUuid": "86a587ca",
+    "hasDashboard": true,
+    "ephemeral": "1:ecYPPwXE,2:0fhTwpih,3:CMmDO8f1,4:4XHMnI0_,5:R5hKe8p8,6:GzapZaha,7:wFbTRvfz,8:s_WZAfhK",
+    "folder": null,
+    "isDocument": true,
+    "isDraft": false,
+    "name": "SEO Funnel (Fixed v3)",
+    "publishedAt": "2026-02-08T17:48:22.107Z",
+    "scope": "restricted",
+    "type": "published"
+  },
+  "exportVersion": "0.1",
+  "fileUploads": {},
+  "queryModels": {},
+  "workbookModel": {
+    "id": "76e956f2-9f91-4144-972a-995297bcc8ff",
+    "connection_id": "ac96c9fd-a1a3-4399-b71d-e73e3fb94043",
+    "views": [],
+    "relationships": [],
+    "model_kind": "WORKBOOK",
+    "base_model_id": "7a9e7e62-41b5-4993-8b89-6f4cf869e14a",
+    "topics": [],
+    "ignored_schemas": [],
+    "ignored_views": [],
+    "all_schema_names": [],
+    "virtualized_schemas": [],
+    "deleted_topics": [],
+    "dbt_virtualization_enabled": true
+  }
+}

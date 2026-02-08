@@ -76,6 +76,121 @@ _OMNI_TO_CHART_TYPE: dict[str, str] = {
 }
 
 
+def _to_omni_filter(f: FilterSpec) -> dict[str, Any]:
+    """Convert an internal FilterSpec to Omni's filter format.
+
+    Omni filters use ``{kind, type, values/right_side, ...}`` instead of
+    our simple ``{operator, value}``.  Maps common operators to Omni
+    equivalents learned from real working dashboards.
+    """
+    op = f.operator.lower() if f.operator else "is"
+    value = f.value
+
+    # Map common operator names to Omni's kind/type system
+    if op in ("date_range", "between", "date_between"):
+        return {
+            "kind": "BETWEEN",
+            "type": "date",
+            "ui_type": "BETWEEN",
+            "isFiscal": False,
+            "left_side": str(value) if value else "this year",
+            "right_side": "now",
+            "is_negative": False,
+        }
+    elif op in ("before", "date_before"):
+        return {
+            "kind": "BEFORE",
+            "type": "date",
+            "ui_type": "BEFORE",
+            "isFiscal": False,
+            "right_side": str(value) if value else "1 weeks ago",
+            "is_negative": False,
+        }
+    elif op in ("past", "last", "date_past"):
+        return {
+            "kind": "TIME_FOR_INTERVAL_DURATION",
+            "type": "date",
+            "ui_type": "PAST",
+            "isFiscal": False,
+            "left_side": str(value) if value else "12 complete weeks ago",
+            "right_side": str(value).replace("ago", "").strip() if value else "12 weeks",
+            "is_negative": False,
+        }
+    elif op in ("is", "equals", "="):
+        if isinstance(value, list):
+            return {
+                "kind": "EQUALS",
+                "type": "string",
+                "values": [str(v) for v in value],
+                "is_negative": False,
+                "appliedLabels": {},
+            }
+        return {
+            "kind": "EQUALS",
+            "type": "string",
+            "values": [str(value)] if value is not None else [],
+            "is_negative": False,
+            "appliedLabels": {},
+        }
+    elif op in ("is_not", "not_equals", "!="):
+        if isinstance(value, list):
+            return {
+                "kind": "EQUALS",
+                "type": "string",
+                "values": [str(v) for v in value],
+                "is_negative": True,
+                "appliedLabels": {},
+            }
+        return {
+            "kind": "EQUALS",
+            "type": "string",
+            "values": [str(value)] if value is not None else [],
+            "is_negative": True,
+            "appliedLabels": {},
+        }
+    elif op in ("gt", ">", "greater_than"):
+        return {
+            "kind": "GREATER_THAN",
+            "type": "number",
+            "right_side": str(value) if value is not None else "0",
+            "is_negative": False,
+        }
+    elif op in ("lt", "<", "less_than"):
+        return {
+            "kind": "LESS_THAN",
+            "type": "number",
+            "right_side": str(value) if value is not None else "0",
+            "is_negative": False,
+        }
+    elif op in ("contains", "like"):
+        return {
+            "kind": "CONTAINS",
+            "type": "string",
+            "right_side": str(value) if value is not None else "",
+            "is_negative": False,
+        }
+    elif op in ("is_null", "null"):
+        return {
+            "kind": "IS_NULL",
+            "type": "string",
+            "is_negative": False,
+        }
+    elif op in ("is_not_null", "not_null"):
+        return {
+            "kind": "IS_NULL",
+            "type": "string",
+            "is_negative": True,
+        }
+    else:
+        # Fallback: pass through as equals
+        return {
+            "kind": "EQUALS",
+            "type": "string",
+            "values": [str(value)] if value is not None else [],
+            "is_negative": False,
+        }
+
+
 class DashboardSerializer:
     """Convert DashboardDefinition to/from various formats."""
 
@@ -84,6 +199,12 @@ class DashboardSerializer:
         """Convert a DashboardDefinition to the Omni POST /api/v1/documents payload.
 
         This is the primary serialization target for creating dashboards via API.
+
+        Applies Omni-specific rules learned from real working dashboards:
+        - KPI tiles must NOT have sorts (they're single-value aggregations)
+        - Sort column_names MUST appear in the fields list
+        - Filters use Omni's ``{kind, type, values}`` format
+        - Default limit is 1000 (Omni's standard)
         """
         if not definition.model_id:
             raise DashboardDefinitionError(
@@ -93,42 +214,57 @@ class DashboardSerializer:
 
         query_presentations = []
         for tile in definition.tiles:
+            omni_chart_type = _CHART_TYPE_TO_OMNI.get(tile.chart_type, tile.chart_type)
+            is_kpi = omni_chart_type in ("kpi", "summaryValue")
+
+            # Build fields list — ensure sort columns are included
+            fields = list(tile.query.fields)
+
+            # KPI tiles: no sorts (working KPIs in Omni always have sorts=[])
+            # Other tiles: validate sort columns are in fields
+            sorts: list[dict[str, Any]] = []
+            if not is_kpi and tile.query.sorts:
+                for s in tile.query.sorts:
+                    if s.column_name not in fields:
+                        fields.append(s.column_name)
+                    sorts.append({
+                        "column_name": s.column_name,
+                        "sort_descending": s.sort_descending,
+                        "null_sort": "DIALECT_DEFAULT",
+                        "is_column_sort": False,
+                    })
+
+            # Determine limit — KPI tiles use 1, others default to 1000
+            limit = tile.query.limit
+            if is_kpi and limit > 1:
+                limit = 1
+            elif limit == 200:
+                # Upgrade old default (200) to Omni's standard (1000)
+                limit = 1000
+
             qp: dict[str, Any] = {
                 "name": tile.name,
                 "description": tile.description,
                 "query": {
                     "table": tile.query.table,
-                    "fields": tile.query.fields,
+                    "fields": fields,
                     "modelId": definition.model_id,
-                    "limit": tile.query.limit,
+                    "limit": limit,
+                    "sorts": sorts,
                 },
             }
 
-            # Sorts — Omni queryJson uses snake_case for sort fields
-            if tile.query.sorts:
-                qp["query"]["sorts"] = [
-                    {
-                        "column_name": s.column_name,
-                        "sort_descending": s.sort_descending,
-                        "null_sort": "DIALECT_DEFAULT",
-                        "is_column_sort": False,
-                    }
-                    for s in tile.query.sorts
-                ]
-
-            # Filters
+            # Filters — convert to Omni's format
             if tile.query.filters:
-                qp["query"]["filters"] = {
-                    f.field: {"operator": f.operator, "value": f.value}
-                    for f in tile.query.filters
-                }
+                omni_filters: dict[str, Any] = {}
+                for f in tile.query.filters:
+                    omni_filters[f.field] = _to_omni_filter(f)
+                qp["query"]["filters"] = omni_filters
 
             # Pivots
             if tile.query.pivots:
                 qp["query"]["pivots"] = tile.query.pivots
 
-            # Chart type — map internal names to Omni API names
-            omni_chart_type = _CHART_TYPE_TO_OMNI.get(tile.chart_type, tile.chart_type)
             qp["chartType"] = omni_chart_type
             qp["prefersChart"] = omni_chart_type not in ("table", "markdown")
 

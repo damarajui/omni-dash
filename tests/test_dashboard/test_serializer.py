@@ -3,6 +3,10 @@
 import pytest
 
 from omni_dash.dashboard.builder import DashboardBuilder
+from omni_dash.dashboard.definition import (
+    DashboardDefinition,
+    SortSpec,
+)
 from omni_dash.dashboard.serializer import DashboardSerializer
 from omni_dash.exceptions import DashboardDefinitionError
 
@@ -208,6 +212,118 @@ def test_from_omni_export():
     assert definition.tiles[0].position is not None
     assert definition.tiles[0].position.x == 0
     assert definition.tiles[0].position.w == 12
+
+
+def test_kpi_tiles_have_no_sorts():
+    """KPI tiles must NOT have sorts — Omni rejects sort fields not in the fields list."""
+    definition = (
+        DashboardBuilder("KPI Test")
+        .model("m-1")
+        .dbt_source("my_table")
+        .add_number_tile("Metric A", metric_col="value_a")
+        .build()
+    )
+    # Manually add a sort that references a column not in fields
+    definition.tiles[0].query.sorts = [
+        SortSpec(column_name="my_table.date_col", sort_descending=True)
+    ]
+
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    kpi_qp = payload["queryPresentations"][0]
+
+    # KPI tiles must have empty sorts
+    assert kpi_qp["query"]["sorts"] == []
+    assert kpi_qp["chartType"] == "kpi"
+    # The sort column should NOT be added to fields for KPI tiles
+    assert "my_table.date_col" not in kpi_qp["query"]["fields"]
+
+
+def test_sort_columns_added_to_fields():
+    """Sort columns not in the fields list should be automatically added."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, SortSpec as SS
+
+    definition = DashboardDefinition(
+        name="Sort Fix Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Chart",
+                chart_type="line",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.metric"],
+                    sorts=[SS(column_name="t.date_col", sort_descending=False)],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    qp = payload["queryPresentations"][0]
+
+    # sort column should be added to fields automatically
+    assert "t.date_col" in qp["query"]["fields"]
+    assert "t.metric" in qp["query"]["fields"]
+    assert qp["query"]["sorts"][0]["column_name"] == "t.date_col"
+
+
+def test_kpi_limit_capped_at_1():
+    """KPI tiles should have limit=1."""
+    definition = (
+        DashboardBuilder("Limit Test")
+        .model("m-1")
+        .dbt_source("t")
+        .add_number_tile("KPI", metric_col="val")
+        .build()
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    assert payload["queryPresentations"][0]["query"]["limit"] == 1
+
+
+def test_default_limit_upgraded_to_1000():
+    """Default limit of 200 should be upgraded to Omni's standard 1000."""
+    definition = (
+        DashboardBuilder("Limit Test")
+        .model("m-1")
+        .dbt_source("t")
+        .add_line_chart("Chart", time_col="d", metric_cols=["v"])
+        .build()
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    assert payload["queryPresentations"][0]["query"]["limit"] == 1000
+
+
+def test_filter_format_omni():
+    """Filters should be converted to Omni's {kind, type, values} format."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, FilterSpec as FS
+
+    definition = DashboardDefinition(
+        name="Filter Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Filtered",
+                chart_type="bar",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.dim", "t.val"],
+                    filters=[
+                        FS(field="t.status", operator="is", value="active"),
+                        FS(field="t.date", operator="before", value="1 weeks ago"),
+                    ],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    filters = payload["queryPresentations"][0]["query"]["filters"]
+
+    assert "t.status" in filters
+    assert filters["t.status"]["kind"] == "EQUALS"
+    assert filters["t.status"]["values"] == ["active"]
+
+    assert "t.date" in filters
+    assert filters["t.date"]["kind"] == "BEFORE"
+    assert filters["t.date"]["type"] == "date"
 
 
 def test_from_yaml_invalid():

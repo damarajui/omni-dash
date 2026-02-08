@@ -106,16 +106,32 @@ class DocumentService:
         if not result or not isinstance(result, dict):
             raise OmniAPIError(0, "Empty response from document creation")
 
+        # The create endpoint returns {dashboard: {...}, workbook: {...}}.
+        # The document ID is workbook.identifier (short ID for URLs),
+        # the full UUID is workbook.id, and the name is workbook.name.
+        workbook = result.get("workbook", {})
+        dashboard = result.get("dashboard", {})
+
+        # Use workbook.identifier (short URL ID) as primary, fall back
+        # to nested IDs, then top-level fields for backwards compat.
+        doc_id = (
+            workbook.get("identifier")
+            or workbook.get("id")
+            or dashboard.get("dashboardId")
+            or result.get("identifier")
+            or result.get("id", "")
+        )
+
         return DashboardResponse(
-            document_id=result.get("identifier", result.get("id", result.get("documentId", ""))),
-            name=result.get("name", payload.get("name", "")),
-            model_id=result.get("modelId", payload.get("modelId", "")),
+            document_id=doc_id,
+            name=workbook.get("name", result.get("name", payload.get("name", ""))),
+            model_id=payload.get("modelId", ""),
             query_presentations=result.get("queryPresentations", []),
-            layouts=result.get("layouts", []),
-            text_tiles=result.get("textTiles", []),
-            tile_settings=result.get("tileSettings", {}),
-            created_at=result.get("createdAt", ""),
-            updated_at=result.get("updatedAt", ""),
+            layouts=dashboard.get("metadata", {}).get("layouts", {}).get("lg", []),
+            text_tiles=dashboard.get("metadata", {}).get("textTiles", []),
+            tile_settings=dashboard.get("metadata", {}).get("tileSettings", {}),
+            created_at=workbook.get("createdAt", result.get("createdAt", "")),
+            updated_at=workbook.get("updatedAt", result.get("updatedAt", "")),
         )
 
     def get_dashboard(self, document_id: str) -> DashboardResponse:
