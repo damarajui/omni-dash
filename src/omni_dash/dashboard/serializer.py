@@ -104,12 +104,14 @@ class DashboardSerializer:
                 },
             }
 
-            # Sorts
+            # Sorts — Omni queryJson uses snake_case for sort fields
             if tile.query.sorts:
                 qp["query"]["sorts"] = [
                     {
-                        "columnName": s.column_name,
-                        "sortDescending": s.sort_descending,
+                        "column_name": s.column_name,
+                        "sort_descending": s.sort_descending,
+                        "null_sort": "DIALECT_DEFAULT",
+                        "is_column_sort": False,
                     }
                     for s in tile.query.sorts
                 ]
@@ -484,8 +486,8 @@ class DashboardSerializer:
 
             sorts = [
                 SortSpec(
-                    column_name=s.get("columnName", ""),
-                    sort_descending=s.get("sortDescending", False),
+                    column_name=s.get("column_name", s.get("columnName", "")),
+                    sort_descending=s.get("sort_descending", s.get("sortDescending", False)),
                 )
                 for s in query.get("sorts", [])
             ]

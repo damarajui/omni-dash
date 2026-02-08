@@ -46,6 +46,11 @@ def test_to_omni_payload(sample_definition):
     assert qp0["query"]["modelId"] == "abc-123"
     assert "mart_seo_weekly_funnel.week_start" in qp0["query"]["fields"]
 
+    # Sorts use snake_case (Omni queryJson format)
+    assert qp0["query"]["sorts"][0]["column_name"] == "mart_seo_weekly_funnel.week_start"
+    assert qp0["query"]["sorts"][0]["sort_descending"] is False
+    assert qp0["query"]["sorts"][0]["null_sort"] == "DIALECT_DEFAULT"
+
     # Number tile → mapped to "kpi" for Omni API
     qp2 = payload["queryPresentations"][2]
     assert qp2["chartType"] == "kpi"
@@ -175,7 +180,7 @@ def test_from_omni_export():
                     _make_omni_export_qp(
                         "Chart 1", "bar", "my_table",
                         ["my_table.col1", "my_table.col2"],
-                        sorts=[{"columnName": "my_table.col1", "sortDescending": True}],
+                        sorts=[{"column_name": "my_table.col1", "sort_descending": True, "null_sort": "DIALECT_DEFAULT", "is_column_sort": False}],
                         vis_spec={"xAxis": "my_table.col1", "yAxis": ["my_table.col2"], "stacked": True},
                     ),
                 ],

@@ -107,7 +107,7 @@ class DocumentService:
             raise OmniAPIError(0, "Empty response from document creation")
 
         return DashboardResponse(
-            document_id=result.get("id", result.get("documentId", "")),
+            document_id=result.get("identifier", result.get("id", result.get("documentId", ""))),
             name=result.get("name", payload.get("name", "")),
             model_id=result.get("modelId", payload.get("modelId", "")),
             query_presentations=result.get("queryPresentations", []),
