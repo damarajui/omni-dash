@@ -61,8 +61,10 @@ def export(
 
         # Determine output path
         if output is None:
-            # Auto-generate from dashboard name
-            safe_name = definition.name.lower().replace(" ", "_")[:50] if not full else document_id[:12]
+            if full:
+                safe_name = document_id[:12]
+            else:
+                safe_name = definition.name.lower().replace(" ", "_")[:50]
             output = Path(f"dashboards/{safe_name}{default_ext}")
 
         # Ensure parent directory exists

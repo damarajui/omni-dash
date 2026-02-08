@@ -5,14 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from omni_dash.dashboard.definition import (
-    CHART_TYPE_DEFAULTS,
     DashboardDefinition,
     DashboardFilter,
     FilterSpec,
     SortSpec,
     TextTile,
     Tile,
-    TilePosition,
     TileQuery,
     TileVisConfig,
 )

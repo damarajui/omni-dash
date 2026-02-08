@@ -10,14 +10,11 @@ from omni_dash.dashboard.definition import (
     TILE_SIZE_WIDTHS,
     ChartType,
     DashboardDefinition,
-    DashboardFilter,
     Tile,
     TilePosition,
     TileQuery,
     TileSize,
-    TileVisConfig,
 )
-
 
 # ── TilePosition ──
 

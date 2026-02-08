@@ -89,9 +89,6 @@ class ConfigurationError(OmniDashError):
     """Missing or invalid configuration (API keys, paths, etc.)."""
 
 
-class CacheError(OmniDashError):
-    """Error reading or writing the local cache."""
-
 
 class AIGenerationError(OmniDashError):
     """Claude failed to generate a valid dashboard."""
