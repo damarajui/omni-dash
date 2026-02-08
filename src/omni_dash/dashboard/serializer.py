@@ -421,30 +421,50 @@ def _build_markdown_vis(tile: Tile) -> dict[str, Any]:
     """Build Omni markdown tile visConfig.
 
     Uses ``omni-markdown`` visType with raw markdown/HTML content.
-    Supports Mustache ``{{result._last.field.value}}`` template syntax.
+    Supports Mustache templates:
+    - ``{{result.0.field_name.value}}`` for formatted display values
+    - ``{{result.0.field_name.raw}}`` for raw values (useful for CSS)
+    - ``{{result._last.field_name.value}}`` for last row values
     """
-    return {
+    # Extract field names from query to include in visConfig.fields
+    vis_fields = []
+    for f in tile.query.fields:
+        # Strip table prefix: "table.col" → "col"
+        vis_fields.append(f.split(".")[-1] if "." in f else f)
+
+    vis: dict[str, Any] = {
         "visType": "omni-markdown",
         "chartType": "markdown",
         "spec": {
             "markdown": tile.vis_config.markdown_template or tile.description or "",
         },
     }
+    if vis_fields:
+        vis["fields"] = vis_fields
+    return vis
 
 
 def _build_table_vis(tile: Tile) -> dict[str, Any]:
-    """Build Omni table visConfig matching working spreadsheet tables."""
+    """Build Omni table visConfig matching working spreadsheet tables.
+
+    Supports per-column formatting via ``column_formats`` in vis_config:
+    ``{"COL_NAME": {"align": "right"}, ...}``
+    """
+    spec: dict[str, Any] = {
+        "tableType": "spreadsheet",
+        "rowBanding": {"enabled": False, "bandSize": 1},
+        "hideIndexColumn": False,
+        "truncateHeaders": True,
+        "showDescriptions": True,
+        "visColumnDisplay": "hide-view-name",
+    }
+    if tile.vis_config.column_formats:
+        spec["columnFormats"] = tile.vis_config.column_formats
+
     return {
         "visType": "omni-table",
         "chartType": "table",
-        "spec": {
-            "tableType": "spreadsheet",
-            "rowBanding": {"enabled": False, "bandSize": 1},
-            "hideIndexColumn": False,
-            "truncateHeaders": True,
-            "showDescriptions": True,
-            "visColumnDisplay": "hide-view-name",
-        },
+        "spec": spec,
     }
 
 

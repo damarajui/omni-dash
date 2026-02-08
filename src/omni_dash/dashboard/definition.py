@@ -194,6 +194,10 @@ class TileVisConfig(BaseModel):
     # Markdown tile content
     markdown_template: str | None = None  # Raw markdown/HTML with Mustache syntax
 
+    # Table-specific
+    # Per-column formats: {"COL_NAME": {"align": "right"}, ...}
+    column_formats: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
 
 class Tile(BaseModel):
     """A single tile (chart/table/number) on a dashboard."""

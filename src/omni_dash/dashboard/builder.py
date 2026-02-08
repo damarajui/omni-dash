@@ -250,8 +250,14 @@ class DashboardBuilder:
         limit: int = 100,
         size: str = "full",
         description: str = "",
+        column_formats: dict[str, dict[str, Any]] | None = None,
     ) -> DashboardBuilder:
-        """Add a data table tile."""
+        """Add a data table tile.
+
+        Args:
+            column_formats: Per-column formatting, e.g.
+                ``{"REVENUE": {"align": "right"}, "NAME": {"align": "left"}}``
+        """
         sorts = []
         if sort_by:
             sorts.append(SortSpec(column_name=self._qualify_field(sort_by), sort_descending=sort_desc))
@@ -267,6 +273,9 @@ class DashboardBuilder:
                     limit=limit,
                 ),
                 chart_type="table",
+                vis_config=TileVisConfig(
+                    column_formats=column_formats or {},
+                ),
                 size=size,
             )
         )
