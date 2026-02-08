@@ -46,9 +46,63 @@ def test_to_omni_payload(sample_definition):
     assert qp0["query"]["modelId"] == "abc-123"
     assert "mart_seo_weekly_funnel.week_start" in qp0["query"]["fields"]
 
-    # Number tile
+    # Number tile → mapped to "kpi" for Omni API
     qp2 = payload["queryPresentations"][2]
-    assert qp2["chartType"] == "number"
+    assert qp2["chartType"] == "kpi"
+
+    # Stacked bar → mapped to "barStacked" for Omni API
+    qp1 = payload["queryPresentations"][1]
+    assert qp1["chartType"] == "barStacked"
+
+
+def test_chart_type_mapping_all():
+    """Verify all internal chart types map to valid Omni API types."""
+    from omni_dash.dashboard.serializer import _CHART_TYPE_TO_OMNI
+
+    omni_valid = {
+        "auto", "area", "areaStacked", "areaStackedPercentage",
+        "bar", "barLine", "barGrouped", "barStacked", "barStackedPercentage",
+        "boxplot", "code", "column", "columnGrouped", "columnStacked",
+        "columnStackedPercentage", "heatmap", "kpi", "line", "lineColor",
+        "map", "regionMap", "markdown", "omni-ai-summary-markdown", "pie",
+        "sankey", "point", "pointColor", "pointSize", "pointSizeColor",
+        "singleRecord", "omni-spreadsheet", "summaryValue", "table",
+    }
+    for internal, omni in _CHART_TYPE_TO_OMNI.items():
+        assert omni in omni_valid, f"Internal '{internal}' maps to invalid Omni type '{omni}'"
+
+
+def test_from_omni_export_reverse_maps_chart_types():
+    """Verify Omni chart types are reverse-mapped when importing."""
+    export_data = {
+        "document": {"name": "Test", "modelId": "m1"},
+        "dashboard": {
+            "queryPresentations": [
+                {
+                    "name": "KPI",
+                    "chartType": "kpi",
+                    "query": {"table": "t", "fields": ["t.a"]},
+                    "visualization": {"config": {}},
+                },
+                {
+                    "name": "Stacked",
+                    "chartType": "barStacked",
+                    "query": {"table": "t", "fields": ["t.a", "t.b"]},
+                    "visualization": {"config": {}},
+                },
+                {
+                    "name": "Scatter",
+                    "chartType": "point",
+                    "query": {"table": "t", "fields": ["t.x", "t.y"]},
+                    "visualization": {"config": {}},
+                },
+            ],
+        },
+    }
+    defn = DashboardSerializer.from_omni_export(export_data)
+    assert defn.tiles[0].chart_type == "number"
+    assert defn.tiles[1].chart_type == "stacked_bar"
+    assert defn.tiles[2].chart_type == "scatter"
 
 
 def test_payload_requires_model_id():
