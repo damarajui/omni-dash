@@ -337,6 +337,430 @@ class TestListFolders:
 
 
 # ---------------------------------------------------------------------------
+# import_dashboard
+# ---------------------------------------------------------------------------
+
+
+SAMPLE_EXPORT = {
+    "document": {"name": "Exported", "sharedModelId": "model-abc", "folderId": "f1"},
+    "dashboard": {"model": {"baseModelId": "model-abc"}, "tiles": []},
+    "workbookModel": {"base_model_id": "model-abc"},
+    "exportVersion": "0.1",
+}
+
+
+class TestImportDashboard:
+    def test_imports_successfully(self, mock_doc_svc):
+        from omni_dash.api.documents import ImportResponse
+
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
+            document_id="imported-1", name="My Import"
+        )
+
+        with patch("omni_dash.mcp.server.get_settings") as mock_s:
+            mock_s.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+            result = json.loads(mcp_server.import_dashboard(
+                export_data=SAMPLE_EXPORT,
+            ))
+
+        assert result["status"] == "imported"
+        assert result["dashboard_id"] == "imported-1"
+        assert "url" in result
+
+    def test_passes_name_override(self, mock_doc_svc):
+        from omni_dash.api.documents import ImportResponse
+
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
+            document_id="x", name="Override"
+        )
+
+        with patch("omni_dash.mcp.server.get_settings") as mock_s:
+            mock_s.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+            mcp_server.import_dashboard(
+                export_data=SAMPLE_EXPORT, name="Override"
+            )
+
+        _, kwargs = mock_doc_svc.import_dashboard.call_args
+        assert kwargs["name"] == "Override"
+
+    def test_resolves_model_from_export(self, mock_doc_svc):
+        from omni_dash.api.documents import ImportResponse
+
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
+            document_id="x", name="X"
+        )
+
+        with patch("omni_dash.mcp.server.get_settings") as mock_s:
+            mock_s.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+            mcp_server.import_dashboard(export_data=SAMPLE_EXPORT)
+
+        _, kwargs = mock_doc_svc.import_dashboard.call_args
+        assert kwargs["base_model_id"] == "model-abc"
+
+    def test_handles_error(self, mock_doc_svc):
+        from omni_dash.exceptions import OmniAPIError
+
+        mock_doc_svc.import_dashboard.side_effect = OmniAPIError(400, "bad")
+        result = json.loads(mcp_server.import_dashboard(export_data=SAMPLE_EXPORT))
+        assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# clone_dashboard
+# ---------------------------------------------------------------------------
+
+
+class TestCloneDashboard:
+    def test_clones_successfully(self, mock_doc_svc):
+        from omni_dash.api.documents import ImportResponse
+
+        mock_doc_svc.export_dashboard.return_value = SAMPLE_EXPORT
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
+            document_id="clone-1", name="Cloned"
+        )
+
+        with patch("omni_dash.mcp.server.get_settings") as mock_s:
+            mock_s.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+            result = json.loads(mcp_server.clone_dashboard(
+                dashboard_id="orig-1", new_name="Cloned"
+            ))
+
+        assert result["status"] == "cloned"
+        assert result["source_dashboard_id"] == "orig-1"
+        assert result["new_dashboard_id"] == "clone-1"
+
+    def test_passes_folder_override(self, mock_doc_svc):
+        from omni_dash.api.documents import ImportResponse
+
+        mock_doc_svc.export_dashboard.return_value = SAMPLE_EXPORT
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
+            document_id="x", name="X"
+        )
+
+        with patch("omni_dash.mcp.server.get_settings") as mock_s:
+            mock_s.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+            mcp_server.clone_dashboard(
+                dashboard_id="orig", new_name="X", folder_id="new-folder"
+            )
+
+        _, kwargs = mock_doc_svc.import_dashboard.call_args
+        assert kwargs["folder_id"] == "new-folder"
+
+    def test_handles_export_error(self, mock_doc_svc):
+        from omni_dash.exceptions import DocumentNotFoundError
+
+        mock_doc_svc.export_dashboard.side_effect = DocumentNotFoundError("bad")
+        result = json.loads(mcp_server.clone_dashboard(
+            dashboard_id="bad", new_name="X"
+        ))
+        assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# move_dashboard
+# ---------------------------------------------------------------------------
+
+
+class TestMoveDashboard:
+    def test_moves_successfully(self, mock_doc_svc):
+        from omni_dash.api.documents import ImportResponse
+
+        mock_doc_svc.export_dashboard.return_value = SAMPLE_EXPORT
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
+            document_id="moved-1", name="Exported"
+        )
+        mock_doc_svc.delete_dashboard.return_value = None
+
+        with patch("omni_dash.mcp.server.get_settings") as mock_s:
+            mock_s.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+            result = json.loads(mcp_server.move_dashboard(
+                dashboard_id="orig-1", target_folder_id="f2"
+            ))
+
+        assert result["status"] == "moved"
+        assert result["old_dashboard_id"] == "orig-1"
+        assert result["new_dashboard_id"] == "moved-1"
+        assert result["target_folder_id"] == "f2"
+
+    def test_deletes_original(self, mock_doc_svc):
+        from omni_dash.api.documents import ImportResponse
+
+        mock_doc_svc.export_dashboard.return_value = SAMPLE_EXPORT
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
+            document_id="x", name="X"
+        )
+        mock_doc_svc.delete_dashboard.return_value = None
+
+        with patch("omni_dash.mcp.server.get_settings") as mock_s:
+            mock_s.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+            mcp_server.move_dashboard(dashboard_id="orig-1", target_folder_id="f2")
+
+        mock_doc_svc.delete_dashboard.assert_called_once_with("orig-1")
+
+    def test_partial_on_delete_failure(self, mock_doc_svc):
+        from omni_dash.api.documents import ImportResponse
+        from omni_dash.exceptions import OmniAPIError
+
+        mock_doc_svc.export_dashboard.return_value = SAMPLE_EXPORT
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
+            document_id="new-1", name="X"
+        )
+        mock_doc_svc.delete_dashboard.side_effect = OmniAPIError(500, "fail")
+
+        with patch("omni_dash.mcp.server.get_settings") as mock_s:
+            mock_s.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+            result = json.loads(mcp_server.move_dashboard(
+                dashboard_id="orig-1", target_folder_id="f2"
+            ))
+
+        assert result["status"] == "partial"
+        assert "warning" in result
+        assert result["old_dashboard_id"] == "orig-1"
+        assert result["new_dashboard_id"] == "new-1"
+
+    def test_handles_export_error(self, mock_doc_svc):
+        from omni_dash.exceptions import DocumentNotFoundError
+
+        mock_doc_svc.export_dashboard.side_effect = DocumentNotFoundError("bad")
+        result = json.loads(mcp_server.move_dashboard(
+            dashboard_id="bad", target_folder_id="f2"
+        ))
+        assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# update_dashboard
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateDashboard:
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch("omni_dash.mcp.server.get_settings")
+    def test_updates_with_new_tiles(self, mock_settings, _, mock_doc_svc):
+        from omni_dash.api.documents import DashboardResponse
+
+        mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+        mock_doc_svc.export_dashboard.return_value = SAMPLE_EXPORT
+        mock_doc_svc.create_dashboard.return_value = DashboardResponse(
+            document_id="updated-1", name="Updated"
+        )
+        mock_doc_svc.delete_dashboard.return_value = None
+
+        tiles = [{
+            "name": "New Chart",
+            "chart_type": "bar",
+            "query": {"table": "t", "fields": ["t.a", "t.b"]},
+            "vis_config": {"x_axis": "t.a", "y_axis": ["t.b"]},
+            "size": "half",
+        }]
+
+        result = json.loads(mcp_server.update_dashboard(
+            dashboard_id="orig-1", tiles=tiles, name="Updated"
+        ))
+
+        assert result["status"] == "updated"
+        assert result["old_dashboard_id"] == "orig-1"
+        assert result["new_dashboard_id"] == "updated-1"
+        mock_doc_svc.delete_dashboard.assert_called_once_with("orig-1")
+
+    @patch("omni_dash.mcp.server.get_settings")
+    def test_updates_name_only(self, mock_settings, mock_doc_svc):
+        from omni_dash.api.documents import ImportResponse
+
+        mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+        mock_doc_svc.export_dashboard.return_value = SAMPLE_EXPORT
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
+            document_id="renamed-1", name="New Name"
+        )
+        mock_doc_svc.delete_dashboard.return_value = None
+
+        result = json.loads(mcp_server.update_dashboard(
+            dashboard_id="orig-1", name="New Name"
+        ))
+
+        assert result["status"] == "updated"
+        assert result["name"] == "New Name"
+        mock_doc_svc.import_dashboard.assert_called_once()
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch("omni_dash.mcp.server.get_settings")
+    def test_partial_on_delete_failure(self, mock_settings, _, mock_doc_svc):
+        from omni_dash.api.documents import DashboardResponse
+        from omni_dash.exceptions import OmniAPIError
+
+        mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+        mock_doc_svc.export_dashboard.return_value = SAMPLE_EXPORT
+        mock_doc_svc.create_dashboard.return_value = DashboardResponse(
+            document_id="new-1", name="X"
+        )
+        mock_doc_svc.delete_dashboard.side_effect = OmniAPIError(500, "fail")
+
+        tiles = [{
+            "name": "Chart",
+            "chart_type": "line",
+            "query": {"table": "t", "fields": ["t.a"]},
+            "vis_config": {},
+            "size": "half",
+        }]
+
+        result = json.loads(mcp_server.update_dashboard(
+            dashboard_id="orig-1", tiles=tiles
+        ))
+
+        assert result["status"] == "partial"
+        assert "warning" in result
+
+    def test_handles_export_error(self, mock_doc_svc):
+        from omni_dash.exceptions import DocumentNotFoundError
+
+        mock_doc_svc.export_dashboard.side_effect = DocumentNotFoundError("bad")
+        result = json.loads(mcp_server.update_dashboard(dashboard_id="bad"))
+        assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# add_tiles_to_dashboard
+# ---------------------------------------------------------------------------
+
+
+class TestAddTilesToDashboard:
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch("omni_dash.mcp.server.get_settings")
+    @patch("omni_dash.mcp.server.DashboardSerializer")
+    def test_adds_tiles(self, mock_serializer, mock_settings, _, mock_doc_svc):
+        from omni_dash.api.documents import DashboardResponse
+        from omni_dash.dashboard.definition import (
+            DashboardDefinition,
+            Tile,
+            TileQuery,
+            TileVisConfig,
+        )
+
+        mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+        mock_doc_svc.export_dashboard.return_value = SAMPLE_EXPORT
+
+        existing_tile = Tile(
+            name="Existing",
+            chart_type="line",
+            query=TileQuery(table="t", fields=["t.x"]),
+            vis_config=TileVisConfig(),
+        )
+        mock_serializer.from_omni_export.return_value = DashboardDefinition(
+            name="Dashboard",
+            model_id="model-123",
+            tiles=[existing_tile],
+        )
+        mock_serializer.to_omni_create_payload.return_value = {"name": "Dashboard"}
+
+        mock_doc_svc.create_dashboard.return_value = DashboardResponse(
+            document_id="updated-1", name="Dashboard"
+        )
+        mock_doc_svc.delete_dashboard.return_value = None
+
+        new_tiles = [{
+            "name": "New Bar",
+            "chart_type": "bar",
+            "query": {"table": "t", "fields": ["t.a", "t.b"]},
+            "vis_config": {"x_axis": "t.a", "y_axis": ["t.b"]},
+            "size": "half",
+        }]
+
+        result = json.loads(mcp_server.add_tiles_to_dashboard(
+            dashboard_id="orig-1", tiles=new_tiles
+        ))
+
+        assert result["status"] == "updated"
+        assert result["previous_tile_count"] == 1
+        assert result["tiles_added"] == 1
+        assert result["new_tile_count"] == 2
+
+    def test_rejects_empty_tiles(self, mock_doc_svc):
+        result = json.loads(mcp_server.add_tiles_to_dashboard(
+            dashboard_id="x", tiles=[]
+        ))
+        assert "error" in result
+
+    def test_handles_export_error(self, mock_doc_svc):
+        from omni_dash.exceptions import DocumentNotFoundError
+
+        mock_doc_svc.export_dashboard.side_effect = DocumentNotFoundError("bad")
+        result = json.loads(mcp_server.add_tiles_to_dashboard(
+            dashboard_id="bad",
+            tiles=[{"name": "X", "chart_type": "line", "query": {"table": "t", "fields": ["t.f"]}}],
+        ))
+        assert "error" in result
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch("omni_dash.mcp.server.get_settings")
+    @patch("omni_dash.mcp.server.DashboardSerializer")
+    def test_partial_on_delete_failure(self, mock_serializer, mock_settings, _, mock_doc_svc):
+        from omni_dash.api.documents import DashboardResponse
+        from omni_dash.dashboard.definition import DashboardDefinition
+        from omni_dash.exceptions import OmniAPIError
+
+        mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+        mock_doc_svc.export_dashboard.return_value = SAMPLE_EXPORT
+        mock_serializer.from_omni_export.return_value = DashboardDefinition(
+            name="D", model_id="m", tiles=[]
+        )
+        mock_serializer.to_omni_create_payload.return_value = {"name": "D"}
+        mock_doc_svc.create_dashboard.return_value = DashboardResponse(
+            document_id="new-1", name="D"
+        )
+        mock_doc_svc.delete_dashboard.side_effect = OmniAPIError(500, "fail")
+
+        tiles = [{
+            "name": "X",
+            "chart_type": "line",
+            "query": {"table": "t", "fields": ["t.f"]},
+            "vis_config": {},
+            "size": "half",
+        }]
+
+        result = json.loads(mcp_server.add_tiles_to_dashboard(
+            dashboard_id="orig-1", tiles=tiles
+        ))
+
+        assert result["status"] == "partial"
+        assert "warning" in result
+
+
+# ---------------------------------------------------------------------------
+# Helper: _resolve_model_id_from_export
+# ---------------------------------------------------------------------------
+
+
+class TestResolveModelIdFromExport:
+    def test_uses_user_override(self):
+        result = mcp_server._resolve_model_id_from_export({}, "user-model")
+        assert result == "user-model"
+
+    def test_uses_document_shared_model_id(self):
+        export = {"document": {"sharedModelId": "doc-model"}}
+        result = mcp_server._resolve_model_id_from_export(export)
+        assert result == "doc-model"
+
+    def test_uses_workbook_model(self):
+        export = {"document": {}, "workbookModel": {"base_model_id": "wb-model"}}
+        result = mcp_server._resolve_model_id_from_export(export)
+        assert result == "wb-model"
+
+    def test_uses_dashboard_model(self):
+        export = {
+            "document": {},
+            "workbookModel": {},
+            "dashboard": {"model": {"baseModelId": "dash-model"}},
+        }
+        result = mcp_server._resolve_model_id_from_export(export)
+        assert result == "dash-model"
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="fallback")
+    def test_falls_back_to_discovery(self, _):
+        result = mcp_server._resolve_model_id_from_export({"document": {}})
+        assert result == "fallback"
+
+
+# ---------------------------------------------------------------------------
 # MCP tool registration
 # ---------------------------------------------------------------------------
 
@@ -354,7 +778,12 @@ class TestMCPRegistration:
             "list_dashboards",
             "get_dashboard",
             "create_dashboard",
+            "update_dashboard",
+            "add_tiles_to_dashboard",
             "delete_dashboard",
+            "clone_dashboard",
+            "move_dashboard",
+            "import_dashboard",
             "export_dashboard",
             "list_topics",
             "get_topic_fields",
@@ -369,4 +798,4 @@ class TestMCPRegistration:
         async def check():
             return len(await mcp_server.mcp.list_tools())
 
-        assert asyncio.run(check()) == 9
+        assert asyncio.run(check()) == 14
