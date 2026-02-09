@@ -458,7 +458,7 @@ def test_dashboard_filters_applied_to_matching_tiles():
     for qp in payload["queryPresentations"]:
         filters = qp["query"].get("filters", {})
         assert "my_table.date" in filters
-        assert filters["my_table.date"]["kind"] == "BETWEEN"
+        assert filters["my_table.date"]["kind"] == "TIME_FOR_INTERVAL_DURATION"
         assert filters["my_table.date"]["type"] == "date"
 
 
@@ -894,7 +894,7 @@ def test_dashboard_filter_config_in_payload():
     fc = payload["filterConfig"][fid]
     assert fc["fieldName"] == "t.date"
     assert fc["label"] == "Date Filter"
-    assert fc["kind"] == "BETWEEN"
+    assert fc["kind"] == "TIME_FOR_INTERVAL_DURATION"
     assert fc["type"] == "date"
 
 

@@ -93,13 +93,16 @@ def _to_omni_filter(f: FilterSpec) -> dict[str, Any]:
 
     # Map common operator names to Omni's kind/type system
     if op in ("date_range", "between", "date_between"):
+        val_str = str(value) if value else "12 complete weeks ago"
+        # Extract the interval portion: "12 complete weeks ago" → "12 complete weeks"
+        interval = val_str.replace("ago", "").strip() if "ago" in val_str else val_str
         return {
-            "kind": "BETWEEN",
+            "kind": "TIME_FOR_INTERVAL_DURATION",
             "type": "date",
-            "ui_type": "BETWEEN",
+            "ui_type": "PAST",
             "isFiscal": False,
-            "left_side": str(value) if value else "this year",
-            "right_side": "now",
+            "left_side": val_str,
+            "right_side": interval,
             "is_negative": False,
         }
     elif op in ("before", "date_before"):
@@ -206,13 +209,15 @@ def _to_omni_filter_from_dashboard(dash_filter: DashboardFilter) -> dict[str, An
     value = dash_filter.default_value
 
     if ft == "date_range":
+        val_str = str(value) if value else "12 complete weeks ago"
+        interval = val_str.replace("ago", "").strip() if "ago" in val_str else val_str
         return {
-            "kind": "BETWEEN",
+            "kind": "TIME_FOR_INTERVAL_DURATION",
             "type": "date",
-            "ui_type": "BETWEEN",
+            "ui_type": "PAST",
             "isFiscal": False,
-            "left_side": str(value) if value else "this year",
-            "right_side": "now",
+            "left_side": val_str,
+            "right_side": interval,
             "is_negative": False,
         }
     elif ft == "select":
