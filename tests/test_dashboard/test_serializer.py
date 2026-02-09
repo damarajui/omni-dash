@@ -351,7 +351,7 @@ def test_cartesian_spec_generated_for_line_chart():
         ],
     )
     payload = DashboardSerializer.to_omni_create_payload(definition)
-    vis = payload["queryPresentations"][0]["visualization"]
+    vis = payload["queryPresentations"][0]["visConfig"]
 
     assert vis["visType"] == "basic"
     assert vis["chartType"] == "line"
@@ -377,7 +377,7 @@ def test_kpi_vis_generates_markdown_config():
         .build()
     )
     payload = DashboardSerializer.to_omni_create_payload(definition)
-    vis = payload["queryPresentations"][0]["visualization"]
+    vis = payload["queryPresentations"][0]["visConfig"]
 
     assert vis["visType"] == "omni-kpi"
     assert vis["chartType"] == "kpi"
@@ -399,7 +399,7 @@ def test_kpi_with_sparkline():
         .build()
     )
     payload = DashboardSerializer.to_omni_create_payload(definition)
-    mc = payload["queryPresentations"][0]["visualization"]["spec"]["markdownConfig"]
+    mc = payload["queryPresentations"][0]["visConfig"]["spec"]["markdownConfig"]
 
     assert len(mc) == 2
     assert mc[1]["type"] == "chart"
@@ -416,7 +416,7 @@ def test_markdown_tile_vis():
         .build()
     )
     payload = DashboardSerializer.to_omni_create_payload(definition)
-    vis = payload["queryPresentations"][0]["visualization"]
+    vis = payload["queryPresentations"][0]["visConfig"]
 
     assert vis["visType"] == "omni-markdown"
     assert vis["chartType"] == "markdown"
@@ -433,7 +433,7 @@ def test_table_vis_generates_spreadsheet_config():
         .build()
     )
     payload = DashboardSerializer.to_omni_create_payload(definition)
-    vis = payload["queryPresentations"][0]["visualization"]
+    vis = payload["queryPresentations"][0]["visConfig"]
 
     assert vis["visType"] == "omni-table"
     assert vis["chartType"] == "table"
@@ -487,7 +487,7 @@ def test_series_config_dual_axis():
         ],
     )
     payload = DashboardSerializer.to_omni_create_payload(definition)
-    vis = payload["queryPresentations"][0]["visualization"]
+    vis = payload["queryPresentations"][0]["visConfig"]
     spec = vis["spec"]
 
     assert vis["visType"] == "basic"
@@ -510,7 +510,7 @@ def test_value_format_in_kpi():
         .build()
     )
     payload = DashboardSerializer.to_omni_create_payload(definition)
-    mc = payload["queryPresentations"][0]["visualization"]["spec"]["markdownConfig"]
+    mc = payload["queryPresentations"][0]["visConfig"]["spec"]["markdownConfig"]
     assert mc[0]["config"]["field"]["format"] == "USDCURRENCY_0"
     assert mc[0]["config"]["field"]["label"]["value"] == "Total Rev"
 
@@ -525,7 +525,7 @@ def test_basic_vis_used_when_no_advanced_config():
         .build()
     )
     payload = DashboardSerializer.to_omni_create_payload(definition)
-    vis = payload["queryPresentations"][0]["visualization"]
+    vis = payload["queryPresentations"][0]["visConfig"]
     assert vis["visType"] == "basic"
 
 
@@ -550,7 +550,7 @@ def test_reference_lines_in_cartesian_spec():
         ],
     )
     payload = DashboardSerializer.to_omni_create_payload(definition)
-    vis = payload["queryPresentations"][0]["visualization"]
+    vis = payload["queryPresentations"][0]["visConfig"]
     spec = vis["spec"]
 
     assert vis["visType"] == "basic"
@@ -577,7 +577,7 @@ def test_heatmap_generates_heatmap_spec():
         .build()
     )
     payload = DashboardSerializer.to_omni_create_payload(definition)
-    vis = payload["queryPresentations"][0]["visualization"]
+    vis = payload["queryPresentations"][0]["visConfig"]
 
     assert vis["visType"] == "basic"
     assert vis["chartType"] == "heatmap"
@@ -606,7 +606,7 @@ def test_vegalite_tile_generates_vegalite_vis():
         .build()
     )
     payload = DashboardSerializer.to_omni_create_payload(definition)
-    vis = payload["queryPresentations"][0]["visualization"]
+    vis = payload["queryPresentations"][0]["visConfig"]
 
     assert vis["visType"] == "vegalite"
     assert vis["chartType"] == "code"
@@ -642,7 +642,7 @@ def test_color_values_in_cartesian_spec():
         ],
     )
     payload = DashboardSerializer.to_omni_create_payload(definition)
-    spec = payload["queryPresentations"][0]["visualization"]["spec"]
+    spec = payload["queryPresentations"][0]["visConfig"]["spec"]
 
     assert spec["color"]["field"]["name"] == "t.type"
     assert spec["color"]["manual"] is True
@@ -760,7 +760,7 @@ def test_frozen_column_in_table_vis():
         .build()
     )
     payload = DashboardSerializer.to_omni_create_payload(definition)
-    spec = payload["queryPresentations"][0]["visualization"]["spec"]
+    spec = payload["queryPresentations"][0]["visConfig"]["spec"]
     assert spec["frozenColumn"] == "t.id"
 
 
@@ -800,7 +800,7 @@ def test_data_labels_in_series_config():
         ],
     )
     payload = DashboardSerializer.to_omni_create_payload(definition)
-    series = payload["queryPresentations"][0]["visualization"]["spec"]["series"]
+    series = payload["queryPresentations"][0]["visConfig"]["spec"]["series"]
 
     assert series[0]["dataLabel"]["enabled"] is True
     assert series[0]["dataLabel"]["format"] == "PERCENT_1"
@@ -823,7 +823,7 @@ def test_kpi_comparison_swap_colors():
         .build()
     )
     payload = DashboardSerializer.to_omni_create_payload(definition)
-    mc = payload["queryPresentations"][0]["visualization"]["spec"]["markdownConfig"]
+    mc = payload["queryPresentations"][0]["visConfig"]["spec"]["markdownConfig"]
 
     assert len(mc) == 2
     assert mc[1]["type"] == "comparison"
@@ -866,7 +866,7 @@ def test_markdown_fields_are_fully_qualified():
         ],
     )
     payload = DashboardSerializer.to_omni_create_payload(definition)
-    vis = payload["queryPresentations"][0]["visualization"]
+    vis = payload["queryPresentations"][0]["visConfig"]
 
     assert vis["visType"] == "omni-markdown"
     assert vis["chartType"] == "markdown"
@@ -926,7 +926,7 @@ def test_vegalite_fields_included():
         ],
     )
     payload = DashboardSerializer.to_omni_create_payload(definition)
-    vis = payload["queryPresentations"][0]["visualization"]
+    vis = payload["queryPresentations"][0]["visConfig"]
 
     assert vis["fields"] == ["t.week", "t.category", "t.value"]
     assert vis["spec"]["mark"] == "bar"

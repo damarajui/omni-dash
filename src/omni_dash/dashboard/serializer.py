@@ -732,21 +732,21 @@ class DashboardSerializer:
 
             # Visualization config — use rich Omni visTypes when appropriate
             if is_vegalite:
-                qp["visualization"] = _build_vegalite_vis(tile)
+                qp["visConfig"] = _build_vegalite_vis(tile)
             elif is_kpi:
-                qp["visualization"] = _build_kpi_vis(tile)
+                qp["visConfig"] = _build_kpi_vis(tile)
             elif is_markdown:
-                qp["visualization"] = _build_markdown_vis(tile)
+                qp["visConfig"] = _build_markdown_vis(tile)
             elif is_table:
-                qp["visualization"] = _build_table_vis(tile)
+                qp["visConfig"] = _build_table_vis(tile)
             elif is_heatmap:
-                qp["visualization"] = {
+                qp["visConfig"] = {
                     "visType": "basic",
                     "chartType": "heatmap",
                     "spec": _build_heatmap_spec(tile),
                 }
             elif omni_chart_type in _CARTESIAN_CHART_TYPES and _has_advanced_vis(tile):
-                qp["visualization"] = {
+                qp["visConfig"] = {
                     "visType": "basic",
                     "chartType": omni_chart_type,
                     "spec": _build_cartesian_spec(tile, omni_chart_type, fields),
@@ -780,7 +780,7 @@ class DashboardSerializer:
                     vis["config"]["seriesColors"] = tile.vis_config.series_colors
                 if tile.vis_config.custom:
                     vis["config"].update(tile.vis_config.custom)
-                qp["visualization"] = vis
+                qp["visConfig"] = vis
 
             # Position (layout)
             if tile.position:
