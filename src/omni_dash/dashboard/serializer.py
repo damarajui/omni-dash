@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 import yaml
@@ -428,6 +429,8 @@ def _build_vegalite_vis(tile: Tile) -> dict[str, Any]:
     """Build Omni Vega-Lite visConfig for custom visualizations.
 
     Passes through a full Vega-Lite v5 spec with Omni-standard defaults.
+    The spec goes under the ``spec`` key (matching Omni's stored format).
+    Field names in VL encoding use escaped dots: ``table\\.field``.
     """
     import copy
     vl_spec = copy.deepcopy(tile.vis_config.vegalite_spec or {})
@@ -437,11 +440,15 @@ def _build_vegalite_vis(tile: Tile) -> dict[str, Any]:
     vl_spec.setdefault("background", "transparent")
     vl_spec.setdefault("config", {}).setdefault("view", {})["stroke"] = None
 
-    return {
+    vis: dict[str, Any] = {
         "visType": "vegalite",
         "chartType": "code",
-        "config": vl_spec,
+        "spec": vl_spec,
     }
+    # Include query fields so Omni knows which columns to fetch
+    if tile.query.fields:
+        vis["fields"] = list(tile.query.fields)
+    return vis
 
 
 def _build_kpi_vis(tile: Tile) -> dict[str, Any]:
@@ -512,17 +519,12 @@ def _build_markdown_vis(tile: Tile) -> dict[str, Any]:
     """Build Omni markdown tile visConfig.
 
     Uses ``omni-markdown`` visType with raw markdown/HTML content.
-    Supports Mustache templates:
-    - ``{{result.0.field_name.value}}`` for formatted display values
-    - ``{{result.0.field_name.raw}}`` for raw values (useful for CSS)
-    - ``{{result._last.field_name.value}}`` for last row values
-    """
-    # Extract field names from query to include in visConfig.fields
-    vis_fields = []
-    for f in tile.query.fields:
-        # Strip table prefix: "table.col" → "col"
-        vis_fields.append(f.split(".")[-1] if "." in f else f)
 
+    Field qualification rules (from real Omni dashboards):
+    - ``fields`` array keeps fully qualified names: ``["table.col"]``
+    - Mustache templates use full qualified names with dots:
+      ``{{result.0.table.col.value}}``, ``{{result._last.table.col.raw}}``
+    """
     vis: dict[str, Any] = {
         "visType": "omni-markdown",
         "chartType": "markdown",
@@ -530,8 +532,9 @@ def _build_markdown_vis(tile: Tile) -> dict[str, Any]:
             "markdown": tile.vis_config.markdown_template or tile.description or "",
         },
     }
-    if vis_fields:
-        vis["fields"] = vis_fields
+    # Fields stay fully qualified (Omni expects "table.col" not "col")
+    if tile.query.fields:
+        vis["fields"] = list(tile.query.fields)
     return vis
 
 
@@ -739,7 +742,7 @@ class DashboardSerializer:
                 }
             elif omni_chart_type in _CARTESIAN_CHART_TYPES and _has_advanced_vis(tile):
                 qp["visualization"] = {
-                    "visType": "cartesian",
+                    "visType": "basic",
                     "chartType": omni_chart_type,
                     "spec": _build_cartesian_spec(tile, omni_chart_type, fields),
                 }
@@ -793,6 +796,21 @@ class DashboardSerializer:
 
         if definition.folder_id:
             payload["folderId"] = definition.folder_id
+
+        # Dashboard-level filters → filterConfig for Omni's filter UI controls
+        if definition.filters:
+            filter_config: dict[str, Any] = {}
+            filter_order: list[str] = []
+            for dash_filter in definition.filters:
+                # Generate a short deterministic ID from the field name
+                fid = hashlib.md5(dash_filter.field.encode()).hexdigest()[:8]
+                omni_filter = _to_omni_filter_from_dashboard(dash_filter)
+                omni_filter["fieldName"] = dash_filter.field
+                omni_filter["label"] = dash_filter.label or dash_filter.field
+                filter_config[fid] = omni_filter
+                filter_order.append(fid)
+            payload["filterConfig"] = filter_config
+            payload["filterOrder"] = filter_order
 
         return payload
 
