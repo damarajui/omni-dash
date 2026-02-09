@@ -593,8 +593,10 @@ class DashboardBuilder:
         Pass a full Vega-Lite v5 spec dict. The spec will be wrapped with
         Omni-standard defaults (container width, transparent background).
         """
+        import copy
         table = query_table or self._table or ""
         fields = self._qualify_fields(query_fields) if query_fields else [f"{table}.id"]
+        spec = copy.deepcopy(spec)
         spec.setdefault("height", height)
 
         self._tiles.append(
