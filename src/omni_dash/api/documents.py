@@ -250,9 +250,22 @@ class DocumentService:
         if not result or not isinstance(result, dict):
             raise OmniAPIError(0, "Empty response from dashboard import")
 
+        # The import response nests IDs under 'workbook':
+        #   workbook.identifier = short hex ID (e.g., "18a2f36a")
+        #   workbook.name = dashboard name
+        #   workbook.documentId = full UUID
+        wb = result.get("workbook", {})
+        doc_id = (
+            wb.get("identifier", "")
+            or result.get("identifier", "")
+            or result.get("id", "")
+            or result.get("documentId", "")
+        )
+        doc_name = wb.get("name", "") or result.get("name", "") or name or ""
+
         return ImportResponse(
-            document_id=result.get("identifier", result.get("id", result.get("documentId", ""))),
-            name=result.get("name", name or ""),
+            document_id=doc_id,
+            name=doc_name,
             success=True,
         )
 
