@@ -239,8 +239,8 @@ class TestListTopics:
         from omni_dash.api.models import TopicSummary
 
         mock_model_svc.list_topics.return_value = [
-            TopicSummary(name="mart_seo", label="SEO", description="SEO data"),
-            TopicSummary(name="mart_paid", label="Paid", description="Paid data"),
+            TopicSummary(name="mart_seo", label="SEO", description="SEO data", base_view="mart_seo_view"),
+            TopicSummary(name="mart_paid", label="Paid", description="Paid data", base_view="mart_paid_view"),
         ]
 
         result = json.loads(mcp_server.list_topics())
