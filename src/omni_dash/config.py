@@ -47,6 +47,11 @@ class OmniDashSettings(BaseSettings):
         Field(default="", description="Comma-separated additional template directories"),
     ] = ""
 
+    # Omni shared model ID (auto-discovered from dashboards if not set)
+    omni_shared_model_id: Annotated[
+        str, Field(default="", description="Omni shared model ID for topic/field discovery")
+    ] = ""
+
     # AI (Claude) integration
     anthropic_api_key: Annotated[
         str, Field(default="", description="Anthropic API key for AI dashboard generation", repr=False)

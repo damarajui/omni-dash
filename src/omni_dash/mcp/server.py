@@ -99,7 +99,7 @@ def _get_query_runner() -> QueryRunner:
 def _get_shared_model_id() -> str:
     """Get the shared model ID from settings or discover it."""
     settings = get_settings()
-    model_id = getattr(settings, "omni_shared_model_id", "")
+    model_id = settings.omni_shared_model_id
     if model_id:
         return model_id
     # Fall back to finding a shared model
@@ -643,6 +643,7 @@ def list_topics(model_id: str = "") -> str:
                     "name": t.name,
                     "label": t.label,
                     "description": t.description,
+                    "base_view": t.base_view,
                 }
                 for t in topics
             ],
@@ -677,8 +678,10 @@ def get_topic_fields(topic_name: str, model_id: str = "") -> str:
                 "name": detail.name,
                 "label": detail.label,
                 "description": detail.description,
-                "fields": detail.fields,
+                "base_view": detail.base_view,
                 "views": detail.views,
+                "field_count": len(detail.fields),
+                "fields": detail.fields,
             },
             indent=2,
         )
@@ -703,7 +706,7 @@ def query_data(
     Args:
         table: Topic/table name (e.g., "mart_seo_weekly_funnel").
         fields: Qualified field names (e.g., ["mart_seo.week_start", "mart_seo.visits"]).
-        sorts: Sort specs [{columnName, sortDescending}].
+        sorts: Sort specs [{column_name, sort_descending}].
         filters: Filter map {qualified_field: {operator, value}}.
         limit: Max rows to return (default 25, max 1000).
         model_id: Omni model ID. Auto-discovered if omitted.
@@ -722,7 +725,14 @@ def query_data(
         builder._fields = fields  # Already qualified
         builder._limit = limit
         if sorts:
-            builder._sorts = sorts
+            # Normalize sort keys to snake_case (Omni API format)
+            normalized = []
+            for s in sorts:
+                normalized.append({
+                    "column_name": s.get("column_name") or s.get("columnName", ""),
+                    "sort_descending": s.get("sort_descending", s.get("sortDescending", False)),
+                })
+            builder._sorts = normalized
         if filters:
             builder._filters = filters
 

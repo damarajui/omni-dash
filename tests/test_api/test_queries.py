@@ -35,8 +35,8 @@ def test_sort():
         .build()
     )
     assert len(query.sorts) == 1
-    assert query.sorts[0]["columnName"] == "tbl.col1"
-    assert query.sorts[0]["sortDescending"] is True
+    assert query.sorts[0]["column_name"] == "tbl.col1"
+    assert query.sorts[0]["sort_descending"] is True
 
 
 def test_filter():
@@ -87,7 +87,7 @@ def test_to_api_dict():
         .limit(10)
         .to_api_dict()
     )
-    assert payload["modelId"] == "model-123"
+    assert payload["query"]["modelId"] == "model-123"
     assert payload["query"]["table"] == "tbl"
     assert payload["query"]["limit"] == 10
     assert len(payload["query"]["fields"]) == 2

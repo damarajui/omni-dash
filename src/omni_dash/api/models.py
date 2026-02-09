@@ -1,4 +1,8 @@
-"""Omni model and topic introspection."""
+"""Omni model and topic introspection.
+
+Uses the model YAML endpoint (/api/v1/models/{id}/yaml) to discover
+topics, views, and fields. This replaces the non-existent /topics API.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import yaml
 from pydantic import BaseModel, Field
 
 from omni_dash.api.client import OmniClient
@@ -37,6 +42,7 @@ class TopicSummary(BaseModel):
     name: str
     label: str = ""
     description: str = ""
+    base_view: str = ""
 
 
 class TopicDetail(BaseModel):
@@ -45,6 +51,7 @@ class TopicDetail(BaseModel):
     name: str
     label: str = ""
     description: str = ""
+    base_view: str = ""
     views: list[dict[str, Any]] = Field(default_factory=list)
     fields: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -54,7 +61,10 @@ class ModelService:
 
     Provides methods to discover which Omni model corresponds to a
     given Snowflake database/schema, and to enumerate topics and
-    fields within a model. Results are cached locally.
+    fields within a model.
+
+    Topic and field discovery uses the model YAML endpoint which
+    returns all .topic and .view file definitions.
     """
 
     def __init__(self, client: OmniClient, cache_ttl: int = 3600):
@@ -129,7 +139,6 @@ class ModelService:
         Raises:
             ModelNotFoundError: If no model matches.
         """
-        # Check cache first
         cache_key = f"model:{database}:{schema}"
         cached = self._get_cache(cache_key)
         if cached:
@@ -153,60 +162,209 @@ class ModelService:
             f"Available models: {[m.name for m in models]}"
         )
 
-    def list_topics(self, model_id: str) -> list[TopicSummary]:
-        """List all topics in a model.
+    # -- YAML-based topic/view discovery --
 
-        Handles the paginated ``{pageInfo, records}`` response format.
+    def _fetch_model_yaml(self, model_id: str) -> dict[str, Any]:
+        """Fetch the model YAML definition, with caching.
+
+        Returns the full response: {files: {name: content}, viewNames: {file: name}, version: int}
         """
-        params: dict[str, str] = {"pageSize": "100"}
-        all_topics: list[TopicSummary] = []
-        while True:
-            result = self._client.get(
-                f"/api/v1/models/{model_id}/topics", params=params
-            )
-            if not result:
-                break
+        cache_key = f"yaml:{model_id}"
+        cached = self._get_cache(cache_key)
+        if cached:
+            return cached
 
-            topics_data = _extract_records(result)
-            for t in topics_data:
-                all_topics.append(
-                    TopicSummary(
-                        name=t.get("name", ""),
-                        label=t.get("label", ""),
-                        description=t.get("description", ""),
-                    )
+        result = self._client.get(f"/api/v1/models/{model_id}/yaml")
+        if not result or not isinstance(result, dict):
+            raise OmniAPIError(0, f"Failed to fetch model YAML for {model_id}")
+
+        self._set_cache(cache_key, result)
+        return result
+
+    def _parse_yaml_content(self, content: str) -> dict[str, Any]:
+        """Parse a YAML string into a dict, handling empty/invalid content."""
+        if not content or not content.strip():
+            return {}
+        try:
+            parsed = yaml.safe_load(content)
+            return parsed if isinstance(parsed, dict) else {}
+        except yaml.YAMLError:
+            return {}
+
+    def list_topics(self, model_id: str) -> list[TopicSummary]:
+        """List all topics in a model by parsing .topic files from model YAML."""
+        model_yaml = self._fetch_model_yaml(model_id)
+        files = model_yaml.get("files", {})
+
+        topics: list[TopicSummary] = []
+        for filename, content in files.items():
+            if not filename.endswith(".topic"):
+                continue
+
+            topic_name = filename.removesuffix(".topic")
+            parsed = self._parse_yaml_content(content)
+
+            topics.append(
+                TopicSummary(
+                    name=topic_name,
+                    label=parsed.get("label", ""),
+                    description=parsed.get("description", ""),
+                    base_view=parsed.get("base_view", ""),
                 )
+            )
 
-            page_info = result.get("pageInfo", {}) if isinstance(result, dict) else {}
-            if page_info.get("hasNextPage") and page_info.get("nextCursor"):
-                params["cursor"] = page_info["nextCursor"]
-            else:
-                break
-
-        return all_topics
+        return sorted(topics, key=lambda t: t.name)
 
     def get_topic(self, model_id: str, topic_name: str) -> TopicDetail:
-        """Get full topic details including views and fields."""
-        result = self._client.get(
-            f"/api/v1/models/{model_id}/topics/{topic_name}"
-        )
-        if not result or not isinstance(result, dict):
-            raise OmniAPIError(404, f"Topic not found: {topic_name}")
+        """Get full topic details including resolved views and fields.
+
+        Parses the topic's .topic file to find its base_view and joins,
+        then resolves each view's .view file to extract dimensions and measures.
+        """
+        model_yaml = self._fetch_model_yaml(model_id)
+        files = model_yaml.get("files", {})
+
+        # Find the topic file
+        topic_file = f"{topic_name}.topic"
+        if topic_file not in files:
+            available = [f.removesuffix(".topic") for f in files if f.endswith(".topic")]
+            raise OmniAPIError(
+                404,
+                f"Topic not found: {topic_name}. "
+                f"Available topics: {available}",
+            )
+
+        parsed = self._parse_yaml_content(files[topic_file])
+        base_view = parsed.get("base_view", "")
+        joins = parsed.get("joins", {}) or {}
+        topic_label = parsed.get("label", "")
+        topic_desc = parsed.get("description", "")
+
+        # Collect all view names: base_view + joined views
+        view_names = []
+        if base_view:
+            view_names.append(base_view)
+        for join_name in joins:
+            if join_name and isinstance(join_name, str):
+                view_names.append(join_name)
+
+        # Resolve each view's fields from .view files
+        views_info: list[dict[str, Any]] = []
+        all_fields: list[dict[str, Any]] = []
+
+        for view_name in view_names:
+            view_data = self._find_view_file(files, view_name)
+            if not view_data:
+                views_info.append({"name": view_name, "fields": []})
+                continue
+
+            dimensions = view_data.get("dimensions", {}) or {}
+            measures = view_data.get("measures", {}) or {}
+            view_schema = view_data.get("schema", "")
+            table_name = view_data.get("table_name", "")
+
+            view_fields: list[dict[str, Any]] = []
+
+            for dim_name, dim_def in dimensions.items():
+                if isinstance(dim_def, dict) and dim_def.get("hidden"):
+                    continue
+                field_info: dict[str, Any] = {
+                    "name": dim_name,
+                    "qualified_name": f"{topic_name}.{dim_name}",
+                    "view": view_name,
+                    "type": "dimension",
+                }
+                if isinstance(dim_def, dict):
+                    field_info["label"] = dim_def.get("label", "")
+                    field_info["format"] = dim_def.get("format", "")
+                    field_info["sql"] = dim_def.get("sql", "")
+                view_fields.append(field_info)
+
+            for measure_name, measure_def in measures.items():
+                if isinstance(measure_def, dict) and measure_def.get("hidden"):
+                    continue
+                field_info = {
+                    "name": measure_name,
+                    "qualified_name": f"{topic_name}.{measure_name}",
+                    "view": view_name,
+                    "type": "measure",
+                }
+                if isinstance(measure_def, dict):
+                    field_info["label"] = measure_def.get("label", "")
+                    field_info["aggregate_type"] = measure_def.get("aggregate_type", "")
+                    field_info["sql"] = measure_def.get("sql", "")
+                view_fields.append(field_info)
+
+            views_info.append({
+                "name": view_name,
+                "schema": view_schema,
+                "table_name": table_name,
+                "field_count": len(view_fields),
+            })
+            all_fields.extend(view_fields)
 
         return TopicDetail(
-            name=result.get("name", topic_name),
-            label=result.get("label", ""),
-            description=result.get("description", ""),
-            views=result.get("views", []),
-            fields=result.get("fields", []),
+            name=topic_name,
+            label=topic_label,
+            description=topic_desc,
+            base_view=base_view,
+            views=views_info,
+            fields=all_fields,
         )
+
+    def _find_view_file(
+        self, files: dict[str, str], view_name: str
+    ) -> dict[str, Any]:
+        """Find and parse a .view file by view name.
+
+        View files may be at root level (e.g., "view_name.view") or
+        under a schema prefix (e.g., "PUBLIC/view_name.view").
+        """
+        # Try exact match first
+        candidates = [
+            f"{view_name}.view",
+            f"{view_name}.query.view",
+        ]
+        # Also try with schema prefixes
+        for filename in files:
+            if filename.endswith(".view"):
+                # Extract view name from path like "PUBLIC/mart_foo.view"
+                bare = filename.rsplit("/", 1)[-1].removesuffix(".view").removesuffix(".query")
+                if bare == view_name:
+                    candidates.insert(0, filename)
+
+        for candidate in candidates:
+            if candidate in files:
+                return self._parse_yaml_content(files[candidate])
+
+        return {}
+
+    def list_views(self, model_id: str) -> list[dict[str, str]]:
+        """List all views (queryable tables) in a model.
+
+        Returns view names from the model YAML viewNames mapping.
+        """
+        model_yaml = self._fetch_model_yaml(model_id)
+        view_names = model_yaml.get("viewNames", {})
+
+        views = []
+        for file_path, view_name in view_names.items():
+            schema = ""
+            if "/" in file_path:
+                schema = file_path.split("/")[0]
+            views.append({
+                "name": view_name,
+                "file": file_path,
+                "schema": schema,
+            })
+        return sorted(views, key=lambda v: v["name"])
 
     def find_view_for_table(
         self, model_id: str, table_name: str
     ) -> str | None:
         """Find the Omni view name that corresponds to a dbt table name.
 
-        Searches through all topics in the model to find a view whose
+        Searches through viewNames in the model YAML to find a view whose
         name matches the given table (dbt model) name.
 
         Returns:
@@ -217,19 +375,14 @@ class ModelService:
         if cached:
             return cached.get("view_name")
 
-        topics = self.list_topics(model_id)
+        model_yaml = self._fetch_model_yaml(model_id)
+        view_names = model_yaml.get("viewNames", {})
         table_lower = table_name.lower()
 
-        for topic in topics:
-            try:
-                detail = self.get_topic(model_id, topic.name)
-                for view in detail.views:
-                    view_name = view.get("name", "")
-                    if view_name.lower() == table_lower:
-                        self._set_cache(cache_key, {"view_name": view_name})
-                        return view_name
-            except OmniAPIError:
-                continue
+        for _file_path, view_name in view_names.items():
+            if view_name.lower() == table_lower:
+                self._set_cache(cache_key, {"view_name": view_name})
+                return view_name
 
         return None
 

@@ -211,6 +211,67 @@ class OmniClient:
 
     # -- Health check --
 
+    def post_ndjson(
+        self, path: str, *, json: dict | None = None, timeout: float | None = None
+    ) -> list[dict]:
+        """POST and parse an NDJSON (newline-delimited JSON) response.
+
+        Used for the /api/v1/query/run endpoint which streams results
+        as multiple JSON lines. Includes retry for rate limits.
+        """
+        import json as json_lib
+
+        last_error: OmniAPIError | None = None
+
+        for attempt in range(MAX_RETRIES + 1):
+            if not self._rate_limiter.acquire(timeout=30.0):
+                raise RateLimitError()
+
+            req_kwargs: dict[str, Any] = {}
+            if json is not None:
+                req_kwargs["json"] = json
+            if timeout is not None:
+                req_kwargs["timeout"] = timeout
+
+            response = self._http.request("POST", path, **req_kwargs)
+
+            if response.status_code in (401, 403):
+                raise AuthenticationError(response.text)
+            if response.status_code == 429:
+                retry_after = float(response.headers.get("Retry-After", "5"))
+                last_error = RateLimitError(retry_after=retry_after)
+                logger.warning(
+                    "Rate limited on NDJSON (attempt %d/%d), waiting %.1fs",
+                    attempt + 1, MAX_RETRIES + 1, retry_after,
+                )
+                time.sleep(retry_after)
+                continue
+            if response.status_code >= 400:
+                raise OmniAPIError(response.status_code, response.text, response.text)
+
+            lines = []
+            for raw_line in response.text.strip().split("\n"):
+                raw_line = raw_line.strip()
+                if raw_line:
+                    lines.append(json_lib.loads(raw_line))
+
+            # Omni sometimes returns {"message": ...} on soft rate limits (HTTP 200)
+            if len(lines) == 1 and "message" in lines[0] and "jobs_submitted" not in lines[0]:
+                if attempt < MAX_RETRIES:
+                    wait = RETRY_BACKOFF_BASE ** attempt
+                    logger.warning(
+                        "Soft rate limit on NDJSON (attempt %d/%d), waiting %.1fs",
+                        attempt + 1, MAX_RETRIES + 1, wait,
+                    )
+                    time.sleep(wait)
+                    continue
+
+            return lines
+
+        if last_error:
+            raise last_error
+        raise OmniAPIError(0, "Unexpected retry exhaustion on NDJSON request")
+
     def get_raw(self, path: str, **kwargs: Any) -> bytes:
         """Make a GET request and return raw response bytes (for binary downloads)."""
         if not self._rate_limiter.acquire(timeout=30.0):

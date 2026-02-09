@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 from typing import Any
 
@@ -85,7 +86,7 @@ class QueryBuilder:
         """Add a sort clause."""
         qualified = column if "." in column else f"{self._table}.{column}"
         self._sorts.append(
-            {"columnName": qualified, "sortDescending": descending}
+            {"column_name": qualified, "sort_descending": descending}
         )
         return self
 
@@ -144,8 +145,8 @@ def _spec_to_payload(query: QuerySpec) -> dict[str, Any]:
     QueryRunner.run(), and QueryRunner.run_blocking().
     """
     payload: dict[str, Any] = {
-        "modelId": query.model_id,
         "query": {
+            "modelId": query.model_id,
             "table": query.table,
             "fields": query.fields,
             "limit": query.limit,
@@ -183,6 +184,38 @@ def _parse_query_result(result: dict[str, Any]) -> QueryResult:
     )
 
 
+def _decode_arrow_result(arrow_b64: str) -> QueryResult:
+    """Decode a base64-encoded Apache Arrow IPC stream into a QueryResult."""
+    try:
+        import pyarrow as pa
+    except ImportError:
+        raise OmniAPIError(
+            0,
+            "pyarrow is required to decode query results. "
+            "Install it: uv add pyarrow",
+        )
+
+    arrow_bytes = base64.b64decode(arrow_b64)
+    reader = pa.ipc.open_stream(arrow_bytes)
+    table = reader.read_all()
+
+    # Filter out __raw columns (Omni includes both raw and formatted)
+    display_cols = [c for c in table.column_names if not c.endswith("__raw")]
+    if not display_cols:
+        display_cols = table.column_names
+
+    rows = []
+    for row_dict in table.to_pylist():
+        rows.append({k: v for k, v in row_dict.items() if k in display_cols})
+
+    return QueryResult(
+        fields=display_cols,
+        rows=rows,
+        row_count=len(rows),
+        truncated=False,
+    )
+
+
 class QueryRunner:
     """Execute queries against the Omni API and parse results."""
 
@@ -192,47 +225,74 @@ class QueryRunner:
     def run(self, query: QuerySpec | dict[str, Any]) -> QueryResult:
         """Run a query and return parsed results.
 
-        Accepts either a QuerySpec or a raw API payload dict.
+        Omni's /api/v1/query/run returns NDJSON (newline-delimited JSON):
+          Line 1: {"jobs_submitted": {job_id: result_id}}
+          Line 2: {"job_id": ..., "status": ..., "result": <base64 Arrow>}
+          Line 3: {"remaining_job_ids": [], "timed_out": "false"}
+
+        Results are returned as base64-encoded Apache Arrow IPC streams.
         """
         payload = _spec_to_payload(query) if isinstance(query, QuerySpec) else query
 
-        result = self._client.post("/api/v1/query/run", json=payload, timeout=120.0)
+        lines = self._client.post_ndjson(
+            "/api/v1/query/run", json=payload, timeout=120.0
+        )
 
-        if not result or not isinstance(result, dict):
+        if not lines:
             raise OmniAPIError(0, "Empty response from query execution")
 
-        return _parse_query_result(result)
+        # Check for inline data (legacy/direct JSON response)
+        for line in lines:
+            if "data" in line or "rows" in line:
+                return _parse_query_result(line)
+
+        # Look for Arrow result in NDJSON lines
+        for line in lines:
+            if line.get("status") == "FAILED":
+                error_msg = line.get("error_message", "Unknown error")
+                missing = line.get("summary", {}).get("missing_fields", [])
+                if missing:
+                    error_msg += f". Missing fields: {missing}"
+                raise OmniAPIError(0, f"Query failed: {error_msg}")
+
+            if "result" in line:
+                return _decode_arrow_result(line["result"])
+
+        # No inline result — check for remaining jobs to poll
+        remaining = []
+        for line in lines:
+            remaining.extend(line.get("remaining_job_ids", []))
+
+        if remaining:
+            return self._poll_for_result(remaining)
+
+        raise OmniAPIError(0, "No result data in query response")
+
+    def _poll_for_result(self, job_ids: list[str]) -> QueryResult:
+        """Poll /api/v1/query/wait until the query completes."""
+        import time
+
+        for _ in range(60):  # max 5 minutes
+            lines = self._client.post_ndjson(
+                "/api/v1/query/wait",
+                json={"jobIds": job_ids},
+                timeout=300.0,
+            )
+            for line in lines:
+                if "result" in line:
+                    return _decode_arrow_result(line["result"])
+                if line.get("status") == "FAILED":
+                    raise OmniAPIError(
+                        0, f"Query failed: {line.get('error_message', '')}"
+                    )
+                if "data" in line or "rows" in line:
+                    return _parse_query_result(line)
+            time.sleep(5)
+        raise OmniAPIError(0, "Query timed out after 5 minutes")
 
     def run_blocking(self, query: QuerySpec | dict[str, Any]) -> QueryResult:
         """Run a query using the blocking poll pattern.
 
-        Submits the query, then polls /api/v1/query/wait until complete.
-        Use this for long-running queries.
+        Alias for run() which now handles polling automatically.
         """
-        payload = _spec_to_payload(query) if isinstance(query, QuerySpec) else query
-
-        # Submit
-        submit_result = self._client.post("/api/v1/query/run", json=payload, timeout=120.0)
-
-        if not submit_result or not isinstance(submit_result, dict):
-            raise OmniAPIError(0, "Empty response from query submission")
-
-        # If we got data directly, parse it without re-submitting
-        if "data" in submit_result or "rows" in submit_result:
-            return _parse_query_result(submit_result)
-
-        # Otherwise poll via /wait
-        query_id = submit_result.get("queryId", submit_result.get("id", ""))
-        if not query_id:
-            raise OmniAPIError(0, "No queryId in submission response")
-
-        wait_result = self._client.get(
-            "/api/v1/query/wait",
-            params={"queryId": query_id},
-            timeout=300.0,
-        )
-
-        if not wait_result or not isinstance(wait_result, dict):
-            raise OmniAPIError(0, "Empty response from query wait")
-
-        return _parse_query_result(wait_result)
+        return self.run(query)
