@@ -19,9 +19,16 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
+
+# Load .env from the omni-dash project root (handles MCP subprocess CWD issues)
+_project_root = Path(__file__).resolve().parents[3]
+load_dotenv(_project_root / ".env", override=False)
 
 from omni_dash.api.client import OmniClient
 from omni_dash.api.documents import DocumentService
