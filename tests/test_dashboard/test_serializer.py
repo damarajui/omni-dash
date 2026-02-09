@@ -353,7 +353,7 @@ def test_cartesian_spec_generated_for_line_chart():
     payload = DashboardSerializer.to_omni_create_payload(definition)
     vis = payload["queryPresentations"][0]["visualization"]
 
-    assert vis["visType"] == "cartesian"
+    assert vis["visType"] == "basic"
     assert vis["chartType"] == "line"
 
     spec = vis["spec"]
@@ -490,7 +490,7 @@ def test_series_config_dual_axis():
     vis = payload["queryPresentations"][0]["visualization"]
     spec = vis["spec"]
 
-    assert vis["visType"] == "cartesian"
+    assert vis["visType"] == "basic"
     assert "y2" in spec
     assert spec["y2"]["axis"]["label"]["format"]["format"] == "BIGNUMBER_0"
     assert len(spec["series"]) == 2
@@ -553,7 +553,7 @@ def test_reference_lines_in_cartesian_spec():
     vis = payload["queryPresentations"][0]["visualization"]
     spec = vis["spec"]
 
-    assert vis["visType"] == "cartesian"
+    assert vis["visType"] == "basic"
     ref = spec["y"]["axis"]["referenceLine"]
     assert ref["enabled"] is True
     assert ref["value"] == 186
@@ -610,11 +610,15 @@ def test_vegalite_tile_generates_vegalite_vis():
 
     assert vis["visType"] == "vegalite"
     assert vis["chartType"] == "code"
-    config = vis["config"]
-    assert config["$schema"] == "https://vega.github.io/schema/vega-lite/v5.json"
-    assert config["width"] == "container"
-    assert config["background"] == "transparent"
-    assert len(config["layer"]) == 1
+    spec = vis["spec"]
+    assert spec["$schema"] == "https://vega.github.io/schema/vega-lite/v5.json"
+    assert spec["width"] == "container"
+    assert spec["background"] == "transparent"
+    assert len(spec["layer"]) == 1
+    # Fields array should include query fields for Omni
+    assert "fields" in vis
+    assert "t.val" in vis["fields"]
+    assert "t.label" in vis["fields"]
 
 
 def test_color_values_in_cartesian_spec():
@@ -834,3 +838,95 @@ def test_from_yaml_invalid():
 def test_from_yaml_empty_dict():
     with pytest.raises(DashboardDefinitionError):
         DashboardSerializer.from_yaml("null")
+
+
+def test_markdown_fields_are_fully_qualified():
+    """Markdown tile fields should be fully qualified (table.col), not stripped."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Markdown Fields Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="KPI Markdown",
+                chart_type="text",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.day_start", "t.arr_sum"],
+                ),
+                vis_config=TileVisConfig(
+                    markdown_template=(
+                        '<single-value label="ARR">'
+                        "{{result._last.t.arr_sum.value}}"
+                        "</single-value>"
+                    ),
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visualization"]
+
+    assert vis["visType"] == "omni-markdown"
+    assert vis["chartType"] == "markdown"
+    # Fields must be fully qualified — NOT stripped of table prefix
+    assert vis["fields"] == ["t.day_start", "t.arr_sum"]
+
+
+def test_dashboard_filter_config_in_payload():
+    """Dashboard filters should produce filterConfig and filterOrder in payload."""
+    definition = (
+        DashboardBuilder("Filter Config Test")
+        .model("m-1")
+        .dbt_source("t")
+        .add_line_chart("Chart", time_col="date", metric_cols=["visits"])
+        .add_filter("date", filter_type="date_range", label="Date Filter", default="last 12 weeks")
+        .build()
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+
+    assert "filterConfig" in payload
+    assert "filterOrder" in payload
+    assert len(payload["filterOrder"]) == 1
+
+    fid = payload["filterOrder"][0]
+    fc = payload["filterConfig"][fid]
+    assert fc["fieldName"] == "t.date"
+    assert fc["label"] == "Date Filter"
+    assert fc["kind"] == "BETWEEN"
+    assert fc["type"] == "date"
+
+
+def test_vegalite_fields_included():
+    """Vega-Lite tiles should include fields array from query."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="VL Fields Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="VL Chart",
+                chart_type="vegalite",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.week", "t.category", "t.value"],
+                ),
+                vis_config=TileVisConfig(
+                    vegalite_spec={
+                        "mark": "bar",
+                        "encoding": {
+                            "x": {"field": "t\\.week", "type": "ordinal"},
+                            "y": {"field": "t\\.value", "type": "quantitative"},
+                        },
+                    },
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visualization"]
+
+    assert vis["fields"] == ["t.week", "t.category", "t.value"]
+    assert vis["spec"]["mark"] == "bar"
