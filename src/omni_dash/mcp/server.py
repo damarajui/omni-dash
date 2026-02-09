@@ -4,7 +4,12 @@ Tools:
   - list_dashboards: List dashboards in the Omni org
   - get_dashboard: Get dashboard details by ID
   - create_dashboard: Create a new dashboard from a spec
+  - update_dashboard: Update an existing dashboard (replace tiles or metadata)
+  - add_tiles_to_dashboard: Append tiles to an existing dashboard
   - delete_dashboard: Delete a dashboard by ID
+  - clone_dashboard: Clone a dashboard with a new name
+  - move_dashboard: Move a dashboard to a different folder
+  - import_dashboard: Import a dashboard from an export payload
   - export_dashboard: Export a dashboard's full definition
   - list_topics: List available Omni model topics (data tables)
   - get_topic_fields: Get fields/columns for a topic
@@ -105,6 +110,34 @@ def _get_shared_model_id() -> str:
     if models:
         return models[0].id
     return ""
+
+
+def _resolve_model_id_from_export(
+    export_data: dict[str, Any], user_model_id: str = ""
+) -> str:
+    """Resolve the base model ID from an export payload or user override."""
+    if user_model_id:
+        return user_model_id
+    doc = export_data.get("document", {})
+    model_id = doc.get("sharedModelId", "")
+    if model_id:
+        return model_id
+    wb = export_data.get("workbookModel", {})
+    model_id = wb.get("base_model_id", "")
+    if model_id:
+        return model_id
+    dash = export_data.get("dashboard", {})
+    model_id = dash.get("model", {}).get("baseModelId", "")
+    if model_id:
+        return model_id
+    return _get_shared_model_id()
+
+
+def _build_dashboard_url(dashboard_id: str) -> str:
+    """Build the full Omni dashboard URL."""
+    settings = get_settings()
+    base_url = settings.omni_base_url.rstrip("/")
+    return f"{base_url}/dashboards/{dashboard_id}"
 
 
 # ---------------------------------------------------------------------------
@@ -231,15 +264,11 @@ def create_dashboard(
             payload, folder_id=folder_id or None
         )
 
-        settings = get_settings()
-        base_url = settings.omni_base_url.rstrip("/")
-        url = f"{base_url}/dashboards/{result.document_id}"
-
         return json.dumps({
             "status": "created",
             "dashboard_id": result.document_id,
             "name": result.name,
-            "url": url,
+            "url": _build_dashboard_url(result.document_id),
             "tile_count": len(tiles),
         })
     except OmniDashError as e:
@@ -280,6 +309,313 @@ def export_dashboard(dashboard_id: str) -> str:
         return json.dumps(export, indent=2)
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def import_dashboard(
+    export_data: dict[str, Any],
+    name: str | None = None,
+    folder_id: str | None = None,
+    model_id: str = "",
+) -> str:
+    """Import a dashboard from an export payload (from export_dashboard or backup).
+
+    Args:
+        export_data: The full export payload (from export_dashboard).
+        name: Optional name override for the imported dashboard.
+        folder_id: Optional folder ID to import into.
+        model_id: Omni model ID. Auto-resolved from export if omitted.
+
+    Returns:
+        JSON with imported dashboard ID and URL.
+    """
+    try:
+        resolved_model_id = _resolve_model_id_from_export(export_data, model_id)
+        if not resolved_model_id:
+            return json.dumps({"error": "Could not resolve model_id from export data."})
+
+        result = _get_doc_svc().import_dashboard(
+            export_data,
+            base_model_id=resolved_model_id,
+            name=name,
+            folder_id=folder_id,
+        )
+        return json.dumps({
+            "status": "imported",
+            "dashboard_id": result.document_id,
+            "name": result.name,
+            "url": _build_dashboard_url(result.document_id),
+        })
+    except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+    except Exception as e:
+        return json.dumps({"error": f"Import error: {e}"})
+
+
+@mcp.tool()
+def clone_dashboard(
+    dashboard_id: str,
+    new_name: str,
+    folder_id: str | None = None,
+    model_id: str = "",
+) -> str:
+    """Clone an existing dashboard with a new name, optionally into a different folder.
+
+    Args:
+        dashboard_id: The source dashboard ID to clone.
+        new_name: Name for the cloned dashboard.
+        folder_id: Optional folder ID for the clone. Defaults to same folder.
+        model_id: Omni model ID. Auto-resolved from export if omitted.
+
+    Returns:
+        JSON with source and new dashboard IDs.
+    """
+    try:
+        export_data = _get_doc_svc().export_dashboard(dashboard_id)
+        resolved_model_id = _resolve_model_id_from_export(export_data, model_id)
+
+        result = _get_doc_svc().import_dashboard(
+            export_data,
+            base_model_id=resolved_model_id,
+            name=new_name,
+            folder_id=folder_id,
+        )
+        return json.dumps({
+            "status": "cloned",
+            "source_dashboard_id": dashboard_id,
+            "new_dashboard_id": result.document_id,
+            "name": result.name,
+            "url": _build_dashboard_url(result.document_id),
+        })
+    except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def move_dashboard(
+    dashboard_id: str,
+    target_folder_id: str,
+    model_id: str = "",
+) -> str:
+    """Move a dashboard to a different folder.
+
+    Since Omni has no native move API, this exports the dashboard,
+    re-imports it to the target folder, and deletes the original.
+
+    Args:
+        dashboard_id: The dashboard to move.
+        target_folder_id: The destination folder ID.
+        model_id: Omni model ID. Auto-resolved from export if omitted.
+
+    Returns:
+        JSON with old and new dashboard IDs.
+    """
+    try:
+        export_data = _get_doc_svc().export_dashboard(dashboard_id)
+        original_name = export_data.get("document", {}).get("name", "")
+        resolved_model_id = _resolve_model_id_from_export(export_data, model_id)
+
+        result = _get_doc_svc().import_dashboard(
+            export_data,
+            base_model_id=resolved_model_id,
+            name=original_name,
+            folder_id=target_folder_id,
+        )
+
+        try:
+            _get_doc_svc().delete_dashboard(dashboard_id)
+        except OmniDashError as del_err:
+            return json.dumps({
+                "status": "partial",
+                "warning": f"Dashboard copied but original not deleted: {del_err}",
+                "old_dashboard_id": dashboard_id,
+                "new_dashboard_id": result.document_id,
+                "url": _build_dashboard_url(result.document_id),
+            })
+
+        return json.dumps({
+            "status": "moved",
+            "old_dashboard_id": dashboard_id,
+            "new_dashboard_id": result.document_id,
+            "target_folder_id": target_folder_id,
+            "url": _build_dashboard_url(result.document_id),
+        })
+    except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def update_dashboard(
+    dashboard_id: str,
+    name: str | None = None,
+    tiles: list[dict[str, Any]] | None = None,
+    description: str = "",
+    filters: list[dict[str, Any]] | None = None,
+    folder_id: str | None = None,
+    model_id: str = "",
+) -> str:
+    """Update an existing dashboard by replacing its content.
+
+    If tiles are provided, the dashboard is rebuilt with the new tile spec
+    (same format as create_dashboard). If tiles are omitted, only metadata
+    (name, folder) is updated. The original dashboard is deleted after the
+    new one is created.
+
+    Args:
+        dashboard_id: The dashboard to update.
+        name: New dashboard name (keeps original if omitted).
+        tiles: New tile specs (same format as create_dashboard). If omitted,
+            existing tiles are preserved and only metadata changes.
+        description: Dashboard description.
+        filters: Dashboard-level filters.
+        folder_id: Move to this folder (keeps original if omitted).
+        model_id: Omni model ID. Auto-discovered if omitted.
+
+    Returns:
+        JSON with old and new dashboard IDs.
+    """
+    try:
+        export_data = _get_doc_svc().export_dashboard(dashboard_id)
+        doc = export_data.get("document", {})
+        effective_name = name or doc.get("name", "Untitled")
+        effective_folder = folder_id or doc.get("folderId")
+        resolved_model_id = _resolve_model_id_from_export(export_data, model_id)
+
+        if tiles is not None:
+            # Full tile replacement — build new dashboard from spec
+            definition = DashboardDefinition(
+                name=effective_name,
+                model_id=resolved_model_id,
+                description=description,
+                tiles=tiles,
+                filters=filters or [],
+                folder_id=effective_folder,
+            )
+            definition.tiles = LayoutManager.auto_position(definition.tiles)
+            payload = DashboardSerializer.to_omni_create_payload(definition)
+            result = _get_doc_svc().create_dashboard(
+                payload, folder_id=effective_folder
+            )
+        else:
+            # Metadata-only update — re-import with modifications
+            result = _get_doc_svc().import_dashboard(
+                export_data,
+                base_model_id=resolved_model_id,
+                name=effective_name,
+                folder_id=effective_folder,
+            )
+
+        # Delete the old dashboard after successful creation
+        try:
+            _get_doc_svc().delete_dashboard(dashboard_id)
+        except OmniDashError as del_err:
+            return json.dumps({
+                "status": "partial",
+                "warning": f"New dashboard created but original not deleted: {del_err}",
+                "old_dashboard_id": dashboard_id,
+                "new_dashboard_id": result.document_id,
+                "name": result.name,
+                "url": _build_dashboard_url(result.document_id),
+            })
+
+        return json.dumps({
+            "status": "updated",
+            "old_dashboard_id": dashboard_id,
+            "new_dashboard_id": result.document_id,
+            "name": result.name,
+            "url": _build_dashboard_url(result.document_id),
+        })
+    except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+    except Exception as e:
+        return json.dumps({"error": f"Validation error: {e}"})
+
+
+@mcp.tool()
+def add_tiles_to_dashboard(
+    dashboard_id: str,
+    tiles: list[dict[str, Any]],
+    model_id: str = "",
+) -> str:
+    """Add new tiles to an existing dashboard without replacing existing ones.
+
+    New tiles are appended after the current tiles. Uses the same tile spec
+    format as create_dashboard.
+
+    Args:
+        dashboard_id: The dashboard to add tiles to.
+        tiles: New tile specs to append (same format as create_dashboard).
+        model_id: Omni model ID. Auto-discovered if omitted.
+
+    Returns:
+        JSON with updated dashboard ID and tile counts.
+    """
+    try:
+        if not tiles:
+            return json.dumps({"error": "No tiles provided."})
+
+        export_data = _get_doc_svc().export_dashboard(dashboard_id)
+        doc = export_data.get("document", {})
+        effective_name = doc.get("name", "Untitled")
+        effective_folder = doc.get("folderId")
+        resolved_model_id = _resolve_model_id_from_export(export_data, model_id)
+
+        # Parse existing dashboard into our definition model
+        existing_def = DashboardSerializer.from_omni_export(export_data)
+        previous_count = len(existing_def.tiles)
+
+        # Build new tiles as a temporary definition
+        new_def = DashboardDefinition(
+            name="tmp",
+            model_id=resolved_model_id,
+            tiles=tiles,
+        )
+
+        # Merge tiles
+        combined_tiles = list(existing_def.tiles) + list(new_def.tiles)
+
+        # Create combined definition
+        combined_def = DashboardDefinition(
+            name=effective_name,
+            model_id=resolved_model_id,
+            description=existing_def.description,
+            tiles=combined_tiles,
+            filters=existing_def.filters,
+            folder_id=effective_folder,
+        )
+        combined_def.tiles = LayoutManager.auto_position(combined_def.tiles)
+
+        # Serialize and create
+        payload = DashboardSerializer.to_omni_create_payload(combined_def)
+        result = _get_doc_svc().create_dashboard(
+            payload, folder_id=effective_folder
+        )
+
+        # Delete old
+        try:
+            _get_doc_svc().delete_dashboard(dashboard_id)
+        except OmniDashError as del_err:
+            return json.dumps({
+                "status": "partial",
+                "warning": f"New dashboard created but original not deleted: {del_err}",
+                "old_dashboard_id": dashboard_id,
+                "new_dashboard_id": result.document_id,
+                "url": _build_dashboard_url(result.document_id),
+            })
+
+        return json.dumps({
+            "status": "updated",
+            "dashboard_id": result.document_id,
+            "name": result.name,
+            "previous_tile_count": previous_count,
+            "new_tile_count": len(combined_tiles),
+            "tiles_added": len(tiles),
+            "url": _build_dashboard_url(result.document_id),
+        })
+    except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+    except Exception as e:
+        return json.dumps({"error": f"Validation error: {e}"})
 
 
 @mcp.tool()
