@@ -185,7 +185,10 @@ def _create_with_vis_configs(
             existing_vc = qp_data.get("visConfig", {})
             existing_vc["visType"] = vc_patch.get("visType")
             existing_vc["chartType"] = vc_patch.get("chartType", existing_vc.get("chartType"))
-            existing_vc["spec"] = vc_patch.get("spec", {})
+            if "spec" in vc_patch:
+                existing_vc["spec"] = vc_patch["spec"]
+            if "config" in vc_patch:
+                existing_vc["config"] = vc_patch["config"]
             if vc_patch.get("fields"):
                 existing_vc["fields"] = vc_patch["fields"]
             existing_vc.pop("jsonHash", None)

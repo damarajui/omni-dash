@@ -515,8 +515,8 @@ def test_value_format_in_kpi():
     assert mc[0]["config"]["field"]["label"]["value"] == "Total Rev"
 
 
-def test_basic_vis_used_when_no_advanced_config():
-    """Line chart without advanced config should use basic visType."""
+def test_simple_chart_gets_cartesian_spec():
+    """Line chart without advanced config should still get a full cartesian spec."""
     definition = (
         DashboardBuilder("Basic Test")
         .model("m-1")
@@ -527,6 +527,118 @@ def test_basic_vis_used_when_no_advanced_config():
     payload = DashboardSerializer.to_omni_create_payload(definition)
     vis = payload["queryPresentations"][0]["visConfig"]
     assert vis["visType"] == "basic"
+    assert vis["chartType"] == "line"
+    spec = vis["spec"]
+    assert spec["configType"] == "cartesian"
+    assert spec["x"]["field"]["name"] == "t.d"
+    assert spec["mark"]["type"] == "line"
+    # Auto-generated series for the metric field
+    assert len(spec["series"]) == 1
+    assert spec["series"][0]["field"]["name"] == "t.v"
+    assert spec["series"][0]["yAxis"] == "y"
+
+
+def test_area_chart_gets_cartesian_spec():
+    """Area chart with only x_axis/y_axis should get a full cartesian spec, not basic config."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Area Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Weekly Spend",
+                chart_type="area",
+                query=TileQuery(table="t", fields=["t.week", "t.spend"]),
+                vis_config=TileVisConfig(
+                    x_axis="t.week",
+                    y_axis=["t.spend"],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visConfig"]
+    assert vis["visType"] == "basic"
+    assert vis["chartType"] == "area"
+    spec = vis["spec"]
+    assert spec["configType"] == "cartesian"
+    assert spec["x"]["field"]["name"] == "t.week"
+    assert spec["mark"]["type"] == "area"
+    # Auto-generated series
+    assert len(spec["series"]) == 1
+    assert spec["series"][0]["field"]["name"] == "t.spend"
+    assert spec["series"][0]["yAxis"] == "y"
+
+
+def test_stacked_bar_auto_stacking():
+    """Stacked bar chart should auto-set stackMultiMark and y-axis color stacking."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Stacked Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Revenue by Channel",
+                chart_type="stacked_bar",
+                query=TileQuery(table="t", fields=["t.month", "t.revenue", "t.channel"]),
+                vis_config=TileVisConfig(
+                    x_axis="t.month",
+                    y_axis=["t.revenue"],
+                    color_by="t.channel",
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visConfig"]
+    spec = vis["spec"]
+    assert spec["behaviors"]["stackMultiMark"] is True
+    assert spec["y"]["color"]["_stack"] == "stack"
+
+
+def test_series_entry_default_yaxis():
+    """Series entries with a field should default yAxis to 'y'."""
+    from omni_dash.dashboard.serializer import _build_series_entry
+
+    # No explicit y_axis → should default to "y"
+    entry = _build_series_entry({"field": "t.revenue", "mark_type": "bar"})
+    assert entry["yAxis"] == "y"
+
+    # Explicit y_axis → should preserve
+    entry2 = _build_series_entry({"field": "t.ctr", "mark_type": "line", "y_axis": "y2"})
+    assert entry2["yAxis"] == "y2"
+
+
+def test_auto_series_generation_multi_fields():
+    """When no series_config, all non-x fields should get auto-generated series."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Multi Field Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Metrics",
+                chart_type="line",
+                query=TileQuery(table="t", fields=["t.date", "t.clicks", "t.impressions", "t.ctr"]),
+                vis_config=TileVisConfig(
+                    x_axis="t.date",
+                    y_axis=["t.clicks", "t.impressions", "t.ctr"],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    spec = payload["queryPresentations"][0]["visConfig"]["spec"]
+    # 3 auto-generated series (all fields except x_axis)
+    assert len(spec["series"]) == 3
+    field_names = [s["field"]["name"] for s in spec["series"]]
+    assert field_names == ["t.clicks", "t.impressions", "t.ctr"]
+    for s in spec["series"]:
+        assert s["yAxis"] == "y"
+        assert s["mark"]["type"] == "line"
 
 
 def test_reference_lines_in_cartesian_spec():

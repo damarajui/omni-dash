@@ -311,6 +311,9 @@ def _build_series_entry(s: dict[str, Any]) -> dict[str, Any]:
         if s.get("sparse_labels", True):
             dl["useSparseLabelAlgorithm"] = True
         entry["dataLabel"] = dl
+    # Default yAxis to "y" if field is present but no yAxis specified
+    if "field" in entry and "yAxis" not in entry:
+        entry["yAxis"] = "y"
     return entry
 
 
@@ -322,6 +325,9 @@ def _build_cartesian_spec(tile: Tile, omni_chart_type: str, fields: list[str]) -
     """
     vc = tile.vis_config
     spec: dict[str, Any] = {"version": 0, "configType": "cartesian"}
+
+    # Derive stacking from chart type or explicit flag
+    is_stacked = vc.stacked or omni_chart_type in ("barStacked", "areaStacked")
 
     # X axis
     if vc.x_axis:
@@ -361,7 +367,7 @@ def _build_cartesian_spec(tile: Tile, omni_chart_type: str, fields: list[str]) -
             ref_config["color"] = ref["color"]
         y_config.setdefault("axis", {})["referenceLine"] = ref_config
     # Color stacking on Y
-    if vc.stacked:
+    if is_stacked:
         y_config.setdefault("color", {})["_stack"] = "stack"
     if y_config:
         spec["y"] = y_config
@@ -377,9 +383,18 @@ def _build_cartesian_spec(tile: Tile, omni_chart_type: str, fields: list[str]) -
     mark_type = _OMNI_TO_MARK.get(omni_chart_type, "line")
     spec["mark"] = {"type": mark_type}
 
-    # Series config
+    # Series config — use explicit series or auto-generate from fields
     if vc.series_config:
         spec["series"] = [_build_series_entry(s) for s in vc.series_config]
+    elif fields:
+        # Auto-generate series entries so Omni can assign fields to axes
+        x_field = vc.x_axis
+        y_fields = [f for f in fields if f != x_field]
+        if y_fields:
+            spec["series"] = [
+                {"field": {"name": f}, "yAxis": "y", "mark": {"type": mark_type}}
+                for f in y_fields
+            ]
 
     # Tooltips
     if vc.tooltip_fields:
@@ -396,7 +411,7 @@ def _build_cartesian_spec(tile: Tile, omni_chart_type: str, fields: list[str]) -
         spec["color"] = {"manual": True, "values": vc.color_values}
 
     # Behaviors
-    spec["behaviors"] = {"stackMultiMark": vc.stacked}
+    spec["behaviors"] = {"stackMultiMark": is_stacked}
     spec["_dependentAxis"] = "y"
     return spec
 
@@ -569,25 +584,6 @@ def _build_table_vis(tile: Tile) -> dict[str, Any]:
     }
 
 
-def _has_advanced_vis(tile: Tile) -> bool:
-    """Check if a tile has any advanced vis config that needs a rich spec."""
-    vc = tile.vis_config
-    return bool(
-        vc.x_axis_format
-        or vc.x_axis_rotation is not None
-        or vc.y_axis_format
-        or vc.y2_axis
-        or vc.series_config
-        or vc.tooltip_fields
-        or vc.show_trendline
-        or vc.reference_lines
-        or vc.color_values
-        or vc.show_data_labels
-        or vc.axis_label_y
-        or vc.axis_label_x
-    )
-
-
 class DashboardSerializer:
     """Convert DashboardDefinition to/from various formats."""
 
@@ -745,42 +741,12 @@ class DashboardSerializer:
                     "chartType": "heatmap",
                     "spec": _build_heatmap_spec(tile),
                 }
-            elif omni_chart_type in _CARTESIAN_CHART_TYPES and _has_advanced_vis(tile):
+            elif omni_chart_type in _CARTESIAN_CHART_TYPES:
                 qp["visConfig"] = {
                     "visType": "basic",
                     "chartType": omni_chart_type,
                     "spec": _build_cartesian_spec(tile, omni_chart_type, fields),
                 }
-            else:
-                # Basic visualization config (backwards compatible)
-                vis: dict[str, Any] = {"visType": "basic", "config": {}}
-                if tile.vis_config.x_axis:
-                    vis["config"]["xAxis"] = tile.vis_config.x_axis
-                if tile.vis_config.y_axis:
-                    vis["config"]["yAxis"] = tile.vis_config.y_axis
-                if tile.vis_config.color_by:
-                    vis["config"]["colorBy"] = tile.vis_config.color_by
-                if tile.vis_config.stacked:
-                    vis["config"]["stacked"] = True
-                if not tile.vis_config.show_labels:
-                    vis["config"]["showLabels"] = False
-                if not tile.vis_config.show_legend:
-                    vis["config"]["showLegend"] = False
-                if not tile.vis_config.show_grid:
-                    vis["config"]["showGrid"] = False
-                if tile.vis_config.show_values:
-                    vis["config"]["showValues"] = True
-                if tile.vis_config.value_format:
-                    vis["config"]["valueFormat"] = tile.vis_config.value_format
-                if tile.vis_config.axis_label_x:
-                    vis["config"]["axisLabelX"] = tile.vis_config.axis_label_x
-                if tile.vis_config.axis_label_y:
-                    vis["config"]["axisLabelY"] = tile.vis_config.axis_label_y
-                if tile.vis_config.series_colors:
-                    vis["config"]["seriesColors"] = tile.vis_config.series_colors
-                if tile.vis_config.custom:
-                    vis["config"].update(tile.vis_config.custom)
-                qp["visConfig"] = vis
 
             # Position (layout)
             if tile.position:
