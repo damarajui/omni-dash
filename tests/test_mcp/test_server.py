@@ -134,12 +134,40 @@ class TestCreateDashboard:
     @patch.object(mcp_server, "_get_doc_svc")
     @patch("omni_dash.mcp.server.get_settings")
     def test_creates_dashboard(self, mock_settings, mock_get_doc_svc, _mock_model_id):
-        from omni_dash.api.documents import DashboardResponse
+        from omni_dash.api.documents import DashboardResponse, ImportResponse
 
         mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
         svc = MagicMock()
         svc.create_dashboard.return_value = DashboardResponse(
-            document_id="new123",
+            document_id="skeleton123",
+            name="Test Dashboard",
+        )
+        # Mock the export→reimport flow for vis config patching
+        svc.export_dashboard.return_value = {
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "Line Chart",
+                                "visConfig": {
+                                    "visType": None,
+                                    "chartType": "line",
+                                    "spec": {},
+                                    "fields": [],
+                                    "jsonHash": "stale",
+                                },
+                            }
+                        }
+                    ]
+                }
+            },
+            "document": {"sharedModelId": "model-123"},
+            "workbookModel": {},
+            "exportVersion": "0.1",
+        }
+        svc.import_dashboard.return_value = ImportResponse(
+            document_id="final123",
             name="Test Dashboard",
         )
         mock_get_doc_svc.return_value = svc
@@ -165,8 +193,10 @@ class TestCreateDashboard:
             tiles=tiles,
         ))
         assert result["status"] == "created"
-        assert result["dashboard_id"] == "new123"
+        assert result["dashboard_id"] == "final123"
         assert "url" in result
+        # Verify skeleton was deleted
+        svc.delete_dashboard.assert_called_once_with("skeleton123")
 
     @patch.object(mcp_server, "_get_shared_model_id", return_value="")
     def test_returns_error_without_model_id(self, _):
@@ -537,11 +567,15 @@ class TestUpdateDashboard:
     @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
     @patch("omni_dash.mcp.server.get_settings")
     def test_updates_with_new_tiles(self, mock_settings, _, mock_doc_svc):
-        from omni_dash.api.documents import DashboardResponse
+        from omni_dash.api.documents import DashboardResponse, ImportResponse
 
         mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
         mock_doc_svc.export_dashboard.return_value = SAMPLE_EXPORT
         mock_doc_svc.create_dashboard.return_value = DashboardResponse(
+            document_id="skeleton-1", name="Updated"
+        )
+        # _create_with_vis_configs will export the skeleton then reimport
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
             document_id="updated-1", name="Updated"
         )
         mock_doc_svc.delete_dashboard.return_value = None
@@ -561,7 +595,6 @@ class TestUpdateDashboard:
         assert result["status"] == "updated"
         assert result["old_dashboard_id"] == "orig-1"
         assert result["new_dashboard_id"] == "updated-1"
-        mock_doc_svc.delete_dashboard.assert_called_once_with("orig-1")
 
     @patch("omni_dash.mcp.server.get_settings")
     def test_updates_name_only(self, mock_settings, mock_doc_svc):
@@ -585,14 +618,18 @@ class TestUpdateDashboard:
     @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
     @patch("omni_dash.mcp.server.get_settings")
     def test_partial_on_delete_failure(self, mock_settings, _, mock_doc_svc):
-        from omni_dash.api.documents import DashboardResponse
+        from omni_dash.api.documents import DashboardResponse, ImportResponse
         from omni_dash.exceptions import OmniAPIError
 
         mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
         mock_doc_svc.export_dashboard.return_value = SAMPLE_EXPORT
         mock_doc_svc.create_dashboard.return_value = DashboardResponse(
+            document_id="skeleton-1", name="X"
+        )
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
             document_id="new-1", name="X"
         )
+        # All delete calls fail — skeleton delete caught silently, orig delete → partial
         mock_doc_svc.delete_dashboard.side_effect = OmniAPIError(500, "fail")
 
         tiles = [{
@@ -628,7 +665,7 @@ class TestAddTilesToDashboard:
     @patch("omni_dash.mcp.server.get_settings")
     @patch("omni_dash.mcp.server.DashboardSerializer")
     def test_adds_tiles(self, mock_serializer, mock_settings, _, mock_doc_svc):
-        from omni_dash.api.documents import DashboardResponse
+        from omni_dash.api.documents import DashboardResponse, ImportResponse
         from omni_dash.dashboard.definition import (
             DashboardDefinition,
             Tile,
@@ -653,6 +690,10 @@ class TestAddTilesToDashboard:
         mock_serializer.to_omni_create_payload.return_value = {"name": "Dashboard"}
 
         mock_doc_svc.create_dashboard.return_value = DashboardResponse(
+            document_id="skeleton-1", name="Dashboard"
+        )
+        # _create_with_vis_configs reimport
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
             document_id="updated-1", name="Dashboard"
         )
         mock_doc_svc.delete_dashboard.return_value = None

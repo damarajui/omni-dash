@@ -140,6 +140,73 @@ def _build_dashboard_url(dashboard_id: str) -> str:
     return f"{base_url}/dashboards/{dashboard_id}"
 
 
+def _create_with_vis_configs(
+    payload: dict[str, Any],
+    *,
+    name: str,
+    folder_id: str | None,
+) -> tuple[str, str]:
+    """Create a dashboard, then patch vis configs via export→reimport.
+
+    Omni's create endpoint ignores visConfig in queryPresentations,
+    so we: (1) strip vis configs, (2) create skeleton, (3) export,
+    (4) inject vis configs with stale jsonHash removed, (5) reimport,
+    (6) delete skeleton.
+
+    Returns:
+        (dashboard_id, dashboard_name) of the final dashboard.
+    """
+    import copy
+
+    # Extract vis configs before sending (create endpoint ignores them)
+    vis_configs_by_name: dict[str, dict] = {}
+    for qp in payload.get("queryPresentations", []):
+        vc = qp.pop("visConfig", None)
+        if vc and vc.get("visType"):
+            vis_configs_by_name[qp["name"]] = vc
+
+    doc_svc = _get_doc_svc()
+    result = doc_svc.create_dashboard(payload, folder_id=folder_id)
+    skeleton_id = result.document_id
+
+    if not vis_configs_by_name:
+        return skeleton_id, result.name
+
+    # Patch vis configs via export→reimport
+    export_data = doc_svc.export_dashboard(skeleton_id)
+    patched = copy.deepcopy(export_data)
+    dash = patched.get("dashboard", {})
+    qpc = dash.get("queryPresentationCollection", {})
+    for membership in qpc.get("queryPresentationCollectionMemberships", []):
+        qp_data = membership.get("queryPresentation", {})
+        tile_name = qp_data.get("name", "")
+        if tile_name in vis_configs_by_name:
+            vc_patch = vis_configs_by_name[tile_name]
+            existing_vc = qp_data.get("visConfig", {})
+            existing_vc["visType"] = vc_patch.get("visType")
+            existing_vc["chartType"] = vc_patch.get("chartType", existing_vc.get("chartType"))
+            existing_vc["spec"] = vc_patch.get("spec", {})
+            if vc_patch.get("fields"):
+                existing_vc["fields"] = vc_patch["fields"]
+            existing_vc.pop("jsonHash", None)
+
+    reimport_model_id = _resolve_model_id_from_export(patched)
+    reimport_result = doc_svc.import_dashboard(
+        patched,
+        base_model_id=reimport_model_id,
+        name=name,
+        folder_id=folder_id,
+    )
+
+    # Delete the skeleton (best-effort)
+    try:
+        doc_svc.delete_dashboard(skeleton_id)
+    except Exception:
+        pass
+
+    return reimport_result.document_id, reimport_result.name
+
+
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
@@ -259,16 +326,16 @@ def create_dashboard(
         # Serialize to Omni API format
         payload = DashboardSerializer.to_omni_create_payload(definition)
 
-        # Push to Omni
-        result = _get_doc_svc().create_dashboard(
-            payload, folder_id=folder_id or None
+        # Create with vis config patching (Omni ignores vis configs on create)
+        dash_id, dash_name = _create_with_vis_configs(
+            payload, name=name, folder_id=folder_id or None,
         )
 
         return json.dumps({
             "status": "created",
-            "dashboard_id": result.document_id,
-            "name": result.name,
-            "url": _build_dashboard_url(result.document_id),
+            "dashboard_id": dash_id,
+            "name": dash_name,
+            "url": _build_dashboard_url(dash_id),
             "tile_count": len(tiles),
         })
     except OmniDashError as e:
@@ -493,17 +560,18 @@ def update_dashboard(
             )
             definition.tiles = LayoutManager.auto_position(definition.tiles)
             payload = DashboardSerializer.to_omni_create_payload(definition)
-            result = _get_doc_svc().create_dashboard(
-                payload, folder_id=effective_folder
+            new_id, new_name = _create_with_vis_configs(
+                payload, name=effective_name, folder_id=effective_folder,
             )
         else:
             # Metadata-only update — re-import with modifications
-            result = _get_doc_svc().import_dashboard(
+            imp_result = _get_doc_svc().import_dashboard(
                 export_data,
                 base_model_id=resolved_model_id,
                 name=effective_name,
                 folder_id=effective_folder,
             )
+            new_id, new_name = imp_result.document_id, imp_result.name
 
         # Delete the old dashboard after successful creation
         try:
@@ -513,17 +581,17 @@ def update_dashboard(
                 "status": "partial",
                 "warning": f"New dashboard created but original not deleted: {del_err}",
                 "old_dashboard_id": dashboard_id,
-                "new_dashboard_id": result.document_id,
-                "name": result.name,
-                "url": _build_dashboard_url(result.document_id),
+                "new_dashboard_id": new_id,
+                "name": new_name,
+                "url": _build_dashboard_url(new_id),
             })
 
         return json.dumps({
             "status": "updated",
             "old_dashboard_id": dashboard_id,
-            "new_dashboard_id": result.document_id,
-            "name": result.name,
-            "url": _build_dashboard_url(result.document_id),
+            "new_dashboard_id": new_id,
+            "name": new_name,
+            "url": _build_dashboard_url(new_id),
         })
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
@@ -585,10 +653,10 @@ def add_tiles_to_dashboard(
         )
         combined_def.tiles = LayoutManager.auto_position(combined_def.tiles)
 
-        # Serialize and create
+        # Serialize and create with vis config patching
         payload = DashboardSerializer.to_omni_create_payload(combined_def)
-        result = _get_doc_svc().create_dashboard(
-            payload, folder_id=effective_folder
+        new_id, new_name = _create_with_vis_configs(
+            payload, name=effective_name, folder_id=effective_folder,
         )
 
         # Delete old
@@ -599,18 +667,18 @@ def add_tiles_to_dashboard(
                 "status": "partial",
                 "warning": f"New dashboard created but original not deleted: {del_err}",
                 "old_dashboard_id": dashboard_id,
-                "new_dashboard_id": result.document_id,
-                "url": _build_dashboard_url(result.document_id),
+                "new_dashboard_id": new_id,
+                "url": _build_dashboard_url(new_id),
             })
 
         return json.dumps({
             "status": "updated",
-            "dashboard_id": result.document_id,
-            "name": result.name,
+            "dashboard_id": new_id,
+            "name": new_name,
             "previous_tile_count": previous_count,
             "new_tile_count": len(combined_tiles),
             "tiles_added": len(tiles),
-            "url": _build_dashboard_url(result.document_id),
+            "url": _build_dashboard_url(new_id),
         })
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
