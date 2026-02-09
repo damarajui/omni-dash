@@ -339,7 +339,7 @@ def _build_cartesian_spec(tile: Tile, omni_chart_type: str, fields: list[str]) -
         y_config.setdefault("axis", {}).setdefault("label", {})["format"] = {
             "format": vc.y_axis_format,
         }
-    # Reference lines on Y axis
+    # Reference lines on Y axis (Omni supports one referenceLine per axis)
     if vc.reference_lines:
         ref = vc.reference_lines[0]
         ref_config: dict[str, Any] = {
@@ -351,6 +351,8 @@ def _build_cartesian_spec(tile: Tile, omni_chart_type: str, fields: list[str]) -
             ref_config["line"] = {"dash": ref["dash"]}
         if "label" in ref:
             ref_config["label"] = ref["label"]
+        if "color" in ref:
+            ref_config["color"] = ref["color"]
         y_config.setdefault("axis", {})["referenceLine"] = ref_config
     # Color stacking on Y
     if vc.stacked:
@@ -416,7 +418,7 @@ def _build_heatmap_spec(tile: Tile) -> dict[str, Any]:
     if vc.show_data_labels:
         dl: dict[str, Any] = {"enabled": True}
         if vc.data_label_format:
-            dl["fontSize"] = 14
+            dl["format"] = vc.data_label_format
         spec["dataLabel"] = dl
 
     return spec
@@ -427,7 +429,8 @@ def _build_vegalite_vis(tile: Tile) -> dict[str, Any]:
 
     Passes through a full Vega-Lite v5 spec with Omni-standard defaults.
     """
-    vl_spec = tile.vis_config.vegalite_spec or {}
+    import copy
+    vl_spec = copy.deepcopy(tile.vis_config.vegalite_spec or {})
     # Ensure Omni-friendly defaults
     vl_spec.setdefault("$schema", "https://vega.github.io/schema/vega-lite/v5.json")
     vl_spec.setdefault("width", "container")
