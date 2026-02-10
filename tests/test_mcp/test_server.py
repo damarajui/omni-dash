@@ -830,6 +830,10 @@ class TestMCPRegistration:
             "get_topic_fields",
             "query_data",
             "list_folders",
+            "suggest_chart",
+            "validate_dashboard",
+            "profile_data",
+            "generate_dashboard",
         }
         assert expected == names
 
@@ -839,4 +843,4 @@ class TestMCPRegistration:
         async def check():
             return len(await mcp_server.mcp.list_tools())
 
-        assert asyncio.run(check()) == 14
+        assert asyncio.run(check()) == 18

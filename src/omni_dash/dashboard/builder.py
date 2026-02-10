@@ -54,6 +54,8 @@ class DashboardBuilder:
         self._folder_id: str | None = None
         self._labels: list[str] = []
         self._meta: dict[str, Any] = {}
+        self._theme: dict[str, Any] = {}
+        self._tile_filter_map: dict[str, dict[str, Any]] = {}
 
     def model(self, model_id: str) -> DashboardBuilder:
         """Set the Omni model ID."""
@@ -93,6 +95,16 @@ class DashboardBuilder:
         self._source_template = template_name
         return self
 
+    def theme(self, theme: dict[str, Any]) -> DashboardBuilder:
+        """Set a custom dashboard theme."""
+        self._theme = theme
+        return self
+
+    def tile_filter_map(self, mapping: dict[str, dict[str, Any]]) -> DashboardBuilder:
+        """Set per-tile filter targeting."""
+        self._tile_filter_map = mapping
+        return self
+
     def _qualify_field(self, field: str) -> str:
         """Qualify a bare field name with the table name."""
         if "." in field:
@@ -119,6 +131,7 @@ class DashboardBuilder:
         limit: int = 200,
         size: str = "half",
         description: str = "",
+        subtitle: str = "",
         show_labels: bool = True,
         stacked: bool = False,
         axis_title_y: str | None = None,
@@ -132,6 +145,8 @@ class DashboardBuilder:
         color_values: dict[str, str] | None = None,
         show_data_labels: bool = False,
         data_label_format: str | None = None,
+        show_trendline: bool = False,
+        trendline_type: str | None = None,
     ) -> DashboardBuilder:
         """Add a line chart tile."""
         fields = [time_col] + metric_cols
@@ -140,6 +155,7 @@ class DashboardBuilder:
         self._tiles.append(
             Tile(
                 name=name,
+                subtitle=subtitle,
                 description=description,
                 query=TileQuery(
                     table=self._table or "",
@@ -164,6 +180,8 @@ class DashboardBuilder:
                     color_values=color_values or {},
                     show_data_labels=show_data_labels,
                     data_label_format=data_label_format,
+                    show_trendline=show_trendline,
+                    trendline_type=trendline_type,
                 ),
                 size=size,
             )
@@ -221,6 +239,7 @@ class DashboardBuilder:
         limit: int = 50,
         size: str = "half",
         description: str = "",
+        subtitle: str = "",
         axis_title_y: str | None = None,
         value_format: str | None = None,
         label_rotation: int | None = None,
@@ -238,6 +257,7 @@ class DashboardBuilder:
         self._tiles.append(
             Tile(
                 name=name,
+                subtitle=subtitle,
                 description=description,
                 query=TileQuery(
                     table=self._table or "",
@@ -617,6 +637,35 @@ class DashboardBuilder:
         )
         return self
 
+    def add_sql_tile(
+        self,
+        name: str,
+        *,
+        sql: str,
+        fields: list[str] | None = None,
+        chart_type: str = "table",
+        size: str = "full",
+        description: str = "",
+    ) -> DashboardBuilder:
+        """Add a tile powered by a custom SQL query."""
+        table = self._table or ""
+        query_fields = self._qualify_fields(fields) if fields else [f"{table}.id"]
+        self._tiles.append(
+            Tile(
+                name=name,
+                description=description,
+                query=TileQuery(
+                    table=table,
+                    fields=query_fields,
+                    is_sql=True,
+                    user_sql=sql,
+                ),
+                chart_type=chart_type,
+                size=size,
+            )
+        )
+        return self
+
     def add_text(
         self,
         content: str,
@@ -678,4 +727,6 @@ class DashboardBuilder:
             folder_id=self._folder_id,
             labels=self._labels,
             meta=self._meta,
+            theme=self._theme,
+            tile_filter_map=self._tile_filter_map,
         )

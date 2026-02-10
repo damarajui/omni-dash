@@ -157,6 +157,11 @@ class TileQuery(BaseModel):
     limit: int = 200
     pivots: list[str] = Field(default_factory=list)
     metadata: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    is_sql: bool = False
+    user_sql: str | None = None
+    row_totals: bool = False
+    column_totals: bool = False
+    fill_fields: list[str] = Field(default_factory=list)
 
     @field_validator("fields")
     @classmethod
@@ -249,17 +254,32 @@ class TileVisConfig(BaseModel):
     # {"table.field_name": {"label": "Custom Label"}}
     field_metadata: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
+    # Table-specific display options
+    table_row_banding: bool = False
+    table_hide_index: bool = False
+    table_truncate_headers: bool = True
+    table_show_descriptions: bool = True
+
+    # KPI layout options
+    kpi_alignment: str | None = None  # "left", "center", "right"
+    kpi_vertical_alignment: str | None = None  # "top", "center", "bottom"
+    kpi_font_size: str | None = None
+    kpi_label_font_size: str | None = None
+    kpi_body_font_size: str | None = None
+
 
 class Tile(BaseModel):
     """A single tile (chart/table/number) on a dashboard."""
 
     name: str
+    subtitle: str = ""
     description: str = ""
     query: TileQuery
     chart_type: str = "line"
     vis_config: TileVisConfig = Field(default_factory=TileVisConfig)
     position: TilePosition | None = None
     size: str = "half"  # TileSize value for auto-layout
+    hidden: bool = False
 
     @field_validator("chart_type")
     @classmethod
@@ -309,6 +329,8 @@ class DashboardDefinition(BaseModel):
     folder_id: str | None = None
     labels: list[str] = Field(default_factory=list)
     meta: dict[str, Any] = Field(default_factory=dict)
+    tile_filter_map: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    theme: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def tile_count(self) -> int:

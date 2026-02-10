@@ -46,3 +46,29 @@ class TestBuildSystemPrompt:
     def test_warns_against_making_up_columns(self):
         prompt = build_system_prompt()
         assert "make up column names" in prompt.lower() or "only use columns" in prompt.lower()
+
+    def test_includes_chart_selection_guide(self):
+        prompt = build_system_prompt()
+        assert "Chart Selection Guide" in prompt
+        assert "Data Shape" in prompt
+        assert "scatter" in prompt.lower()
+
+    def test_includes_auto_format_detection(self):
+        prompt = build_system_prompt()
+        assert "Auto-Format Detection" in prompt
+        assert "USDCURRENCY_0" in prompt
+        assert "PERCENT_1" in prompt
+        assert "BIGNUMBER_0" in prompt
+
+    def test_includes_few_shot_examples(self):
+        prompt = build_system_prompt()
+        assert "Few-Shot Examples" in prompt
+        assert "SEO traffic" in prompt
+        assert "revenue dashboard" in prompt
+        assert "paid channel" in prompt
+
+    def test_includes_semantic_field_matching(self):
+        prompt = build_system_prompt()
+        assert "Semantic Field Matching" in prompt
+        assert "traffic" in prompt.lower()
+        assert "revenue" in prompt.lower()
