@@ -209,15 +209,20 @@ def _to_omni_filter_from_dashboard(dash_filter: DashboardFilter) -> dict[str, An
     value = dash_filter.default_value
 
     if ft == "date_range":
-        val_str = str(value) if value else "12 complete weeks ago"
-        interval = val_str.replace("ago", "").strip() if "ago" in val_str else val_str
+        # Handle dict values with left/right keys (e.g., {"left": "90 days ago", "right": "90 days"})
+        if isinstance(value, dict):
+            left = value.get("left", "30 days ago")
+            right = value.get("right", "30 days")
+        else:
+            left = str(value) if value else "30 days ago"
+            right = left.replace("ago", "").strip() if "ago" in left else left
         return {
             "kind": "TIME_FOR_INTERVAL_DURATION",
             "type": "date",
             "ui_type": "PAST",
             "isFiscal": False,
-            "left_side": val_str,
-            "right_side": interval,
+            "left_side": left,
+            "right_side": right,
             "is_negative": False,
         }
     elif ft == "select":
@@ -410,6 +415,13 @@ def _build_cartesian_spec(tile: Tile, omni_chart_type: str, fields: list[str]) -
     elif vc.color_values:
         spec["color"] = {"manual": True, "values": vc.color_values}
 
+    # Trendlines
+    if vc.show_trendline:
+        trendline: dict[str, Any] = {"enabled": True, "type": vc.trendline_type or "linear"}
+        if vc.moving_average_window:
+            trendline["window"] = vc.moving_average_window
+        spec["trendline"] = trendline
+
     # Behaviors
     spec["behaviors"] = {"stackMultiMark": is_stacked}
     spec["_dependentAxis"] = "y"
@@ -519,11 +531,11 @@ def _build_kpi_vis(tile: Tile) -> dict[str, Any]:
         "visType": "omni-kpi",
         "chartType": "kpi",
         "spec": {
-            "alignment": "left",
-            "fontKPISize": "",
-            "fontBodySize": "",
-            "fontLabelSize": "",
-            "verticalAlignment": "top",
+            "alignment": vc.kpi_alignment or "left",
+            "fontKPISize": vc.kpi_font_size or "",
+            "fontBodySize": vc.kpi_body_font_size or "",
+            "fontLabelSize": vc.kpi_label_font_size or "",
+            "verticalAlignment": vc.kpi_vertical_alignment or "top",
             "markdownConfig": markdown_config,
         },
         "fields": [field_name],
@@ -564,12 +576,13 @@ def _build_table_vis(tile: Tile) -> dict[str, Any]:
     Supports per-column formatting via ``column_formats`` in vis_config:
     ``{"COL_NAME": {"align": "right", "width": 150}, ...}``
     """
+    vc = tile.vis_config
     spec: dict[str, Any] = {
         "tableType": "spreadsheet",
-        "rowBanding": {"enabled": False, "bandSize": 1},
-        "hideIndexColumn": False,
-        "truncateHeaders": True,
-        "showDescriptions": True,
+        "rowBanding": {"enabled": vc.table_row_banding, "bandSize": 1},
+        "hideIndexColumn": vc.table_hide_index,
+        "truncateHeaders": vc.table_truncate_headers,
+        "showDescriptions": vc.table_show_descriptions,
         "visColumnDisplay": "hide-view-name",
     }
     if tile.vis_config.column_formats:
@@ -655,6 +668,26 @@ class DashboardSerializer:
                     "sorts": sorts,
                 },
             }
+
+            # Subtitle
+            if tile.subtitle:
+                qp["subTitle"] = tile.subtitle
+
+            # SQL mode
+            if tile.query.is_sql:
+                qp["isSql"] = True
+                if tile.query.user_sql:
+                    qp["query"]["userEditedSQL"] = tile.query.user_sql
+
+            # Row/column totals
+            if tile.query.row_totals:
+                qp["query"]["row_totals"] = {}
+            if tile.query.column_totals:
+                qp["query"]["column_totals"] = {}
+
+            # Fill fields (fill nulls in time series)
+            if tile.query.fill_fields:
+                qp["query"]["fill_fields"] = tile.query.fill_fields
 
             # Filters — convert to Omni's format
             omni_filters: dict[str, Any] = {}
@@ -767,6 +800,23 @@ class DashboardSerializer:
 
         if definition.folder_id:
             payload["folderId"] = definition.folder_id
+
+        # Refresh interval (only if non-default)
+        if definition.refresh_interval != 3600:
+            payload["refreshInterval"] = definition.refresh_interval
+
+        # Custom theme
+        if definition.theme:
+            payload["dashboardCustomTheme"] = definition.theme
+
+        # Hidden tiles
+        hidden_tiles = [tile.name for tile in definition.tiles if tile.hidden]
+        if hidden_tiles:
+            payload.setdefault("metadata", {})["hiddenTiles"] = hidden_tiles
+
+        # Tile filter map (per-tile filter targeting)
+        if definition.tile_filter_map:
+            payload.setdefault("metadata", {})["tileFilterMap"] = definition.tile_filter_map
 
         # Dashboard-level filters → filterConfig for Omni's filter UI controls
         if definition.filters:

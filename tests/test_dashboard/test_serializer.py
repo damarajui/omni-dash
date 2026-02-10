@@ -6,6 +6,7 @@ from omni_dash.dashboard.builder import DashboardBuilder
 from omni_dash.dashboard.definition import (
     DashboardDefinition,
     SortSpec,
+    TileVisConfig,
 )
 from omni_dash.dashboard.serializer import DashboardSerializer
 from omni_dash.exceptions import DashboardDefinitionError
@@ -1042,3 +1043,411 @@ def test_vegalite_fields_included():
 
     assert vis["fields"] == ["t.week", "t.category", "t.value"]
     assert vis["spec"]["mark"] == "bar"
+
+
+# ── Wave 1: New feature tests ───────────────────────────────────────────────
+
+
+def test_tile_subtitle_in_payload():
+    """Tile subtitle should appear as subTitle in queryPresentation."""
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="Subtitle Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Revenue",
+                subtitle="Last 90 days",
+                chart_type="line",
+                query=TileQuery(table="t", fields=["t.date", "t.revenue"]),
+                vis_config=TileVisConfig(x_axis="t.date"),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    assert payload["queryPresentations"][0]["subTitle"] == "Last 90 days"
+
+
+def test_tile_subtitle_omitted_when_empty():
+    """Empty subtitle should not produce a subTitle key."""
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="No Subtitle",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Chart",
+                chart_type="line",
+                query=TileQuery(table="t", fields=["t.date", "t.v"]),
+                vis_config=TileVisConfig(x_axis="t.date"),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    assert "subTitle" not in payload["queryPresentations"][0]
+
+
+def test_hidden_tiles_in_metadata():
+    """Hidden tiles should appear in payload metadata.hiddenTiles."""
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="Hidden Test",
+        model_id="m-1",
+        tiles=[
+            Tile(name="Visible", chart_type="line", query=TileQuery(table="t", fields=["t.v"])),
+            Tile(name="Secret", chart_type="line", query=TileQuery(table="t", fields=["t.v"]), hidden=True),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    assert "metadata" in payload
+    assert payload["metadata"]["hiddenTiles"] == ["Secret"]
+
+
+def test_sql_tile_in_payload():
+    """SQL tile should produce isSql and userEditedSQL in the payload."""
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="SQL Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Custom SQL",
+                chart_type="table",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.id"],
+                    is_sql=True,
+                    user_sql="SELECT * FROM my_table LIMIT 10",
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    qp = payload["queryPresentations"][0]
+    assert qp["isSql"] is True
+    assert qp["query"]["userEditedSQL"] == "SELECT * FROM my_table LIMIT 10"
+
+
+def test_row_totals_in_payload():
+    """Row totals should produce row_totals: {} in query."""
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="Totals Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Pivot",
+                chart_type="table",
+                query=TileQuery(table="t", fields=["t.a", "t.b"], row_totals=True),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    assert payload["queryPresentations"][0]["query"]["row_totals"] == {}
+
+
+def test_column_totals_in_payload():
+    """Column totals should produce column_totals: {} in query."""
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="Col Totals",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Pivot",
+                chart_type="table",
+                query=TileQuery(table="t", fields=["t.a", "t.b"], column_totals=True),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    assert payload["queryPresentations"][0]["query"]["column_totals"] == {}
+
+
+def test_fill_fields_in_payload():
+    """Fill fields should appear in query."""
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="Fill Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Chart",
+                chart_type="line",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.date", "t.v"],
+                    fill_fields=["t.date"],
+                ),
+                vis_config=TileVisConfig(x_axis="t.date"),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    assert payload["queryPresentations"][0]["query"]["fill_fields"] == ["t.date"]
+
+
+def test_kpi_alignment_in_vis():
+    """KPI alignment fields should flow through to the spec."""
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="KPI Alignment",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="ARR",
+                chart_type="number",
+                query=TileQuery(table="t", fields=["t.arr"], limit=1),
+                vis_config=TileVisConfig(
+                    kpi_alignment="center",
+                    kpi_vertical_alignment="center",
+                    kpi_font_size="32px",
+                    kpi_label_font_size="14px",
+                    kpi_body_font_size="12px",
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    spec = payload["queryPresentations"][0]["visConfig"]["spec"]
+    assert spec["alignment"] == "center"
+    assert spec["verticalAlignment"] == "center"
+    assert spec["fontKPISize"] == "32px"
+    assert spec["fontLabelSize"] == "14px"
+    assert spec["fontBodySize"] == "12px"
+
+
+def test_table_row_banding_in_vis():
+    """Table row banding should flow through to the spec."""
+    definition = (
+        DashboardBuilder("Banding Test")
+        .model("m-1")
+        .dbt_source("t")
+        .add_table("Data", columns=["a", "b"])
+        .build()
+    )
+    # Enable row banding on the tile
+    definition.tiles[0].vis_config.table_row_banding = True
+    definition.tiles[0].vis_config.table_hide_index = True
+    definition.tiles[0].vis_config.table_truncate_headers = False
+    definition.tiles[0].vis_config.table_show_descriptions = False
+
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    spec = payload["queryPresentations"][0]["visConfig"]["spec"]
+    assert spec["rowBanding"]["enabled"] is True
+    assert spec["hideIndexColumn"] is True
+    assert spec["truncateHeaders"] is False
+    assert spec["showDescriptions"] is False
+
+
+def test_trendline_in_cartesian_spec():
+    """Trendline should appear in the cartesian spec."""
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="Trendline Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Revenue Trend",
+                chart_type="line",
+                query=TileQuery(table="t", fields=["t.date", "t.revenue"]),
+                vis_config=TileVisConfig(
+                    x_axis="t.date",
+                    y_axis=["t.revenue"],
+                    show_trendline=True,
+                    trendline_type="linear",
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    spec = payload["queryPresentations"][0]["visConfig"]["spec"]
+    assert spec["trendline"]["enabled"] is True
+    assert spec["trendline"]["type"] == "linear"
+
+
+def test_trendline_moving_average():
+    """Moving average trendline should include window."""
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="MA Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Smoothed",
+                chart_type="line",
+                query=TileQuery(table="t", fields=["t.date", "t.v"]),
+                vis_config=TileVisConfig(
+                    x_axis="t.date",
+                    show_trendline=True,
+                    trendline_type="moving_average",
+                    moving_average_window=7,
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    spec = payload["queryPresentations"][0]["visConfig"]["spec"]
+    assert spec["trendline"]["type"] == "moving_average"
+    assert spec["trendline"]["window"] == 7
+
+
+def test_theme_in_payload():
+    """Dashboard theme should appear as dashboardCustomTheme."""
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    theme = {"primary_color": "#1A73E8", "font_family": "Inter"}
+    definition = DashboardDefinition(
+        name="Theme Test",
+        model_id="m-1",
+        tiles=[
+            Tile(name="C", chart_type="line", query=TileQuery(table="t", fields=["t.v"])),
+        ],
+        theme=theme,
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    assert payload["dashboardCustomTheme"] == theme
+
+
+def test_tile_filter_map_in_payload():
+    """Tile filter map should appear in metadata."""
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    mapping = {"tile_1": {"filter_a": "value"}}
+    definition = DashboardDefinition(
+        name="TFM Test",
+        model_id="m-1",
+        tiles=[
+            Tile(name="C", chart_type="line", query=TileQuery(table="t", fields=["t.v"])),
+        ],
+        tile_filter_map=mapping,
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    assert payload["metadata"]["tileFilterMap"] == mapping
+
+
+def test_refresh_interval_in_payload():
+    """Non-default refresh interval should appear in payload."""
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="Refresh Test",
+        model_id="m-1",
+        tiles=[
+            Tile(name="C", chart_type="line", query=TileQuery(table="t", fields=["t.v"])),
+        ],
+        refresh_interval=300,
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    assert payload["refreshInterval"] == 300
+
+
+def test_refresh_interval_default_omitted():
+    """Default refresh interval (3600) should not be in payload."""
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="Default Refresh",
+        model_id="m-1",
+        tiles=[
+            Tile(name="C", chart_type="line", query=TileQuery(table="t", fields=["t.v"])),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    assert "refreshInterval" not in payload
+
+
+def test_builder_sql_tile():
+    """Builder add_sql_tile should set is_sql and user_sql."""
+    definition = (
+        DashboardBuilder("SQL Builder")
+        .model("m-1")
+        .dbt_source("t")
+        .add_sql_tile("Custom", sql="SELECT 1", fields=["id"])
+        .build()
+    )
+    tile = definition.tiles[0]
+    assert tile.query.is_sql is True
+    assert tile.query.user_sql == "SELECT 1"
+
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    qp = payload["queryPresentations"][0]
+    assert qp["isSql"] is True
+
+
+def test_builder_subtitle_line_chart():
+    """Builder should pass subtitle through to the tile."""
+    definition = (
+        DashboardBuilder("Subtitle Builder")
+        .model("m-1")
+        .dbt_source("t")
+        .add_line_chart("Revenue", time_col="date", metric_cols=["rev"], subtitle="YTD")
+        .build()
+    )
+    assert definition.tiles[0].subtitle == "YTD"
+
+
+def test_builder_trendline():
+    """Builder should pass trendline params through."""
+    definition = (
+        DashboardBuilder("Trendline Builder")
+        .model("m-1")
+        .dbt_source("t")
+        .add_line_chart("Trend", time_col="date", metric_cols=["v"], show_trendline=True, trendline_type="linear")
+        .build()
+    )
+    assert definition.tiles[0].vis_config.show_trendline is True
+    assert definition.tiles[0].vis_config.trendline_type == "linear"
+
+
+def test_builder_theme():
+    """Builder theme method should set the theme."""
+    definition = (
+        DashboardBuilder("Theme Builder")
+        .model("m-1")
+        .dbt_source("t")
+        .add_line_chart("C", time_col="d", metric_cols=["v"])
+        .theme({"bg": "#FFF"})
+        .build()
+    )
+    assert definition.theme == {"bg": "#FFF"}
+
+
+def test_date_filter_dict_value():
+    """Date range filter with dict default_value should serialize correctly."""
+    from omni_dash.dashboard.definition import DashboardFilter, Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="Dict Filter",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="C",
+                chart_type="line",
+                query=TileQuery(table="t", fields=["t.date", "t.v"]),
+                vis_config=TileVisConfig(x_axis="t.date"),
+            ),
+        ],
+        filters=[
+            DashboardFilter(
+                field="t.date",
+                filter_type="date_range",
+                default_value={"left": "90 days ago", "right": "90 days"},
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    # Filter should be applied to the tile
+    tile_filters = payload["queryPresentations"][0]["query"]["filters"]
+    assert tile_filters["t.date"]["left_side"] == "90 days ago"
+    assert tile_filters["t.date"]["right_side"] == "90 days"

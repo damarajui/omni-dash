@@ -15,6 +15,10 @@ Tools:
   - get_topic_fields: Get fields/columns for a topic
   - query_data: Run a query against Omni and return results
   - list_folders: List folders in the Omni org
+  - suggest_chart: AI-powered chart type recommendation
+  - validate_dashboard: Pre-flight validation for dashboard specs
+  - profile_data: Data profiling and field statistics
+  - generate_dashboard: NL-to-dashboard generation via AI
 
 Run:
     uv run python -m omni_dash.mcp
@@ -845,4 +849,311 @@ def list_folders() -> str:
             indent=2,
         )
     except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+
+
+# ---------------------------------------------------------------------------
+# Wave 2: Intelligent tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def suggest_chart(
+    table: str,
+    fields: list[str] | None = None,
+    model_id: str = "",
+) -> str:
+    """Suggest the best chart type for a given table and fields.
+
+    Analyzes field types to recommend chart_type, vis_config skeleton,
+    and reasoning. If fields are omitted, all fields from the table are analyzed.
+
+    Args:
+        table: Topic/table name (e.g., "mart_seo_weekly_funnel").
+        fields: Optional list of specific fields to analyze.
+        model_id: Omni model ID. Auto-discovered if omitted.
+
+    Returns:
+        JSON with chart_type, confidence, reasoning, vis_config, alternatives.
+    """
+    try:
+        from omni_dash.ai.chart_recommender import classify_field, recommend_chart
+
+        mid = model_id or _get_shared_model_id()
+        model_svc = _get_model_svc()
+        detail = model_svc.get_topic_fields(mid, table)
+
+        # Filter to requested fields if specified
+        all_fields = detail.fields
+        if fields:
+            field_set = set(fields)
+            all_fields = [
+                f for f in all_fields
+                if f.get("name", "") in field_set
+                or f"{table}.{f.get('name', '')}" in field_set
+            ]
+
+        classified = [classify_field(f) for f in all_fields]
+        rec = recommend_chart(classified)
+
+        return json.dumps(
+            {
+                "chart_type": rec.chart_type,
+                "confidence": rec.confidence,
+                "reasoning": rec.reasoning,
+                "vis_config": rec.vis_config,
+                "alternatives": rec.alternatives,
+                "fields_analyzed": len(classified),
+            },
+            indent=2,
+        )
+    except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def validate_dashboard(
+    tiles: list[dict[str, Any]],
+    model_id: str = "",
+) -> str:
+    """Validate a dashboard spec before creating it.
+
+    Checks field existence, chart type validity, axis/sort alignment,
+    format codes, and KPI limits. Returns errors and warnings.
+
+    Args:
+        tiles: Array of tile specs (same format as create_dashboard).
+        model_id: Omni model ID for field existence checks.
+
+    Returns:
+        JSON with valid (bool), errors (list), warnings (list).
+    """
+    try:
+        from omni_dash.dashboard.definition import (
+            FilterSpec,
+            SortSpec,
+            Tile,
+            TileQuery,
+            TileVisConfig,
+        )
+        from omni_dash.dashboard.validator import validate_definition
+
+        parsed_tiles = []
+        for t in tiles:
+            q = t.get("query", {})
+            vc = t.get("vis_config", {})
+            sorts = [
+                SortSpec(
+                    column_name=s.get("column_name", ""),
+                    sort_descending=s.get("sort_descending", False),
+                )
+                for s in q.get("sorts", [])
+            ]
+            filters = [
+                FilterSpec(
+                    field=f.get("field", ""),
+                    operator=f.get("operator", "is"),
+                    value=f.get("value"),
+                )
+                for f in q.get("filters", [])
+            ]
+            parsed_tiles.append(
+                Tile(
+                    name=t.get("name", "Untitled"),
+                    chart_type=t.get("chart_type", "line"),
+                    query=TileQuery(
+                        table=q.get("table", ""),
+                        fields=q.get("fields", []),
+                        sorts=sorts,
+                        filters=filters,
+                        limit=q.get("limit", 200),
+                    ),
+                    vis_config=TileVisConfig(
+                        x_axis=vc.get("x_axis"),
+                        y_axis=vc.get("y_axis", []),
+                        value_format=vc.get("value_format"),
+                        y_axis_format=vc.get("y_axis_format"),
+                    ),
+                )
+            )
+
+        mid = model_id or _get_shared_model_id()
+        definition = DashboardDefinition(
+            name="validation_check",
+            model_id=mid,
+            tiles=parsed_tiles,
+        )
+
+        # Optionally fetch available fields for existence checks
+        available_fields: dict[str, set[str]] | None = None
+        if mid:
+            try:
+                model_svc = _get_model_svc()
+                tables = {t.query.table for t in parsed_tiles if t.query.table}
+                available_fields = {}
+                for tbl in tables:
+                    detail = model_svc.get_topic_fields(mid, tbl)
+                    available_fields[tbl] = {
+                        f.get("name", "") for f in detail.fields
+                    } | {
+                        f"{tbl}.{f.get('name', '')}" for f in detail.fields
+                    }
+            except Exception:
+                pass
+
+        result = validate_definition(definition, available_fields)
+
+        return json.dumps(
+            {
+                "valid": result.valid,
+                "errors": result.errors,
+                "warnings": result.warnings,
+            },
+            indent=2,
+        )
+    except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def profile_data(
+    table: str,
+    fields: list[str] | None = None,
+    sample_size: int = 100,
+    model_id: str = "",
+) -> str:
+    """Profile data in a table to understand field distributions.
+
+    Runs a small query and computes per-field stats: distinct_count,
+    null_count, min, max, sample_values, inferred_type. Helps pick
+    chart types and formats intelligently.
+
+    Args:
+        table: Topic/table name.
+        fields: Specific fields to profile. If omitted, profiles all.
+        sample_size: Number of rows to sample (default 100, max 1000).
+        model_id: Omni model ID. Auto-discovered if omitted.
+
+    Returns:
+        JSON with per-field profile stats.
+    """
+    try:
+        mid = model_id or _get_shared_model_id()
+        model_svc = _get_model_svc()
+        query_runner = _get_query_runner()
+
+        if not fields:
+            detail = model_svc.get_topic_fields(mid, table)
+            fields = [f.get("name", "") for f in detail.fields[:20]]
+
+        qualified = [f if "." in f else f"{table}.{f}" for f in fields]
+
+        builder = QueryBuilder(table=table, model_id=mid)
+        builder._fields = qualified
+        builder._limit = min(sample_size, 1000)
+        result = query_runner.run(builder.build())
+
+        profiles: dict[str, Any] = {}
+        for field_name in qualified:
+            col_values = []
+            for row in result.rows:
+                val = row.get(field_name)
+                col_values.append(val)
+
+            non_null = [v for v in col_values if v is not None]
+            distinct = set(str(v) for v in non_null)
+
+            profile: dict[str, Any] = {
+                "sample_count": len(col_values),
+                "null_count": len(col_values) - len(non_null),
+                "distinct_count": len(distinct),
+            }
+
+            if non_null:
+                sample_strs = [str(v) for v in non_null[:5]]
+                profile["sample_values"] = sample_strs
+
+                try:
+                    nums = [float(v) for v in non_null]
+                    profile["min"] = min(nums)
+                    profile["max"] = max(nums)
+                    profile["inferred_type"] = "number"
+                except (ValueError, TypeError):
+                    profile["min"] = str(min(non_null, key=str))
+                    profile["max"] = str(max(non_null, key=str))
+                    sample = str(non_null[0])
+                    if len(sample) >= 8 and ("-" in sample or "/" in sample):
+                        profile["inferred_type"] = "date"
+                    else:
+                        profile["inferred_type"] = "string"
+
+            profiles[field_name] = profile
+
+        return json.dumps(
+            {
+                "table": table,
+                "row_count": result.row_count,
+                "fields": profiles,
+            },
+            indent=2,
+            default=str,
+        )
+    except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def generate_dashboard(
+    prompt: str,
+    folder_id: str = "",
+    model_id: str = "",
+) -> str:
+    """Generate a complete dashboard from natural language.
+
+    Uses AI to analyze available data, select appropriate chart types,
+    and create a full dashboard. This is the most powerful tool —
+    describe what you want and get a working dashboard URL.
+
+    Args:
+        prompt: Natural language description (e.g., "Show me weekly SEO trends").
+        folder_id: Omni folder ID to create in.
+        model_id: Omni model ID. Auto-discovered if omitted.
+
+    Returns:
+        JSON with dashboard URL and ID.
+    """
+    try:
+        from omni_dash.ai.omni_adapter import OmniModelAdapter
+        from omni_dash.ai.service import DashboardAI
+
+        mid = model_id or _get_shared_model_id()
+        model_svc = _get_model_svc()
+
+        adapter = OmniModelAdapter(model_svc, mid)
+        ai = DashboardAI(adapter, model="claude-sonnet-4-5-20250929")
+
+        result = ai.generate(prompt)
+        definition = result.definition
+        definition.model_id = mid
+        if folder_id:
+            definition.folder_id = folder_id
+
+        payload = DashboardSerializer.to_omni_create_payload(definition)
+        dash_id, dash_name = _create_with_vis_configs(
+            payload, name=definition.name, folder_id=folder_id or None,
+        )
+        url = _build_dashboard_url(dash_id)
+
+        return json.dumps(
+            {
+                "dashboard_id": dash_id,
+                "dashboard_name": dash_name,
+                "url": url,
+                "tile_count": definition.tile_count,
+                "tool_calls_made": result.tool_calls_made,
+                "reasoning": result.reasoning,
+            },
+            indent=2,
+        )
+    except Exception as e:
         return json.dumps({"error": str(e)})
