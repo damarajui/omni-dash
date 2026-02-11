@@ -1451,3 +1451,284 @@ def test_date_filter_dict_value():
     tile_filters = payload["queryPresentations"][0]["query"]["filters"]
     assert tile_filters["t.date"]["left_side"] == "90 days ago"
     assert tile_filters["t.date"]["right_side"] == "90 days"
+
+
+# ---------------------------------------------------------------------------
+# Bug 1: Auto-series excludes pivot/color fields
+# ---------------------------------------------------------------------------
+
+
+def test_auto_series_excludes_pivot_fields():
+    """Pivot fields should not appear as y-axis series."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Pivot Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Stacked Bar",
+                chart_type="stacked_bar",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.week", "t.source", "t.sessions"],
+                    pivots=["t.source"],
+                ),
+                vis_config=TileVisConfig(x_axis="t.week"),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visConfig"]
+    series = vis["spec"]["series"]
+    series_fields = [s["field"]["name"] for s in series]
+    assert "t.source" not in series_fields
+    assert "t.sessions" in series_fields
+
+
+def test_auto_series_excludes_color_by_field():
+    """color_by field should not appear as y-axis series."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Color Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Colored Line",
+                chart_type="line",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.date", "t.channel", "t.revenue"],
+                ),
+                vis_config=TileVisConfig(x_axis="t.date", color_by="t.channel"),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visConfig"]
+    series = vis["spec"]["series"]
+    series_fields = [s["field"]["name"] for s in series]
+    assert "t.channel" not in series_fields
+    assert "t.revenue" in series_fields
+
+
+def test_auto_series_excludes_both_pivot_and_color():
+    """Both pivot and color_by fields excluded from auto-series."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Pivot+Color Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Complex Chart",
+                chart_type="stacked_bar",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.week", "t.source", "t.campaign", "t.clicks"],
+                    pivots=["t.source"],
+                ),
+                vis_config=TileVisConfig(x_axis="t.week", color_by="t.campaign"),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visConfig"]
+    series = vis["spec"]["series"]
+    series_fields = [s["field"]["name"] for s in series]
+    assert "t.source" not in series_fields
+    assert "t.campaign" not in series_fields
+    assert "t.clicks" in series_fields
+    assert len(series_fields) == 1
+
+
+# ---------------------------------------------------------------------------
+# Bug 2: KPI smart field selection
+# ---------------------------------------------------------------------------
+
+
+def test_kpi_explicit_kpi_field():
+    """Explicit kpi_field should override default field selection."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="KPI Explicit",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Sessions",
+                chart_type="number",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.week_start", "t.organic_sessions"],
+                ),
+                vis_config=TileVisConfig(kpi_field="t.organic_sessions"),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visConfig"]
+    kpi_field = vis["spec"]["markdownConfig"][0]["config"]["field"]["field"]["name"]
+    assert kpi_field == "t.organic_sessions"
+
+
+def test_kpi_heuristic_picks_measure_over_date():
+    """Without explicit kpi_field, heuristic should pick measure, not date."""
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="KPI Heuristic",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Total Visits",
+                chart_type="number",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.week_start", "t.total_visits_count"],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visConfig"]
+    kpi_field = vis["spec"]["markdownConfig"][0]["config"]["field"]["field"]["name"]
+    assert kpi_field == "t.total_visits_count"
+
+
+def test_kpi_fallback_to_first_field():
+    """When no measure pattern matches, fall back to fields[0]."""
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="KPI Fallback",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Status",
+                chart_type="number",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.some_val", "t.other_val"],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visConfig"]
+    kpi_field = vis["spec"]["markdownConfig"][0]["config"]["field"]["field"]["name"]
+    assert kpi_field == "t.some_val"
+
+
+# ---------------------------------------------------------------------------
+# Bug 3: Cross-table filter propagation
+# ---------------------------------------------------------------------------
+
+
+def test_filter_same_table_direct_match():
+    """Dashboard filter on same table applies directly."""
+    from omni_dash.dashboard.definition import DashboardFilter, Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="Same Table Filter",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Chart",
+                chart_type="line",
+                query=TileQuery(table="funnel", fields=["funnel.week", "funnel.visits"]),
+            ),
+        ],
+        filters=[
+            DashboardFilter(
+                field="funnel.week",
+                filter_type="date_range",
+                label="Date",
+                default_value="last 12 weeks",
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    tile_filters = payload["queryPresentations"][0]["query"]["filters"]
+    assert "funnel.week" in tile_filters
+
+
+def test_filter_cross_table_remap():
+    """Dashboard filter on table_a.col remaps to table_b.col when table_b has same column."""
+    from omni_dash.dashboard.definition import DashboardFilter, Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="Cross Table Filter",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="LLM Sessions",
+                chart_type="bar",
+                query=TileQuery(
+                    table="llm", fields=["llm.week", "llm.session_count"]
+                ),
+            ),
+        ],
+        filters=[
+            DashboardFilter(
+                field="funnel.week",
+                filter_type="date_range",
+                label="Date",
+                default_value="last 12 weeks",
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    tile_filters = payload["queryPresentations"][0]["query"]["filters"]
+    # Should be remapped to llm.week, not funnel.week
+    assert "llm.week" in tile_filters
+    assert "funnel.week" not in tile_filters
+
+
+def test_filter_cross_table_no_match_skips():
+    """Dashboard filter on table_a.col should NOT apply to table_b if no matching column."""
+    from omni_dash.dashboard.definition import DashboardFilter, Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="No Match Filter",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Pages",
+                chart_type="table",
+                query=TileQuery(
+                    table="pages", fields=["pages.url", "pages.clicks"]
+                ),
+            ),
+        ],
+        filters=[
+            DashboardFilter(
+                field="funnel.week_start",
+                filter_type="date_range",
+                label="Date",
+                default_value="last 12 weeks",
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    qp = payload["queryPresentations"][0]
+    # No filters should be applied — pages has no week_start column
+    assert "filters" not in qp["query"] or not qp["query"].get("filters")
+
+
+# ---------------------------------------------------------------------------
+# Bug 5: color alias for color_by
+# ---------------------------------------------------------------------------
+
+
+def test_color_alias_maps_to_color_by():
+    """Passing 'color' in vis_config dict should map to color_by."""
+    vc = TileVisConfig(**{"color": "t.channel", "x_axis": "t.date"})
+    assert vc.color_by == "t.channel"
+
+
+def test_color_by_takes_precedence_over_color():
+    """Explicit color_by should take precedence over color alias."""
+    vc = TileVisConfig(**{"color": "t.channel", "color_by": "t.source", "x_axis": "t.date"})
+    assert vc.color_by == "t.source"

@@ -46,7 +46,7 @@ class OmniModelAdapter:
 
     def get_model(self, name: str) -> DbtModelMetadata:
         """Get topic detail as DbtModelMetadata with columns."""
-        detail: TopicDetail = self._model_svc.get_topic_fields(self._model_id, name)
+        detail: TopicDetail = self._model_svc.get_topic(self._model_id, name)
         columns = [
             DbtColumnMetadata(
                 name=f.get("name", ""),

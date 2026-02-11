@@ -392,9 +392,15 @@ def _build_cartesian_spec(tile: Tile, omni_chart_type: str, fields: list[str]) -
     if vc.series_config:
         spec["series"] = [_build_series_entry(s) for s in vc.series_config]
     elif fields:
-        # Auto-generate series entries so Omni can assign fields to axes
+        # Auto-generate series entries so Omni can assign fields to axes.
+        # Exclude pivot and color_by fields — they are dimensions, not measures.
         x_field = vc.x_axis
-        y_fields = [f for f in fields if f != x_field]
+        exclude: set[str] = set()
+        if vc.color_by:
+            exclude.add(vc.color_by)
+        if tile.query.pivots:
+            exclude.update(tile.query.pivots)
+        y_fields = [f for f in fields if f != x_field and f not in exclude]
         if y_fields:
             spec["series"] = [
                 {"field": {"name": f}, "yAxis": "y", "mark": {"type": mark_type}}
@@ -483,13 +489,34 @@ def _build_vegalite_vis(tile: Tile) -> dict[str, Any]:
     return vis
 
 
+_MEASURE_PATTERNS = [
+    "count", "sum", "avg", "total", "revenue", "rate", "percent",
+    "amount", "cost", "spend", "sessions", "visits", "clicks",
+    "impressions", "signups", "conversions", "orders", "users",
+]
+
+
+def _pick_kpi_field(fields: list[str], kpi_field: str | None) -> str:
+    """Pick the best field for a KPI tile's displayed value.
+
+    Priority: explicit ``kpi_field`` > heuristic measure detection > fields[0].
+    """
+    if kpi_field:
+        return kpi_field
+    for f in fields:
+        col = f.split(".")[-1].lower()
+        if any(p in col for p in _MEASURE_PATTERNS):
+            return f
+    return fields[0] if fields else ""
+
+
 def _build_kpi_vis(tile: Tile) -> dict[str, Any]:
     """Build Omni KPI visConfig matching working PLG Sign-Ups pattern.
 
     Uses ``omni-kpi`` visType with ``markdownConfig`` for rich rendering.
     """
     vc = tile.vis_config
-    field_name = tile.query.fields[0] if tile.query.fields else ""
+    field_name = _pick_kpi_field(tile.query.fields, vc.kpi_field)
 
     markdown_config: list[dict[str, Any]] = [{
         "type": "number",
@@ -695,15 +722,25 @@ class DashboardSerializer:
                 for f in tile.query.filters:
                     omni_filters[f.field] = _to_omni_filter(f)
 
-            # Dashboard-level filters → propagate to matching tile queries
+            # Dashboard-level filters → propagate to matching tile queries.
+            # Cross-table: if filter is on table_a.col but tile queries table_b,
+            # remap to table_b.col when the tile has a field with the same column name.
             if definition.filters:
                 table = tile.query.table
+                tile_cols = {f.split(".")[-1] for f in tile.query.fields}
                 for dash_filter in definition.filters:
                     fld = dash_filter.field
-                    # Apply if field belongs to this tile's table or is unqualified
+                    if dash_filter.default_value is None:
+                        continue
                     if fld.startswith(table + ".") or "." not in fld:
-                        if dash_filter.default_value is not None:
-                            omni_filters[fld] = _to_omni_filter_from_dashboard(dash_filter)
+                        # Same table — direct match
+                        omni_filters[fld] = _to_omni_filter_from_dashboard(dash_filter)
+                    else:
+                        # Cross-table — remap if tile has matching column name
+                        col_name = fld.split(".")[-1]
+                        if col_name in tile_cols:
+                            remapped = f"{table}.{col_name}"
+                            omni_filters[remapped] = _to_omni_filter_from_dashboard(dash_filter)
 
             if omni_filters:
                 qp["query"]["filters"] = omni_filters
