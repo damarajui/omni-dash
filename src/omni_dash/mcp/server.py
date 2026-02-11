@@ -162,12 +162,25 @@ def _create_with_vis_configs(
     """
     import copy
 
-    # Extract vis configs before sending (create endpoint ignores them)
+    # Extract vis configs and query overrides before sending
+    # (create endpoint ignores visConfig; export may lose filters/pivots)
     vis_configs_by_name: dict[str, dict] = {}
+    query_overrides_by_name: dict[str, dict] = {}
     for qp in payload.get("queryPresentations", []):
         vc = qp.pop("visConfig", None)
         if vc and vc.get("visType"):
             vis_configs_by_name[qp["name"]] = vc
+        # Preserve query fields that Omni may drop during export
+        q = qp.get("query", {})
+        overrides: dict[str, Any] = {}
+        if q.get("filters"):
+            overrides["filters"] = q["filters"]
+        if q.get("pivots"):
+            overrides["pivots"] = q["pivots"]
+        if q.get("sorts"):
+            overrides["sorts"] = q["sorts"]
+        if overrides:
+            query_overrides_by_name[qp["name"]] = overrides
 
     doc_svc = _get_doc_svc()
     result = doc_svc.create_dashboard(payload, folder_id=folder_id)
@@ -196,6 +209,14 @@ def _create_with_vis_configs(
             if vc_patch.get("fields"):
                 existing_vc["fields"] = vc_patch["fields"]
             existing_vc.pop("jsonHash", None)
+
+        # Patch query (filters, pivots, sorts) that Omni may have dropped
+        if tile_name in query_overrides_by_name:
+            q_overrides = query_overrides_by_name[tile_name]
+            q_data = qp_data.get("query", {})
+            for key in ("filters", "pivots", "sorts"):
+                if key in q_overrides:
+                    q_data[key] = q_overrides[key]
 
     reimport_model_id = _resolve_model_id_from_export(patched)
     reimport_result = doc_svc.import_dashboard(
