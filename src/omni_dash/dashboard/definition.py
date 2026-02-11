@@ -174,6 +174,15 @@ class TileQuery(BaseModel):
 class TileVisConfig(BaseModel):
     """Visualization configuration for a tile."""
 
+    @model_validator(mode="before")
+    @classmethod
+    def _alias_color(cls, values: Any) -> Any:
+        """Accept ``color`` as an alias for ``color_by``."""
+        if isinstance(values, dict):
+            if "color" in values and "color_by" not in values:
+                values["color_by"] = values.pop("color")
+        return values
+
     # Core axis & display
     x_axis: str | None = None
     y_axis: list[str] = Field(default_factory=list)
@@ -217,6 +226,7 @@ class TileVisConfig(BaseModel):
     kpi_label: str | None = None  # Override display label
     kpi_sparkline: bool = False  # Show sparkline in KPI tile
     kpi_sparkline_type: str | None = None  # "bar" or "line"
+    kpi_field: str | None = None  # Explicit field for KPI value (overrides auto-detect)
 
     # Markdown tile content
     markdown_template: str | None = None  # Raw markdown/HTML with Mustache syntax

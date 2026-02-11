@@ -881,7 +881,7 @@ def suggest_chart(
 
         mid = model_id or _get_shared_model_id()
         model_svc = _get_model_svc()
-        detail = model_svc.get_topic_fields(mid, table)
+        detail = model_svc.get_topic(mid, table)
 
         # Filter to requested fields if specified
         all_fields = detail.fields
@@ -992,7 +992,7 @@ def validate_dashboard(
                 tables = {t.query.table for t in parsed_tiles if t.query.table}
                 available_fields = {}
                 for tbl in tables:
-                    detail = model_svc.get_topic_fields(mid, tbl)
+                    detail = model_svc.get_topic(mid, tbl)
                     available_fields[tbl] = {
                         f.get("name", "") for f in detail.fields
                     } | {
@@ -1043,8 +1043,19 @@ def profile_data(
         query_runner = _get_query_runner()
 
         if not fields:
-            detail = model_svc.get_topic_fields(mid, table)
-            fields = [f.get("name", "") for f in detail.fields[:20]]
+            try:
+                detail = model_svc.get_topic(mid, table)
+                fields = [f.get("name", "") for f in detail.fields[:20]]
+            except Exception:
+                # Fallback for non-topic views: discover fields from a small query
+                builder = QueryBuilder(table=table, model_id=mid)
+                builder._fields = [f"{table}.*"]
+                builder._limit = 1
+                sample_result = query_runner.run(builder.build())
+                if sample_result.rows:
+                    fields = list(sample_result.rows[0].keys())[:20]
+                else:
+                    return json.dumps({"error": f"Could not discover fields for '{table}'."})
 
         qualified = [f if "." in f else f"{table}.{f}" for f in fields]
 

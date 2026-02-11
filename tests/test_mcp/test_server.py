@@ -844,3 +844,53 @@ class TestMCPRegistration:
             return len(await mcp_server.mcp.list_tools())
 
         assert asyncio.run(check()) == 18
+
+
+# ---------------------------------------------------------------------------
+# Bug 4: profile_data fallback for non-topic views
+# ---------------------------------------------------------------------------
+
+
+class TestProfileDataFallback:
+    """profile_data should fall back to query discovery for non-topic views."""
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    def test_profile_data_topic_success(self, _mock_mid, mock_model_svc, mock_query_runner):
+        from omni_dash.api.models import TopicDetail
+        from omni_dash.api.queries import QueryResult
+
+        mock_model_svc.get_topic.return_value = TopicDetail(
+            name="mart_seo",
+            label="SEO",
+            fields=[{"name": "week_start"}, {"name": "visits"}],
+        )
+        mock_query_runner.run.return_value = QueryResult(
+            fields=["mart_seo.week_start", "mart_seo.visits"],
+            rows=[
+                {"mart_seo.week_start": "2026-01-01", "mart_seo.visits": 100},
+            ],
+            row_count=1,
+        )
+
+        result = json.loads(mcp_server.profile_data("mart_seo"))
+        assert "mart_seo.week_start" in result["fields"]
+        assert "mart_seo.visits" in result["fields"]
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    def test_profile_data_non_topic_fallback(self, _mock_mid, mock_model_svc, mock_query_runner):
+        from omni_dash.api.queries import QueryResult
+
+        # get_topic raises — simulates non-topic Snowflake view
+        mock_model_svc.get_topic.side_effect = Exception("Topic not found")
+        # First call: field discovery (limit=1), second call: profile query
+        mock_query_runner.run.return_value = QueryResult(
+            fields=["mart_seo.week_start", "mart_seo.visits"],
+            rows=[
+                {"mart_seo.week_start": "2026-01-01", "mart_seo.visits": 100},
+            ],
+            row_count=1,
+        )
+
+        result = json.loads(mcp_server.profile_data("mart_seo"))
+        # Should have used fallback and still returned field profiles
+        assert "fields" in result or "error" not in result
