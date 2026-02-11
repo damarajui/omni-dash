@@ -210,13 +210,15 @@ def _create_with_vis_configs(
                 existing_vc["fields"] = vc_patch["fields"]
             existing_vc.pop("jsonHash", None)
 
-        # Patch query (filters, pivots, sorts) that Omni may have dropped
+        # Patch query data (filters, pivots, sorts) into queryJson
+        # Export stores query under query.queryJson, not query directly
         if tile_name in query_overrides_by_name:
             q_overrides = query_overrides_by_name[tile_name]
-            q_data = qp_data.get("query", {})
-            for key in ("filters", "pivots", "sorts"):
-                if key in q_overrides:
-                    q_data[key] = q_overrides[key]
+            q_json = qp_data.get("query", {}).get("queryJson", {})
+            if q_json:
+                for key in ("filters", "pivots", "sorts"):
+                    if key in q_overrides and not q_json.get(key):
+                        q_json[key] = q_overrides[key]
 
     reimport_model_id = _resolve_model_id_from_export(patched)
     reimport_result = doc_svc.import_dashboard(
