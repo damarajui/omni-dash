@@ -199,6 +199,51 @@ def _to_omni_filter(f: FilterSpec) -> dict[str, Any]:
         }
 
 
+def _normalize_date_to_days(value: str) -> tuple[str, str]:
+    """Normalize a freeform date expression to Omni's ``N days ago`` / ``N days`` format.
+
+    Omni only accepts date presets like "90 days ago" / "90 days".
+    Freeform values like "last 12 weeks" crash with
+    "past date filter different from UI options".
+    """
+    import re
+
+    s = str(value).strip().lower()
+
+    # Already in "N days ago" format
+    m = re.match(r"^(\d+)\s+days?\s+ago$", s)
+    if m:
+        n = int(m.group(1))
+        return f"{n} days ago", f"{n} days"
+
+    # "N days" (right_side format, derive left)
+    m = re.match(r"^(\d+)\s+days?$", s)
+    if m:
+        n = int(m.group(1))
+        return f"{n} days ago", f"{n} days"
+
+    # "last N weeks" / "N weeks ago" / "N complete weeks ago"
+    m = re.search(r"(\d+)\s+(?:complete\s+)?weeks?", s)
+    if m:
+        n = int(m.group(1)) * 7
+        return f"{n} days ago", f"{n} days"
+
+    # "last N months" / "N months ago"
+    m = re.search(r"(\d+)\s+(?:complete\s+)?months?", s)
+    if m:
+        n = int(m.group(1)) * 30
+        return f"{n} days ago", f"{n} days"
+
+    # "last N years" / "N years ago"
+    m = re.search(r"(\d+)\s+(?:complete\s+)?years?", s)
+    if m:
+        n = int(m.group(1)) * 365
+        return f"{n} days ago", f"{n} days"
+
+    # Default: 90 days
+    return "90 days ago", "90 days"
+
+
 def _to_omni_filter_from_dashboard(dash_filter: DashboardFilter) -> dict[str, Any]:
     """Convert a DashboardFilter to Omni's per-tile query filter format.
 
@@ -209,13 +254,16 @@ def _to_omni_filter_from_dashboard(dash_filter: DashboardFilter) -> dict[str, An
     value = dash_filter.default_value
 
     if ft == "date_range":
-        # Handle dict values with left/right keys (e.g., {"left": "90 days ago", "right": "90 days"})
+        # Handle dict values with left/right keys
         if isinstance(value, dict):
-            left = value.get("left", "30 days ago")
-            right = value.get("right", "30 days")
+            raw_left = value.get("left", "30 days ago")
+            raw_right = value.get("right", "")
+            left, right = _normalize_date_to_days(raw_left)
+            # If right was explicitly provided in days format, respect it
+            if raw_right and "days" in str(raw_right).lower():
+                right = str(raw_right)
         else:
-            left = str(value) if value else "30 days ago"
-            right = left.replace("ago", "").strip() if "ago" in left else left
+            left, right = _normalize_date_to_days(str(value) if value else "30 days ago")
         return {
             "kind": "TIME_FOR_INTERVAL_DURATION",
             "type": "date",

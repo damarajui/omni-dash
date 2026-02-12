@@ -192,7 +192,7 @@ class TestGetTopic:
             "viewNames": {},
             "version": 1,
         }
-        with pytest.raises(OmniAPIError, match="Topic not found"):
+        with pytest.raises(OmniAPIError, match="Not found as topic or view"):
             service.get_topic("m1", "nonexistent")
 
     def test_joined_views_included(self, service, mock_client):
@@ -252,6 +252,62 @@ class TestFindViewForTable:
         }
         result = service.find_view_for_table("m1", "nonexistent")
         assert result is None
+
+
+class TestGetViewAsTopic:
+    """get_topic() falls back to .view files when no .topic file exists."""
+
+    def test_view_fallback_returns_fields(self, service, mock_client):
+        mock_client.get.return_value = {
+            "files": {
+                "PUBLIC/mart_seo_weekly_funnel.view": (
+                    "dimensions:\n"
+                    "  week_start:\n"
+                    "    sql: week_start\n"
+                    "    label: Week Start\n"
+                    "measures:\n"
+                    "  organic_visits_total:\n"
+                    "    aggregate_type: sum\n"
+                    "    sql: organic_visits\n"
+                ),
+            },
+            "viewNames": {"PUBLIC/mart_seo_weekly_funnel.view": "mart_seo_weekly_funnel"},
+            "version": 1,
+        }
+        result = service.get_topic("m1", "mart_seo_weekly_funnel")
+        assert result.name == "mart_seo_weekly_funnel"
+        field_names = [f["name"] for f in result.fields]
+        assert "week_start" in field_names
+        assert "organic_visits_total" in field_names
+
+    def test_view_fallback_excludes_hidden(self, service, mock_client):
+        mock_client.get.return_value = {
+            "files": {
+                "mart_test.view": (
+                    "dimensions:\n"
+                    "  visible_dim:\n"
+                    "    sql: x\n"
+                    "  hidden_dim:\n"
+                    "    sql: y\n"
+                    "    hidden: true\n"
+                ),
+            },
+            "viewNames": {},
+            "version": 1,
+        }
+        result = service.get_topic("m1", "mart_test")
+        field_names = [f["name"] for f in result.fields]
+        assert "visible_dim" in field_names
+        assert "hidden_dim" not in field_names
+
+    def test_view_fallback_not_found_raises(self, service, mock_client):
+        mock_client.get.return_value = {
+            "files": {"other.topic": "base_view: v\n"},
+            "viewNames": {},
+            "version": 1,
+        }
+        with pytest.raises(OmniAPIError, match="Not found as topic or view"):
+            service.get_topic("m1", "nonexistent")
 
 
 class TestCache:

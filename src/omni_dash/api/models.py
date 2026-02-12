@@ -224,15 +224,11 @@ class ModelService:
         model_yaml = self._fetch_model_yaml(model_id)
         files = model_yaml.get("files", {})
 
-        # Find the topic file
+        # Find the topic file; fall back to view file if topic doesn't exist
         topic_file = f"{topic_name}.topic"
         if topic_file not in files:
-            available = [f.removesuffix(".topic") for f in files if f.endswith(".topic")]
-            raise OmniAPIError(
-                404,
-                f"Topic not found: {topic_name}. "
-                f"Available topics: {available}",
-            )
+            # Try resolving as a view instead of a topic
+            return self._get_view_as_topic(model_id, topic_name, files)
 
         parsed = self._parse_yaml_content(files[topic_file])
         base_view = parsed.get("base_view", "")
@@ -309,6 +305,80 @@ class ModelService:
             description=topic_desc,
             base_view=base_view,
             views=views_info,
+            fields=all_fields,
+        )
+
+    def _get_view_as_topic(
+        self,
+        model_id: str,
+        view_name: str,
+        files: dict[str, str] | None = None,
+    ) -> TopicDetail:
+        """Look up a .view file directly and return its fields as a TopicDetail.
+
+        This handles Snowflake views that aren't registered as Omni topics
+        but DO have .view definitions in the model YAML.
+        """
+        if files is None:
+            model_yaml = self._fetch_model_yaml(model_id)
+            files = model_yaml.get("files", {})
+
+        view_data = self._find_view_file(files, view_name)
+        if not view_data:
+            available_topics = [
+                f.removesuffix(".topic") for f in files if f.endswith(".topic")
+            ]
+            available_views = [
+                f.rsplit("/", 1)[-1].removesuffix(".view").removesuffix(".query")
+                for f in files
+                if f.endswith(".view")
+            ]
+            raise OmniAPIError(
+                404,
+                f"Not found as topic or view: {view_name}. "
+                f"Topics: {available_topics[:10]}. Views: {available_views[:10]}",
+            )
+
+        dimensions = view_data.get("dimensions", {}) or {}
+        measures = view_data.get("measures", {}) or {}
+        all_fields: list[dict[str, Any]] = []
+
+        for dim_name, dim_def in dimensions.items():
+            if isinstance(dim_def, dict) and dim_def.get("hidden"):
+                continue
+            field_info: dict[str, Any] = {
+                "name": dim_name,
+                "qualified_name": f"{view_name}.{dim_name}",
+                "view": view_name,
+                "type": "dimension",
+            }
+            if isinstance(dim_def, dict):
+                field_info["label"] = dim_def.get("label", "")
+                field_info["description"] = dim_def.get("description", "")
+                field_info["sql"] = dim_def.get("sql", "")
+            all_fields.append(field_info)
+
+        for measure_name, measure_def in measures.items():
+            if isinstance(measure_def, dict) and measure_def.get("hidden"):
+                continue
+            field_info = {
+                "name": measure_name,
+                "qualified_name": f"{view_name}.{measure_name}",
+                "view": view_name,
+                "type": "measure",
+            }
+            if isinstance(measure_def, dict):
+                field_info["label"] = measure_def.get("label", "")
+                field_info["aggregate_type"] = measure_def.get("aggregate_type", "")
+                field_info["sql"] = measure_def.get("sql", "")
+            all_fields.append(field_info)
+
+        return TopicDetail(
+            name=view_name,
+            label=view_data.get("label", ""),
+            description=view_data.get("description", ""),
+            base_view=view_name,
+            views=[{"name": view_name, "field_count": len(all_fields)}],
             fields=all_fields,
         )
 
