@@ -1732,3 +1732,70 @@ def test_color_by_takes_precedence_over_color():
     """Explicit color_by should take precedence over color alias."""
     vc = TileVisConfig(**{"color": "t.channel", "color_by": "t.source", "x_axis": "t.date"})
     assert vc.color_by == "t.source"
+
+
+# ---------------------------------------------------------------------------
+# Date filter normalization
+# ---------------------------------------------------------------------------
+
+
+class TestDateFilterNormalization:
+    """_normalize_date_to_days converts freeform dates to Omni's N days format."""
+
+    def test_days_ago_passthrough(self):
+        from omni_dash.dashboard.serializer import _normalize_date_to_days
+
+        left, right = _normalize_date_to_days("90 days ago")
+        assert left == "90 days ago"
+        assert right == "90 days"
+
+    def test_weeks_converted_to_days(self):
+        from omni_dash.dashboard.serializer import _normalize_date_to_days
+
+        left, right = _normalize_date_to_days("last 12 weeks")
+        assert left == "84 days ago"
+        assert right == "84 days"
+
+    def test_complete_weeks_converted(self):
+        from omni_dash.dashboard.serializer import _normalize_date_to_days
+
+        left, right = _normalize_date_to_days("12 complete weeks ago")
+        assert left == "84 days ago"
+        assert right == "84 days"
+
+    def test_months_converted_to_days(self):
+        from omni_dash.dashboard.serializer import _normalize_date_to_days
+
+        left, right = _normalize_date_to_days("last 3 months")
+        assert left == "90 days ago"
+        assert right == "90 days"
+
+    def test_bare_days_format(self):
+        from omni_dash.dashboard.serializer import _normalize_date_to_days
+
+        left, right = _normalize_date_to_days("30 days")
+        assert left == "30 days ago"
+        assert right == "30 days"
+
+    def test_unparseable_defaults_to_90_days(self):
+        from omni_dash.dashboard.serializer import _normalize_date_to_days
+
+        left, right = _normalize_date_to_days("some random string")
+        assert left == "90 days ago"
+        assert right == "90 days"
+
+    def test_dashboard_filter_integration(self):
+        """Full round-trip: DashboardFilter with 'last 12 weeks' produces valid Omni filter."""
+        from omni_dash.dashboard.definition import DashboardFilter
+        from omni_dash.dashboard.serializer import _to_omni_filter_from_dashboard
+
+        df = DashboardFilter(
+            field="t.week_start",
+            filter_type="date_range",
+            label="Date Range",
+            default_value="last 12 weeks",
+        )
+        result = _to_omni_filter_from_dashboard(df)
+        assert result["left_side"] == "84 days ago"
+        assert result["right_side"] == "84 days"
+        assert result["kind"] == "TIME_FOR_INTERVAL_DURATION"
