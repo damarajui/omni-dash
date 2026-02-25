@@ -1799,3 +1799,78 @@ class TestDateFilterNormalization:
         assert result["left_side"] == "84 days ago"
         assert result["right_side"] == "84 days"
         assert result["kind"] == "TIME_FOR_INTERVAL_DURATION"
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: is_not_null / is_null must send values=[] not null
+# ---------------------------------------------------------------------------
+
+
+def test_is_not_null_filter_has_empty_values_array():
+    """is_not_null filter must include values=[] to avoid crashing Omni's Java backend.
+
+    Omni's StringFilter requires a non-nullable `values` array.  Sending null
+    causes: "instantiation of StringFilter value failed for JSON property values
+    due to missing (therefore NULL) value for creator parameter values which is
+    a non-nullable type".
+    """
+    from omni_dash.dashboard.definition import FilterSpec as FS, Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="IsNotNull Filter Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Non-null rows",
+                chart_type="bar",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.status", "t.count"],
+                    filters=[
+                        FS(field="t.status", operator="is_not_null", value=None),
+                    ],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    f = payload["queryPresentations"][0]["query"]["filters"]["t.status"]
+
+    assert f["kind"] == "IS_NULL"
+    assert f["is_negative"] is True
+    assert f["values"] == []
+    assert f["values"] is not None
+
+
+def test_is_null_filter_has_empty_values_array():
+    """is_null filter must include values=[] to avoid crashing Omni's Java backend.
+
+    Same root cause as is_not_null: Omni's StringFilter requires a non-nullable
+    `values` array even for null-check operators.
+    """
+    from omni_dash.dashboard.definition import FilterSpec as FS, Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="IsNull Filter Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Null rows",
+                chart_type="bar",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.status", "t.count"],
+                    filters=[
+                        FS(field="t.status", operator="is_null", value=None),
+                    ],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    f = payload["queryPresentations"][0]["query"]["filters"]["t.status"]
+
+    assert f["kind"] == "IS_NULL"
+    assert f["is_negative"] is False
+    assert f["values"] == []
+    assert f["values"] is not None

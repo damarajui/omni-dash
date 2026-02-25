@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "omni-dash": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "omni_dash.mcp"]
+    }
+  },
+  "permissions": {
+    "allow": [
+      "mcp__omni-dash__*",
+      "Bash(python*)",
+      "Bash(uv run*)"
+    ]
+  }
+}

@@ -181,12 +181,14 @@ def _to_omni_filter(f: FilterSpec) -> dict[str, Any]:
         return {
             "kind": "IS_NULL",
             "type": "string",
+            "values": [],
             "is_negative": False,
         }
     elif op in ("is_not_null", "not_null"):
         return {
             "kind": "IS_NULL",
             "type": "string",
+            "values": [],
             "is_negative": True,
         }
     else:
