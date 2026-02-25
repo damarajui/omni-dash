@@ -875,6 +875,7 @@ class TestProfileDataFallback:
         result = json.loads(mcp_server.profile_data("mart_seo"))
         assert "mart_seo.week_start" in result["fields"]
         assert "mart_seo.visits" in result["fields"]
+        assert "error" not in result
 
     @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
     def test_profile_data_non_topic_fallback(self, _mock_mid, mock_model_svc, mock_query_runner):
@@ -882,7 +883,7 @@ class TestProfileDataFallback:
 
         # get_topic raises — simulates non-topic Snowflake view
         mock_model_svc.get_topic.side_effect = Exception("Topic not found")
-        # First call: field discovery (limit=1), second call: profile query
+        # Both the discovery query and profiling query return the same result
         mock_query_runner.run.return_value = QueryResult(
             fields=["mart_seo.week_start", "mart_seo.visits"],
             rows=[
@@ -892,5 +893,23 @@ class TestProfileDataFallback:
         )
 
         result = json.loads(mcp_server.profile_data("mart_seo"))
-        # Should have used fallback and still returned field profiles
-        assert "fields" in result or "error" not in result
+        # Fallback should discover fields and profile them successfully
+        assert "error" not in result
+        assert "fields" in result
+        assert "mart_seo.week_start" in result["fields"]
+        assert "mart_seo.visits" in result["fields"]
+        # query_runner.run called twice: once for discovery, once for profiling
+        assert mock_query_runner.run.call_count == 2
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    def test_profile_data_fallback_query_also_fails(self, _mock_mid, mock_model_svc, mock_query_runner):
+        """When both get_topic and the fallback query fail, return a clear error."""
+        # get_topic fails (non-topic view)
+        mock_model_svc.get_topic.side_effect = Exception("Topic not found")
+        # Fallback query also fails (e.g. view doesn't exist in Snowflake)
+        mock_query_runner.run.side_effect = Exception("Query execution failed")
+
+        result = json.loads(mcp_server.profile_data("nonexistent_view"))
+        assert "error" in result
+        assert "nonexistent_view" in result["error"]
+        assert "not queryable" in result["error"]

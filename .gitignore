@@ -38,3 +38,10 @@ Thumbs.db
 htmlcov/
 .coverage
 coverage.xml
+
+# Slack bot runtime
+output/
+evals/
+
+# Plan files
+plan.md

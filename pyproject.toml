@@ -32,6 +32,9 @@ ai = [
 mcp = [
     "mcp>=1.0",
 ]
+slack = [
+    "slack-bolt>=1.18.0",
+]
 
 [project.scripts]
 omni-dash = "omni_dash.cli.app:main"

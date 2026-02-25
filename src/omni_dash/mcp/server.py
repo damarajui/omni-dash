@@ -1070,15 +1070,27 @@ def profile_data(
                 detail = model_svc.get_topic(mid, table)
                 fields = [f.get("name", "") for f in detail.fields[:20]]
             except Exception:
-                # Fallback for non-topic views: discover fields from a small query
-                builder = QueryBuilder(table=table, model_id=mid)
-                builder._fields = [f"{table}.*"]
-                builder._limit = 1
-                sample_result = query_runner.run(builder.build())
-                if sample_result.rows:
-                    fields = list(sample_result.rows[0].keys())[:20]
-                else:
-                    return json.dumps({"error": f"Could not discover fields for '{table}'."})
+                # Fallback for non-topic views (e.g. Snowflake views not
+                # registered as Omni topics): discover fields via a small
+                # query and extract column names from the result.
+                try:
+                    builder = QueryBuilder(table=table, model_id=mid)
+                    builder._fields = [f"{table}.*"]
+                    builder._limit = 1
+                    sample_result = query_runner.run(builder.build())
+                    if sample_result.fields:
+                        fields = sample_result.fields[:20]
+                    elif sample_result.rows:
+                        fields = list(sample_result.rows[0].keys())[:20]
+                    else:
+                        return json.dumps(
+                            {"error": f"Could not discover fields for '{table}'."}
+                        )
+                except Exception:
+                    return json.dumps(
+                        {"error": f"Could not discover fields for '{table}'. "
+                         "The table may not exist or is not queryable."}
+                    )
 
         qualified = [f if "." in f else f"{table}.{f}" for f in fields]
 
