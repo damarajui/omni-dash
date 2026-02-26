@@ -913,3 +913,504 @@ class TestProfileDataFallback:
         assert "error" in result
         assert "nonexistent_view" in result["error"]
         assert "not queryable" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# suggest_chart
+# ---------------------------------------------------------------------------
+
+
+class TestSuggestChart:
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    def test_date_and_measure_recommends_line(self, _, mock_model_svc):
+        from omni_dash.api.models import TopicDetail
+
+        mock_model_svc.get_topic.return_value = TopicDetail(
+            name="mart_seo",
+            label="SEO",
+            fields=[
+                {"name": "week_start", "type": "date", "label": "Week Start"},
+                {"name": "visits", "type": "number", "label": "Visits", "aggregation": "sum"},
+            ],
+        )
+
+        result = json.loads(mcp_server.suggest_chart(table="mart_seo"))
+        assert result["chart_type"] == "line"
+        assert result["confidence"] > 0
+        assert "fields_analyzed" in result
+        assert result["fields_analyzed"] == 2
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    def test_category_and_measure_recommends_bar(self, _, mock_model_svc):
+        from omni_dash.api.models import TopicDetail
+
+        mock_model_svc.get_topic.return_value = TopicDetail(
+            name="mart_channels",
+            label="Channels",
+            fields=[
+                {"name": "channel_name", "type": "string", "label": "Channel"},
+                {"name": "revenue", "type": "number", "label": "Revenue", "aggregation": "sum"},
+            ],
+        )
+
+        result = json.loads(mcp_server.suggest_chart(table="mart_channels"))
+        assert result["chart_type"] == "bar"
+        assert result["confidence"] > 0
+        assert "alternatives" in result
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    def test_handles_topic_error(self, _, mock_model_svc):
+        from omni_dash.exceptions import OmniAPIError
+
+        mock_model_svc.get_topic.side_effect = OmniAPIError(404, "Topic not found")
+
+        result = json.loads(mcp_server.suggest_chart(table="nonexistent"))
+        assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# validate_dashboard
+# ---------------------------------------------------------------------------
+
+
+class TestValidateDashboard:
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    def test_valid_spec_passes(self, _, mock_model_svc):
+        # Mock get_topic so field existence checks pass
+        from omni_dash.api.models import TopicDetail
+
+        mock_model_svc.get_topic.return_value = TopicDetail(
+            name="t",
+            label="T",
+            fields=[
+                {"name": "date"},
+                {"name": "value"},
+            ],
+        )
+
+        tiles = [{
+            "name": "Chart",
+            "chart_type": "line",
+            "query": {"table": "t", "fields": ["t.date", "t.value"]},
+            "vis_config": {"x_axis": "t.date", "y_axis": ["t.value"]},
+        }]
+        result = json.loads(mcp_server.validate_dashboard(tiles=tiles))
+        assert result["valid"] is True
+        assert result["errors"] == []
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    def test_invalid_chart_type_raises(self, _):
+        """Tile with chart_type not in ChartType enum raises Pydantic ValidationError.
+
+        validate_dashboard only catches OmniDashError, so Pydantic
+        ValidationError from the Tile constructor propagates.
+        """
+        from pydantic import ValidationError
+
+        tiles = [{
+            "name": "Bad Chart",
+            "chart_type": "nonexistent_type",
+            "query": {"table": "t", "fields": ["t.x"]},
+        }]
+        with pytest.raises(ValidationError, match="chart_type"):
+            mcp_server.validate_dashboard(tiles=tiles)
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    def test_missing_fields_raises(self, _):
+        """Tile with empty fields list raises Pydantic ValidationError.
+
+        The TileQuery field_validator rejects empty fields lists before
+        validate_definition runs, and this error is not caught.
+        """
+        from pydantic import ValidationError
+
+        tiles = [{
+            "name": "Empty Fields",
+            "chart_type": "line",
+            "query": {"table": "t", "fields": []},
+        }]
+        with pytest.raises(ValidationError, match="At least one field"):
+            mcp_server.validate_dashboard(tiles=tiles)
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    def test_sort_field_not_in_query_warns(self, _, mock_model_svc):
+        """Sort field not in query fields should produce a warning."""
+        mock_model_svc.get_topic.side_effect = Exception("skip field check")
+
+        tiles = [{
+            "name": "Sorted Chart",
+            "chart_type": "line",
+            "query": {
+                "table": "t",
+                "fields": ["t.date", "t.value"],
+                "sorts": [{"column_name": "t.other_field", "sort_descending": True}],
+            },
+            "vis_config": {"x_axis": "t.date", "y_axis": ["t.value"]},
+        }]
+        result = json.loads(mcp_server.validate_dashboard(tiles=tiles))
+        assert result["valid"] is True  # Warnings don't make it invalid
+        assert len(result["warnings"]) > 0
+        assert any("t.other_field" in w for w in result["warnings"])
+
+
+# ---------------------------------------------------------------------------
+# generate_dashboard
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateDashboard:
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch.object(mcp_server, "_create_with_vis_configs", return_value=("dash-gen-1", "SEO Trends"))
+    @patch("omni_dash.mcp.server.DashboardSerializer")
+    @patch("omni_dash.mcp.server.get_settings")
+    def test_generates_dashboard(self, mock_settings, mock_serializer, _mock_create, _mock_mid, mock_model_svc):
+        from omni_dash.dashboard.definition import DashboardDefinition, Tile, TileQuery
+
+        mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+        mock_serializer.to_omni_create_payload.return_value = {"name": "SEO Trends"}
+
+        mock_definition = DashboardDefinition(
+            name="SEO Trends",
+            model_id="model-123",
+            tiles=[Tile(
+                name="Visits Over Time",
+                chart_type="line",
+                query=TileQuery(table="mart_seo", fields=["mart_seo.week", "mart_seo.visits"]),
+            )],
+        )
+        mock_ai_result = MagicMock()
+        mock_ai_result.definition = mock_definition
+        mock_ai_result.tool_calls_made = 3
+        mock_ai_result.reasoning = "Generated from SEO data"
+
+        mock_ai_cls = MagicMock()
+        mock_ai_cls.return_value.generate.return_value = mock_ai_result
+
+        with patch("omni_dash.ai.omni_adapter.OmniModelAdapter") as _mock_adapter, \
+             patch("omni_dash.ai.service.DashboardAI", mock_ai_cls):
+            result = json.loads(mcp_server.generate_dashboard(prompt="Show me SEO trends"))
+
+        assert result["dashboard_id"] == "dash-gen-1"
+        assert "url" in result
+        assert result["tile_count"] == 1
+        assert result["tool_calls_made"] == 3
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    def test_generate_ai_failure_returns_error(self, _, mock_model_svc):
+        """When the AI service raises, generate_dashboard returns an error."""
+        mock_ai_cls = MagicMock()
+        mock_ai_cls.return_value.generate.side_effect = RuntimeError("AI service unavailable")
+
+        with patch("omni_dash.ai.omni_adapter.OmniModelAdapter"), \
+             patch("omni_dash.ai.service.DashboardAI", mock_ai_cls):
+            result = json.loads(mcp_server.generate_dashboard(prompt="anything"))
+
+        assert "error" in result
+        assert "AI service unavailable" in result["error"]
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch.object(mcp_server, "_create_with_vis_configs")
+    @patch("omni_dash.mcp.server.DashboardSerializer")
+    @patch("omni_dash.mcp.server.get_settings")
+    def test_generate_passes_folder_id(self, mock_settings, mock_serializer, mock_create, _, mock_model_svc):
+        from omni_dash.dashboard.definition import DashboardDefinition, Tile, TileQuery
+
+        mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+        mock_serializer.to_omni_create_payload.return_value = {"name": "D"}
+        mock_create.return_value = ("dash-f1", "D")
+
+        mock_definition = DashboardDefinition(
+            name="D",
+            model_id="model-123",
+            tiles=[Tile(name="C", chart_type="bar", query=TileQuery(table="t", fields=["t.x"]))],
+        )
+        mock_ai_result = MagicMock()
+        mock_ai_result.definition = mock_definition
+        mock_ai_result.tool_calls_made = 1
+        mock_ai_result.reasoning = "ok"
+
+        mock_ai_cls = MagicMock()
+        mock_ai_cls.return_value.generate.return_value = mock_ai_result
+
+        with patch("omni_dash.ai.omni_adapter.OmniModelAdapter"), \
+             patch("omni_dash.ai.service.DashboardAI", mock_ai_cls):
+            mcp_server.generate_dashboard(prompt="test", folder_id="folder-abc")
+
+        _, kwargs = mock_create.call_args
+        assert kwargs["folder_id"] == "folder-abc"
+
+
+# ---------------------------------------------------------------------------
+# MCP Error Recovery
+# ---------------------------------------------------------------------------
+
+
+class TestQueryDataErrors:
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch.object(mcp_server, "_get_query_runner")
+    def test_nonexistent_table(self, mock_get_runner, _):
+        from omni_dash.exceptions import OmniAPIError
+
+        runner = MagicMock()
+        runner.run.side_effect = OmniAPIError(404, "Table not found")
+        mock_get_runner.return_value = runner
+
+        result = json.loads(mcp_server.query_data(
+            table="nonexistent",
+            fields=["nonexistent.x"],
+        ))
+        assert "error" in result
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch.object(mcp_server, "_get_query_runner")
+    def test_empty_result_returns_zero_rows(self, mock_get_runner, _):
+        from omni_dash.api.queries import QueryResult
+
+        runner = MagicMock()
+        runner.run.return_value = QueryResult(fields=["t.x"], rows=[], row_count=0)
+        mock_get_runner.return_value = runner
+
+        result = json.loads(mcp_server.query_data(
+            table="t",
+            fields=["t.x"],
+        ))
+        assert result["row_count"] == 0
+        assert result["rows"] == []
+
+
+class TestProfileDataErrors:
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    def test_profile_data_empty_table(self, _, mock_model_svc, mock_query_runner):
+        from omni_dash.api.models import TopicDetail
+        from omni_dash.api.queries import QueryResult
+
+        mock_model_svc.get_topic.return_value = TopicDetail(
+            name="empty_table",
+            label="Empty",
+            fields=[{"name": "col1"}, {"name": "col2"}],
+        )
+        mock_query_runner.run.return_value = QueryResult(
+            fields=["empty_table.col1", "empty_table.col2"],
+            rows=[],
+            row_count=0,
+        )
+
+        result = json.loads(mcp_server.profile_data("empty_table"))
+        assert "error" not in result
+        assert result["row_count"] == 0
+        # Field profiles should still exist but with zero sample_count
+        assert "empty_table.col1" in result["fields"]
+        assert result["fields"]["empty_table.col1"]["sample_count"] == 0
+        assert result["fields"]["empty_table.col1"]["null_count"] == 0
+
+
+class TestCloneDashboardErrors:
+    def test_handles_import_error_after_export(self, mock_doc_svc):
+        from omni_dash.exceptions import OmniAPIError
+
+        mock_doc_svc.export_dashboard.return_value = SAMPLE_EXPORT
+        mock_doc_svc.import_dashboard.side_effect = OmniAPIError(500, "Import failed")
+
+        result = json.loads(mcp_server.clone_dashboard(
+            dashboard_id="orig", new_name="Clone"
+        ))
+        assert "error" in result
+        assert "Import failed" in result["error"] or "500" in result["error"]
+
+
+class TestUpdateDashboardErrors:
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch("omni_dash.mcp.server.get_settings")
+    def test_update_with_empty_tiles_creates_empty_dashboard(self, mock_settings, _, mock_doc_svc):
+        """tiles=[] (empty list, not None) means replace with zero tiles."""
+        from omni_dash.api.documents import DashboardResponse, ImportResponse
+
+        mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+        mock_doc_svc.export_dashboard.return_value = SAMPLE_EXPORT
+        mock_doc_svc.create_dashboard.return_value = DashboardResponse(
+            document_id="skeleton-1", name="Updated"
+        )
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
+            document_id="updated-1", name="Updated"
+        )
+        mock_doc_svc.delete_dashboard.return_value = None
+
+        # Empty tiles list — should still process without crashing
+        result = json.loads(mcp_server.update_dashboard(
+            dashboard_id="orig-1", tiles=[], name="Updated"
+        ))
+        assert result["status"] == "updated"
+
+    def test_update_nonexistent_dashboard(self, mock_doc_svc):
+        from omni_dash.exceptions import DocumentNotFoundError
+
+        mock_doc_svc.export_dashboard.side_effect = DocumentNotFoundError("missing")
+        result = json.loads(mcp_server.update_dashboard(dashboard_id="missing"))
+        assert "error" in result
+
+
+class TestMoveDashboardErrors:
+    def test_handles_import_error(self, mock_doc_svc):
+        from omni_dash.exceptions import OmniAPIError
+
+        mock_doc_svc.export_dashboard.return_value = SAMPLE_EXPORT
+        mock_doc_svc.import_dashboard.side_effect = OmniAPIError(500, "Import failed")
+
+        result = json.loads(mcp_server.move_dashboard(
+            dashboard_id="orig", target_folder_id="f2"
+        ))
+        assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# Full CRUD Chain
+# ---------------------------------------------------------------------------
+
+
+class TestCRUDChain:
+    """End-to-end: create -> get -> clone -> delete."""
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch.object(mcp_server, "_get_doc_svc")
+    @patch("omni_dash.mcp.server.get_settings")
+    def test_full_lifecycle(self, mock_settings, mock_get_doc_svc, _):
+        from omni_dash.api.documents import DashboardResponse, ImportResponse
+
+        mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+        svc = MagicMock()
+        mock_get_doc_svc.return_value = svc
+
+        # Step 1: Create
+        svc.create_dashboard.return_value = DashboardResponse(
+            document_id="skel-1", name="CRUD Test"
+        )
+        svc.export_dashboard.return_value = {
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "Line Chart",
+                                "visConfig": {
+                                    "visType": None,
+                                    "chartType": "line",
+                                    "spec": {},
+                                    "fields": [],
+                                    "jsonHash": "x",
+                                },
+                            }
+                        }
+                    ]
+                }
+            },
+            "document": {"sharedModelId": "model-123", "name": "CRUD Test", "folderId": None},
+            "workbookModel": {},
+            "exportVersion": "0.1",
+        }
+        svc.import_dashboard.return_value = ImportResponse(
+            document_id="final-1", name="CRUD Test"
+        )
+        svc.delete_dashboard.return_value = None
+
+        tiles = [{
+            "name": "Line Chart",
+            "chart_type": "line",
+            "query": {"table": "t", "fields": ["t.d", "t.v"]},
+            "vis_config": {"x_axis": "t.d", "y_axis": ["t.v"]},
+            "size": "half",
+        }]
+        create_result = json.loads(mcp_server.create_dashboard(
+            name="CRUD Test", tiles=tiles
+        ))
+        assert create_result["status"] == "created"
+        created_id = create_result["dashboard_id"]
+        assert created_id == "final-1"
+
+        # Step 2: Get
+        # Reset _doc_svc so that get_dashboard uses the injected svc
+        mcp_server._doc_svc = svc
+        svc.get_dashboard.return_value = DashboardResponse(
+            document_id=created_id,
+            name="CRUD Test",
+            model_id="model-123",
+            query_presentations=[{"id": "qp1"}],
+            created_at="2026-01-01",
+            updated_at="2026-01-02",
+        )
+        get_result = json.loads(mcp_server.get_dashboard(created_id))
+        assert get_result["document_id"] == created_id
+        assert get_result["name"] == "CRUD Test"
+        assert get_result["tile_count"] == 1
+
+        # Step 3: Clone
+        svc.export_dashboard.return_value = SAMPLE_EXPORT
+        svc.import_dashboard.return_value = ImportResponse(
+            document_id="clone-1", name="CRUD Clone"
+        )
+        clone_result = json.loads(mcp_server.clone_dashboard(
+            dashboard_id=created_id, new_name="CRUD Clone"
+        ))
+        assert clone_result["status"] == "cloned"
+        assert clone_result["source_dashboard_id"] == created_id
+        assert clone_result["new_dashboard_id"] == "clone-1"
+
+        # Step 4: Delete original
+        svc.delete_dashboard.return_value = None
+        delete_result = json.loads(mcp_server.delete_dashboard(created_id))
+        assert delete_result["status"] == "deleted"
+        assert delete_result["dashboard_id"] == created_id
+
+        # Step 5: Delete clone
+        delete_clone_result = json.loads(mcp_server.delete_dashboard("clone-1"))
+        assert delete_clone_result["status"] == "deleted"
+
+
+# ---------------------------------------------------------------------------
+# suggest_chart: field filtering
+# ---------------------------------------------------------------------------
+
+
+class TestSuggestChartFieldFiltering:
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    def test_filters_to_requested_fields(self, _, mock_model_svc):
+        from omni_dash.api.models import TopicDetail
+
+        mock_model_svc.get_topic.return_value = TopicDetail(
+            name="mart_seo",
+            label="SEO",
+            fields=[
+                {"name": "week_start", "type": "date", "label": "Week Start"},
+                {"name": "visits", "type": "number", "label": "Visits", "aggregation": "sum"},
+                {"name": "revenue", "type": "number", "label": "Revenue", "aggregation": "sum"},
+                {"name": "channel_name", "type": "string", "label": "Channel"},
+            ],
+        )
+
+        # Request only 1 measure field — should recommend "number" (KPI)
+        result = json.loads(mcp_server.suggest_chart(
+            table="mart_seo",
+            fields=["visits"],
+        ))
+        assert result["chart_type"] == "number"
+        assert result["fields_analyzed"] == 1
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    def test_qualified_field_names_filter(self, _, mock_model_svc):
+        from omni_dash.api.models import TopicDetail
+
+        mock_model_svc.get_topic.return_value = TopicDetail(
+            name="mart_seo",
+            label="SEO",
+            fields=[
+                {"name": "week_start", "type": "date", "label": "Week Start"},
+                {"name": "visits", "type": "number", "label": "Visits", "aggregation": "sum"},
+            ],
+        )
+
+        # Use qualified names like "mart_seo.visits"
+        result = json.loads(mcp_server.suggest_chart(
+            table="mart_seo",
+            fields=["mart_seo.week_start", "mart_seo.visits"],
+        ))
+        assert result["fields_analyzed"] == 2
+        assert result["chart_type"] == "line"

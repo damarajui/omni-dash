@@ -1218,7 +1218,17 @@ class DashboardSerializer:
 
             # Chart type is in visConfig.chartType
             vis_config_data = qp.get("visConfig", {})
-            omni_chart_type = vis_config_data.get("chartType", "line")
+            # chartType can be explicitly null in exports; fall back to
+            # visType mapping, then to "line".
+            _VIS_TYPE_FALLBACK = {
+                "omni-kpi": "kpi",
+                "omni-table": "table",
+                "omni-markdown": "markdown",
+            }
+            omni_chart_type = (
+                vis_config_data.get("chartType")
+                or _VIS_TYPE_FALLBACK.get(vis_config_data.get("visType", ""), "line")
+            )
             vis_spec = vis_config_data.get("spec", {})
 
             sorts = [
