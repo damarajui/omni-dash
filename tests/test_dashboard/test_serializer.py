@@ -1874,3 +1874,1093 @@ def test_is_null_filter_has_empty_values_array():
     assert f["is_negative"] is False
     assert f["values"] == []
     assert f["values"] is not None
+
+
+# ===========================================================================
+# Phase 1: Missing Chart Types
+# ===========================================================================
+
+
+def test_pie_chart_serialization():
+    """Pie chart should map to Omni 'pie' type with correct chartType."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Pie Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Revenue by Channel",
+                chart_type="pie",
+                query=TileQuery(table="t", fields=["t.channel", "t.revenue"]),
+                vis_config=TileVisConfig(x_axis="t.channel", y_axis=["t.revenue"]),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    qp = payload["queryPresentations"][0]
+    assert qp["chartType"] == "pie"
+    # Pie is NOT in _CARTESIAN_CHART_TYPES, so it won't get a visConfig with spec
+    # but the chartType should be set correctly
+    assert qp["prefersChart"] is True
+    assert "t.channel" in qp["query"]["fields"]
+    assert "t.revenue" in qp["query"]["fields"]
+
+
+def test_grouped_bar_chart_serialization():
+    """Grouped bar chart should map to 'barGrouped' and generate a cartesian spec."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Grouped Bar Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Revenue vs Cost",
+                chart_type="grouped_bar",
+                query=TileQuery(table="t", fields=["t.category", "t.revenue", "t.cost"]),
+                vis_config=TileVisConfig(
+                    x_axis="t.category",
+                    y_axis=["t.revenue", "t.cost"],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    qp = payload["queryPresentations"][0]
+    assert qp["chartType"] == "barGrouped"
+    assert qp["prefersChart"] is True
+
+    # barGrouped IS in _CARTESIAN_CHART_TYPES so should get full cartesian spec
+    vis = qp["visConfig"]
+    assert vis["visType"] == "basic"
+    spec = vis["spec"]
+    assert spec["configType"] == "cartesian"
+    assert spec["x"]["field"]["name"] == "t.category"
+    assert spec["mark"]["type"] == "bar"
+    # Auto-generated series: one per measure (revenue and cost)
+    assert len(spec["series"]) == 2
+    series_fields = [s["field"]["name"] for s in spec["series"]]
+    assert "t.revenue" in series_fields
+    assert "t.cost" in series_fields
+    for s in spec["series"]:
+        assert s["yAxis"] == "y"
+
+
+def test_stacked_area_chart_serialization():
+    """Stacked area chart should map to 'areaStacked' with stacking behavior."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Stacked Area Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Revenue by Source",
+                chart_type="stacked_area",
+                query=TileQuery(
+                    table="t", fields=["t.date", "t.revenue", "t.source"]
+                ),
+                vis_config=TileVisConfig(
+                    x_axis="t.date",
+                    y_axis=["t.revenue"],
+                    color_by="t.source",
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    qp = payload["queryPresentations"][0]
+    assert qp["chartType"] == "areaStacked"
+
+    # areaStacked IS in _CARTESIAN_CHART_TYPES
+    vis = qp["visConfig"]
+    assert vis["visType"] == "basic"
+    spec = vis["spec"]
+    assert spec["configType"] == "cartesian"
+    assert spec["mark"]["type"] == "area"
+    # Stacking behavior
+    assert spec["behaviors"]["stackMultiMark"] is True
+    assert spec["y"]["color"]["_stack"] == "stack"
+
+
+def test_funnel_chart_serialization():
+    """Funnel chart should fall back to 'bar' (documented limitation)."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Funnel Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Conversion Funnel",
+                chart_type="funnel",
+                query=TileQuery(table="t", fields=["t.stage", "t.count"]),
+                vis_config=TileVisConfig(x_axis="t.stage", y_axis=["t.count"]),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    qp = payload["queryPresentations"][0]
+    # funnel maps to "bar" in _CHART_TYPE_TO_OMNI
+    assert qp["chartType"] == "bar"
+    # "bar" IS in _CARTESIAN_CHART_TYPES so should get cartesian spec
+    vis = qp["visConfig"]
+    assert vis["visType"] == "basic"
+    assert spec_mark_type(vis) == "bar"
+
+
+def spec_mark_type(vis: dict) -> str:
+    """Helper to extract mark type from a visConfig."""
+    return vis["spec"]["mark"]["type"]
+
+
+def test_donut_maps_to_pie():
+    """Donut chart type should map to Omni 'pie'."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Donut Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Distribution",
+                chart_type="donut",
+                query=TileQuery(table="t", fields=["t.segment", "t.value"]),
+                vis_config=TileVisConfig(x_axis="t.segment"),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    qp = payload["queryPresentations"][0]
+    assert qp["chartType"] == "pie"
+    assert qp["prefersChart"] is True
+
+
+def test_pivot_table_serialization():
+    """Pivot table with multiple dimensions and pivots should map to 'table'."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Pivot Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Revenue Pivot",
+                chart_type="pivot_table",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.region", "t.quarter", "t.revenue"],
+                    pivots=["t.quarter"],
+                ),
+                vis_config=TileVisConfig(x_axis="t.region"),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    qp = payload["queryPresentations"][0]
+    assert qp["chartType"] == "table"
+    # Pivots should be passed through to the query
+    assert qp["query"]["pivots"] == ["t.quarter"]
+    # table type → prefersChart is False
+    assert qp["prefersChart"] is False
+
+
+def test_from_export_grouped_bar():
+    """Omni 'barGrouped' should reverse map to internal 'grouped_bar'."""
+    export_data = {
+        "document": {"name": "Test", "modelId": "m1"},
+        "dashboard": {
+            "queryPresentationCollection": {
+                "queryPresentationCollectionMemberships": [
+                    _make_omni_export_qp("Grouped", "barGrouped", "t", ["t.dim", "t.m1", "t.m2"]),
+                ],
+            },
+            "metadata": {"layouts": {"lg": []}},
+        },
+    }
+    defn = DashboardSerializer.from_omni_export(export_data)
+    assert defn.tiles[0].chart_type == "grouped_bar"
+
+
+def test_from_export_stacked_area():
+    """Omni 'areaStacked' should reverse map to internal 'stacked_area'."""
+    export_data = {
+        "document": {"name": "Test", "modelId": "m1"},
+        "dashboard": {
+            "queryPresentationCollection": {
+                "queryPresentationCollectionMemberships": [
+                    _make_omni_export_qp("Stacked Area", "areaStacked", "t", ["t.date", "t.val"]),
+                ],
+            },
+            "metadata": {"layouts": {"lg": []}},
+        },
+    }
+    defn = DashboardSerializer.from_omni_export(export_data)
+    assert defn.tiles[0].chart_type == "stacked_area"
+
+
+def test_from_export_pie():
+    """Omni 'pie' should reverse map to internal 'pie'."""
+    export_data = {
+        "document": {"name": "Test", "modelId": "m1"},
+        "dashboard": {
+            "queryPresentationCollection": {
+                "queryPresentationCollectionMemberships": [
+                    _make_omni_export_qp("Pie Chart", "pie", "t", ["t.category", "t.amount"]),
+                ],
+            },
+            "metadata": {"layouts": {"lg": []}},
+        },
+    }
+    defn = DashboardSerializer.from_omni_export(export_data)
+    assert defn.tiles[0].chart_type == "pie"
+
+
+# ===========================================================================
+# Phase 3a: Serializer Edge Cases
+# ===========================================================================
+
+
+def test_kpi_with_only_date_fields():
+    """KPI tile with only date fields should fall back to fields[0]."""
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="KPI Date Only",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Latest Date",
+                chart_type="number",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.created_at", "t.updated_at"],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    vis = payload["queryPresentations"][0]["visConfig"]
+    kpi_field = vis["spec"]["markdownConfig"][0]["config"]["field"]["field"]["name"]
+    # Both fields are date-like — heuristic should still pick something (falls back to first)
+    assert kpi_field == "t.created_at"
+
+
+def test_empty_fields_list_raises_error():
+    """Tile with empty fields list should raise validation error."""
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    with pytest.raises(Exception):
+        TileQuery(table="t", fields=[])
+
+
+def test_extremely_long_field_names():
+    """Fields with 200+ character names should serialize without truncation."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    long_name = "t." + "a" * 200
+    definition = DashboardDefinition(
+        name="Long Field Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Long Names",
+                chart_type="line",
+                query=TileQuery(table="t", fields=[long_name, "t.value"]),
+                vis_config=TileVisConfig(x_axis=long_name, y_axis=["t.value"]),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    qp = payload["queryPresentations"][0]
+    assert long_name in qp["query"]["fields"]
+    # Cartesian spec should also have the long field name without truncation
+    spec = qp["visConfig"]["spec"]
+    assert spec["x"]["field"]["name"] == long_name
+    assert len(spec["x"]["field"]["name"]) == 202  # "t." + 200 chars
+
+
+def test_duplicate_fields_in_query():
+    """Duplicate fields in query should be preserved (serializer does not deduplicate)."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Duplicate Fields Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Duplicated",
+                chart_type="line",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.date", "t.revenue", "t.revenue"],
+                ),
+                vis_config=TileVisConfig(x_axis="t.date", y_axis=["t.revenue"]),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    qp = payload["queryPresentations"][0]
+    # The fields list should be preserved as-is (duplicates included)
+    assert qp["query"]["fields"].count("t.revenue") == 2
+    # Series should be generated for each non-x field including duplicates
+    series = qp["visConfig"]["spec"]["series"]
+    series_fields = [s["field"]["name"] for s in series]
+    assert series_fields.count("t.revenue") == 2
+
+
+def test_unknown_chart_type_passthrough():
+    """Chart type not in _CHART_TYPE_TO_OMNI should pass through as-is.
+
+    Note: The Tile validator restricts chart_type to the ChartType enum,
+    so truly unknown types won't pass validation. But the serializer's
+    _CHART_TYPE_TO_OMNI.get(chart_type, chart_type) logic is what we test
+    via the mapping itself.
+    """
+    from omni_dash.dashboard.serializer import _CHART_TYPE_TO_OMNI
+
+    # Verify that all ChartType enum values are covered in the mapping
+    from omni_dash.dashboard.definition import ChartType
+
+    for ct in ChartType:
+        assert ct.value in _CHART_TYPE_TO_OMNI, (
+            f"ChartType.{ct.name} ('{ct.value}') is not in _CHART_TYPE_TO_OMNI"
+        )
+
+
+def test_filter_operator_fallback():
+    """Unknown filter operator should fall back to EQUALS."""
+    from omni_dash.dashboard.definition import FilterSpec as FS, Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="Unknown Op Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Filtered",
+                chart_type="bar",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.dim", "t.val"],
+                    filters=[
+                        FS(field="t.status", operator="some_unknown_operator", value="test"),
+                    ],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    f = payload["queryPresentations"][0]["query"]["filters"]["t.status"]
+    # Unknown operator falls back to EQUALS
+    assert f["kind"] == "EQUALS"
+    assert f["values"] == ["test"]
+    assert f["is_negative"] is False
+
+
+# ===========================================================================
+# Phase 3c: Filter Edge Cases
+# ===========================================================================
+
+
+def test_is_not_null_with_explicit_empty_values():
+    """is_not_null with explicit values=[] should produce correct payload (regression)."""
+    from omni_dash.dashboard.definition import FilterSpec as FS, Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="IsNotNull Empty Values",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Filtered",
+                chart_type="bar",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.email", "t.count"],
+                    filters=[
+                        FS(field="t.email", operator="is_not_null", value=None),
+                    ],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    f = payload["queryPresentations"][0]["query"]["filters"]["t.email"]
+    assert f["kind"] == "IS_NULL"
+    assert f["is_negative"] is True
+    assert f["values"] == []
+    # Must be an empty list, not None — Omni's Java backend crashes on null
+    assert isinstance(f["values"], list)
+
+
+def test_date_range_last_12_weeks_normalized():
+    """'last 12 weeks' should be normalized to 84 days in a full serialization round-trip."""
+    from omni_dash.dashboard.definition import DashboardFilter, Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="12 Weeks Normalized",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Trend",
+                chart_type="line",
+                query=TileQuery(
+                    table="t", fields=["t.week_start", "t.visits"]
+                ),
+                vis_config=TileVisConfig(x_axis="t.week_start"),
+            ),
+        ],
+        filters=[
+            DashboardFilter(
+                field="t.week_start",
+                filter_type="date_range",
+                label="Date",
+                default_value="last 12 weeks",
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    tile_filter = payload["queryPresentations"][0]["query"]["filters"]["t.week_start"]
+    assert tile_filter["left_side"] == "84 days ago"
+    assert tile_filter["right_side"] == "84 days"
+    assert tile_filter["kind"] == "TIME_FOR_INTERVAL_DURATION"
+
+    # Also verify the filterConfig gets the same normalization
+    fid = payload["filterOrder"][0]
+    fc = payload["filterConfig"][fid]
+    assert fc["kind"] == "TIME_FOR_INTERVAL_DURATION"
+
+
+def test_dashboard_filter_with_none_default_skipped():
+    """Dashboard filter with default_value=None should NOT be applied to tiles."""
+    from omni_dash.dashboard.definition import DashboardFilter, Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="None Default Filter",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Chart",
+                chart_type="line",
+                query=TileQuery(
+                    table="t", fields=["t.date", "t.revenue"]
+                ),
+                vis_config=TileVisConfig(x_axis="t.date"),
+            ),
+        ],
+        filters=[
+            DashboardFilter(
+                field="t.date",
+                filter_type="date_range",
+                label="Date",
+                default_value=None,
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    qp = payload["queryPresentations"][0]
+    # With default_value=None, the filter should be skipped during tile propagation
+    tile_filters = qp["query"].get("filters", {})
+    assert "t.date" not in tile_filters
+
+
+def test_composite_filter_with_three_conditions():
+    """Composite filter with 3 AND conditions should produce correct nesting."""
+    from omni_dash.dashboard.definition import (
+        CompositeFilter, FilterSpec as FS, Tile, TileQuery,
+    )
+
+    definition = DashboardDefinition(
+        name="Triple Composite",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Filtered",
+                chart_type="bar",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.date", "t.value"],
+                    composite_filters=[
+                        CompositeFilter(
+                            conditions=[
+                                FS(field="t.date", operator="date_range", value="90 days ago"),
+                                FS(field="t.date", operator="before", value="7 days ago"),
+                                FS(field="t.date", operator="is_not_null", value=None),
+                            ],
+                            conjunction="AND",
+                        ),
+                    ],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    filters = payload["queryPresentations"][0]["query"]["filters"]
+    assert "t.date" in filters
+    composite = filters["t.date"]
+    assert composite["type"] == "composite"
+    assert composite["conjunction"] == "AND"
+    assert len(composite["filters"]) == 3
+    # Verify each sub-filter kind
+    kinds = [f["kind"] for f in composite["filters"]]
+    assert kinds[0] == "TIME_FOR_INTERVAL_DURATION"
+    assert kinds[1] == "BEFORE"
+    assert kinds[2] == "IS_NULL"
+
+
+# ===========================================================================
+# Phase 4a: 16-Tile Stress Test
+# ===========================================================================
+
+
+def test_stress_16_tile_dashboard():
+    """Build a 16-tile dashboard programmatically and verify all tiles serialize."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    tiles = []
+
+    # 4 KPI tiles (quarter size)
+    for i in range(4):
+        tiles.append(
+            Tile(
+                name=f"KPI {i+1}",
+                chart_type="number",
+                query=TileQuery(table="t", fields=[f"t.metric_{i}"]),
+                size="quarter",
+            )
+        )
+
+    # 3 line charts (half size)
+    for i in range(3):
+        tiles.append(
+            Tile(
+                name=f"Line Chart {i+1}",
+                chart_type="line",
+                query=TileQuery(table="t", fields=["t.date", f"t.measure_{i}"]),
+                vis_config=TileVisConfig(x_axis="t.date", y_axis=[f"t.measure_{i}"]),
+                size="half",
+            )
+        )
+
+    # 2 stacked bar charts (half size)
+    for i in range(2):
+        tiles.append(
+            Tile(
+                name=f"Stacked Bar {i+1}",
+                chart_type="stacked_bar",
+                query=TileQuery(
+                    table="t", fields=["t.month", f"t.revenue_{i}", "t.channel"]
+                ),
+                vis_config=TileVisConfig(
+                    x_axis="t.month",
+                    y_axis=[f"t.revenue_{i}"],
+                    color_by="t.channel",
+                ),
+                size="half",
+            )
+        )
+
+    # 2 bar charts (third size)
+    for i in range(2):
+        tiles.append(
+            Tile(
+                name=f"Bar Chart {i+1}",
+                chart_type="bar",
+                query=TileQuery(table="t", fields=["t.category", f"t.count_{i}"]),
+                vis_config=TileVisConfig(
+                    x_axis="t.category", y_axis=[f"t.count_{i}"]
+                ),
+                size="third",
+            )
+        )
+
+    # 1 scatter plot (half size)
+    tiles.append(
+        Tile(
+            name="Scatter",
+            chart_type="scatter",
+            query=TileQuery(table="t", fields=["t.x_val", "t.y_val"]),
+            vis_config=TileVisConfig(x_axis="t.x_val", y_axis=["t.y_val"]),
+            size="half",
+        )
+    )
+
+    # 1 heatmap (half size)
+    tiles.append(
+        Tile(
+            name="Heatmap",
+            chart_type="heatmap",
+            query=TileQuery(table="t", fields=["t.day", "t.hour", "t.intensity"]),
+            vis_config=TileVisConfig(
+                x_axis="t.day", y_axis=["t.hour"], heatmap_color_field="t.intensity"
+            ),
+            size="half",
+        )
+    )
+
+    # 1 combo chart (full size)
+    tiles.append(
+        Tile(
+            name="Combo",
+            chart_type="combo",
+            query=TileQuery(table="t", fields=["t.date", "t.revenue", "t.growth"]),
+            vis_config=TileVisConfig(
+                x_axis="t.date",
+                y2_axis=True,
+                series_config=[
+                    {"field": "t.revenue", "mark_type": "bar", "y_axis": "y"},
+                    {"field": "t.growth", "mark_type": "line", "y_axis": "y2"},
+                ],
+            ),
+            size="full",
+        )
+    )
+
+    # 1 table (full size)
+    tiles.append(
+        Tile(
+            name="Detail Table",
+            chart_type="table",
+            query=TileQuery(
+                table="t", fields=["t.id", "t.name", "t.status", "t.value"]
+            ),
+            size="full",
+        )
+    )
+
+    # 1 text/markdown tile (full size)
+    tiles.append(
+        Tile(
+            name="Header",
+            chart_type="text",
+            query=TileQuery(table="t", fields=["t.id"]),
+            vis_config=TileVisConfig(
+                markdown_template="<h1>Dashboard Overview</h1>"
+            ),
+            size="full",
+        )
+    )
+
+    assert len(tiles) == 16
+
+    definition = DashboardDefinition(
+        name="Stress Test Dashboard",
+        model_id="m-1",
+        tiles=tiles,
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+
+    # All 16 tiles should serialize
+    assert len(payload["queryPresentations"]) == 16
+
+    # Verify chart types are correct
+    chart_types = [qp["chartType"] for qp in payload["queryPresentations"]]
+    assert chart_types.count("kpi") == 4
+    assert chart_types.count("line") == 3
+    assert chart_types.count("barStacked") == 2
+    assert chart_types.count("bar") == 2
+    assert chart_types.count("point") == 1
+    assert chart_types.count("heatmap") == 1
+    assert chart_types.count("barLine") == 1
+    assert chart_types.count("table") == 1
+    assert chart_types.count("markdown") == 1
+
+    # Verify no crashes — all queryPresentations have required fields
+    for qp in payload["queryPresentations"]:
+        assert "name" in qp
+        assert "chartType" in qp
+        assert "query" in qp
+        assert "fields" in qp["query"]
+        assert "table" in qp["query"]
+        assert "modelId" in qp["query"]
+
+
+# ===========================================================================
+# Phase 4b: Multi-Table Dashboard Filter Propagation
+# ===========================================================================
+
+
+def test_multi_table_dashboard_filter_propagation():
+    """Dashboard filter on table_a.date should remap to table_b.date but skip table_c."""
+    from omni_dash.dashboard.definition import DashboardFilter, Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="Multi-Table Filter",
+        model_id="m-1",
+        tiles=[
+            # table_a: has "date" column — direct match
+            Tile(
+                name="Table A Chart",
+                chart_type="line",
+                query=TileQuery(
+                    table="table_a", fields=["table_a.date", "table_a.visits"]
+                ),
+                vis_config=TileVisConfig(x_axis="table_a.date"),
+            ),
+            # table_b: has "date" column — cross-table remap
+            Tile(
+                name="Table B Chart",
+                chart_type="bar",
+                query=TileQuery(
+                    table="table_b", fields=["table_b.date", "table_b.signups"]
+                ),
+                vis_config=TileVisConfig(x_axis="table_b.date"),
+            ),
+            # table_c: does NOT have "date" column — filter should NOT apply
+            Tile(
+                name="Table C Chart",
+                chart_type="bar",
+                query=TileQuery(
+                    table="table_c", fields=["table_c.url", "table_c.clicks"]
+                ),
+                vis_config=TileVisConfig(x_axis="table_c.url"),
+            ),
+        ],
+        filters=[
+            DashboardFilter(
+                field="table_a.date",
+                filter_type="date_range",
+                label="Date",
+                default_value="last 12 weeks",
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+
+    # table_a: direct match — filter applied as table_a.date
+    filters_a = payload["queryPresentations"][0]["query"]["filters"]
+    assert "table_a.date" in filters_a
+
+    # table_b: cross-table remap — filter applied as table_b.date
+    filters_b = payload["queryPresentations"][1]["query"]["filters"]
+    assert "table_b.date" in filters_b
+    assert "table_a.date" not in filters_b
+
+    # table_c: no matching column — filter NOT applied
+    qp_c = payload["queryPresentations"][2]
+    filters_c = qp_c["query"].get("filters", {})
+    assert "table_a.date" not in filters_c
+    assert "table_c.date" not in filters_c
+    assert len(filters_c) == 0
+
+
+# ===========================================================================
+# Phase 4c: Builder -> Serializer Round-Trip
+# ===========================================================================
+
+
+def test_builder_serializer_round_trip():
+    """Build a complex dashboard with DashboardBuilder, serialize it, and verify structure."""
+    definition = (
+        DashboardBuilder("Round Trip Test")
+        .model("model-rt-123")
+        .dbt_source("mart_seo_weekly_funnel")
+        .add_line_chart(
+            "Organic Visits",
+            time_col="week_start",
+            metric_cols=["organic_visits_total", "organic_sessions"],
+        )
+        .add_bar_chart(
+            "Signups by Channel",
+            dimension_col="channel",
+            metric_cols=["signups"],
+        )
+        .add_number_tile("Current ARR", metric_col="running_plg_arr", value_format="USDCURRENCY_0")
+        .add_table("Detail Data", columns=["week_start", "channel", "signups", "organic_visits_total"])
+        .add_filter("week_start", filter_type="date_range", label="Date Range", default="last 12 weeks")
+        .auto_layout()
+        .build()
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+
+    # Top-level structure
+    assert payload["modelId"] == "model-rt-123"
+    assert payload["name"] == "Round Trip Test"
+    assert len(payload["queryPresentations"]) == 4
+
+    # All fields should be fully qualified (table.column)
+    for qp in payload["queryPresentations"]:
+        for field in qp["query"]["fields"]:
+            assert "." in field, f"Field '{field}' is not qualified"
+        # All modelIds should match
+        assert qp["query"]["modelId"] == "model-rt-123"
+
+    # Line chart
+    qp_line = payload["queryPresentations"][0]
+    assert qp_line["chartType"] == "line"
+    assert qp_line["prefersChart"] is True
+    assert "mart_seo_weekly_funnel.week_start" in qp_line["query"]["fields"]
+    assert "mart_seo_weekly_funnel.organic_visits_total" in qp_line["query"]["fields"]
+    # Line charts should have sorts on the time column
+    if qp_line["query"]["sorts"]:
+        assert qp_line["query"]["sorts"][0]["column_name"] == "mart_seo_weekly_funnel.week_start"
+    # Should have a cartesian visConfig
+    assert qp_line["visConfig"]["visType"] == "basic"
+    assert qp_line["visConfig"]["spec"]["configType"] == "cartesian"
+
+    # Bar chart
+    qp_bar = payload["queryPresentations"][1]
+    assert qp_bar["chartType"] == "bar"
+
+    # KPI
+    qp_kpi = payload["queryPresentations"][2]
+    assert qp_kpi["chartType"] == "kpi"
+    assert qp_kpi["query"]["limit"] == 1
+    assert qp_kpi["visConfig"]["visType"] == "omni-kpi"
+
+    # Table
+    qp_table = payload["queryPresentations"][3]
+    assert qp_table["chartType"] == "table"
+    assert qp_table["prefersChart"] is False
+    assert qp_table["visConfig"]["visType"] == "omni-table"
+
+    # Filters should be propagated to all tiles with matching date column
+    for qp in payload["queryPresentations"]:
+        tile_table = qp["query"]["table"]
+        tile_fields = qp["query"]["fields"]
+        col_names = {f.split(".")[-1] for f in tile_fields}
+        if "week_start" in col_names:
+            tile_filters = qp["query"].get("filters", {})
+            assert f"{tile_table}.week_start" in tile_filters
+
+    # Filter config should be present at top level
+    assert "filterConfig" in payload
+    assert "filterOrder" in payload
+    assert len(payload["filterOrder"]) == 1
+
+    # Layout positions should be present (from auto_layout)
+    for qp in payload["queryPresentations"]:
+        assert "position" in qp
+        pos = qp["position"]
+        assert "x" in pos
+        assert "y" in pos
+        assert "w" in pos
+        assert "h" in pos
+
+
+# ===========================================================================
+# Additional edge case: from_export for column variants
+# ===========================================================================
+
+
+def test_from_export_column_stacked_maps_to_stacked_bar():
+    """Omni 'columnStacked' should reverse map to internal 'stacked_bar'."""
+    export_data = {
+        "document": {"name": "Test", "modelId": "m1"},
+        "dashboard": {
+            "queryPresentationCollection": {
+                "queryPresentationCollectionMemberships": [
+                    _make_omni_export_qp("Col Stacked", "columnStacked", "t", ["t.a", "t.b"]),
+                ],
+            },
+            "metadata": {"layouts": {"lg": []}},
+        },
+    }
+    defn = DashboardSerializer.from_omni_export(export_data)
+    assert defn.tiles[0].chart_type == "stacked_bar"
+
+
+def test_from_export_column_grouped_maps_to_grouped_bar():
+    """Omni 'columnGrouped' should reverse map to internal 'grouped_bar'."""
+    export_data = {
+        "document": {"name": "Test", "modelId": "m1"},
+        "dashboard": {
+            "queryPresentationCollection": {
+                "queryPresentationCollectionMemberships": [
+                    _make_omni_export_qp("Col Grouped", "columnGrouped", "t", ["t.a", "t.b"]),
+                ],
+            },
+            "metadata": {"layouts": {"lg": []}},
+        },
+    }
+    defn = DashboardSerializer.from_omni_export(export_data)
+    assert defn.tiles[0].chart_type == "grouped_bar"
+
+
+def test_from_export_markdown_maps_to_text():
+    """Omni 'markdown' should reverse map to internal 'text'."""
+    export_data = {
+        "document": {"name": "Test", "modelId": "m1"},
+        "dashboard": {
+            "queryPresentationCollection": {
+                "queryPresentationCollectionMemberships": [
+                    _make_omni_export_qp("Header", "markdown", "t", ["t.a"]),
+                ],
+            },
+            "metadata": {"layouts": {"lg": []}},
+        },
+    }
+    defn = DashboardSerializer.from_omni_export(export_data)
+    assert defn.tiles[0].chart_type == "text"
+
+
+# ===========================================================================
+# Additional coverage: more edge cases
+# ===========================================================================
+
+
+def test_pie_chart_no_visconfig_spec():
+    """Pie chart should NOT get a cartesian or heatmap visConfig (not in those sets).
+
+    Pie is in _CHART_TYPE_TO_OMNI but not in _CARTESIAN_CHART_TYPES, so the
+    serializer has no branch to generate a visConfig for it. Verify this is the case.
+    """
+    from omni_dash.dashboard.definition import Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="Pie No Spec",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Pie",
+                chart_type="pie",
+                query=TileQuery(table="t", fields=["t.label", "t.amount"]),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    qp = payload["queryPresentations"][0]
+    assert qp["chartType"] == "pie"
+    # Pie doesn't match any vis-building branch, so no visConfig should be set
+    assert "visConfig" not in qp
+
+
+def test_grouped_bar_not_stacked():
+    """Grouped bar should NOT have stackMultiMark=True (unlike stacked bar)."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Grouped Not Stacked",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Grouped",
+                chart_type="grouped_bar",
+                query=TileQuery(table="t", fields=["t.dim", "t.m1", "t.m2"]),
+                vis_config=TileVisConfig(x_axis="t.dim", y_axis=["t.m1", "t.m2"]),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    spec = payload["queryPresentations"][0]["visConfig"]["spec"]
+    # Grouped bar is NOT stacked
+    assert spec["behaviors"]["stackMultiMark"] is False
+    # Y axis should NOT have color._stack
+    y_config = spec.get("y", {})
+    assert "color" not in y_config or "_stack" not in y_config.get("color", {})
+
+
+def test_multiple_dashboard_filters():
+    """Dashboard with multiple filters should produce correct filterConfig and filterOrder."""
+    from omni_dash.dashboard.definition import DashboardFilter, Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="Multi Filter",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Chart",
+                chart_type="line",
+                query=TileQuery(
+                    table="t", fields=["t.date", "t.channel", "t.revenue"]
+                ),
+                vis_config=TileVisConfig(x_axis="t.date"),
+            ),
+        ],
+        filters=[
+            DashboardFilter(
+                field="t.date",
+                filter_type="date_range",
+                label="Date",
+                default_value="last 12 weeks",
+            ),
+            DashboardFilter(
+                field="t.channel",
+                filter_type="select",
+                label="Channel",
+                default_value="organic",
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+
+    assert len(payload["filterOrder"]) == 2
+    assert len(payload["filterConfig"]) == 2
+
+    # Both filters should be applied to the tile
+    tile_filters = payload["queryPresentations"][0]["query"]["filters"]
+    assert "t.date" in tile_filters
+    assert "t.channel" in tile_filters
+    assert tile_filters["t.date"]["kind"] == "TIME_FOR_INTERVAL_DURATION"
+    assert tile_filters["t.channel"]["kind"] == "EQUALS"
+    assert tile_filters["t.channel"]["values"] == ["organic"]
+
+
+def test_scatter_chart_maps_to_point():
+    """Scatter chart should map to Omni 'point' type with cartesian spec."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Scatter Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Correlation",
+                chart_type="scatter",
+                query=TileQuery(table="t", fields=["t.x_val", "t.y_val"]),
+                vis_config=TileVisConfig(x_axis="t.x_val", y_axis=["t.y_val"]),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    qp = payload["queryPresentations"][0]
+    assert qp["chartType"] == "point"
+    # point IS in _CARTESIAN_CHART_TYPES
+    vis = qp["visConfig"]
+    assert vis["visType"] == "basic"
+    assert vis["chartType"] == "point"
+    spec = vis["spec"]
+    assert spec["mark"]["type"] == "point"
+    assert spec["x"]["field"]["name"] == "t.x_val"
+    assert len(spec["series"]) == 1
+    assert spec["series"][0]["field"]["name"] == "t.y_val"
+
+
+def test_combo_chart_generates_dual_series_types():
+    """Combo chart should map to 'barLine' with mixed mark types in series."""
+    from omni_dash.dashboard.definition import Tile, TileQuery, TileVisConfig
+
+    definition = DashboardDefinition(
+        name="Combo Test",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Revenue & Growth",
+                chart_type="combo",
+                query=TileQuery(
+                    table="t", fields=["t.month", "t.revenue", "t.growth_pct"]
+                ),
+                vis_config=TileVisConfig(
+                    x_axis="t.month",
+                    y2_axis=True,
+                    series_config=[
+                        {"field": "t.revenue", "mark_type": "bar", "y_axis": "y"},
+                        {"field": "t.growth_pct", "mark_type": "line", "y_axis": "y2"},
+                    ],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    qp = payload["queryPresentations"][0]
+    assert qp["chartType"] == "barLine"
+
+    vis = qp["visConfig"]
+    spec = vis["spec"]
+    assert spec["configType"] == "cartesian"
+    assert "y2" in spec
+    assert len(spec["series"]) == 2
+    assert spec["series"][0]["mark"]["type"] == "bar"
+    assert spec["series"][0]["yAxis"] == "y"
+    assert spec["series"][1]["mark"]["type"] == "line"
+    assert spec["series"][1]["yAxis"] == "y2"
