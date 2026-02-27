@@ -909,10 +909,11 @@ class DashboardSerializer:
         if definition.tile_filter_map:
             payload.setdefault("metadata", {})["tileFilterMap"] = definition.tile_filter_map
 
-        # Dashboard-level filters → filterConfig for Omni's filter UI controls
+        # Dashboard-level filters → filterConfig for Omni's filter UI controls.
+        # Always include both keys — Omni rejects payloads missing filterOrder.
+        filter_config: dict[str, Any] = {}
+        filter_order: list[str] = []
         if definition.filters:
-            filter_config: dict[str, Any] = {}
-            filter_order: list[str] = []
             for dash_filter in definition.filters:
                 # Generate a short deterministic ID from the field name
                 fid = hashlib.md5(dash_filter.field.encode()).hexdigest()[:8]
@@ -921,8 +922,9 @@ class DashboardSerializer:
                 omni_filter["label"] = dash_filter.label or dash_filter.field
                 filter_config[fid] = omni_filter
                 filter_order.append(fid)
-            payload["filterConfig"] = filter_config
-            payload["filterOrder"] = filter_order
+        payload["filterConfig"] = filter_config
+        payload["filterOrder"] = filter_order
+        payload["metadataVersion"] = 2
 
         return payload
 
