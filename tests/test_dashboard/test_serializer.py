@@ -70,6 +70,11 @@ def test_to_omni_payload(sample_definition):
     qp1 = payload["queryPresentations"][1]
     assert qp1["chartType"] == "barStacked"
 
+    # Required top-level fields for Omni API
+    assert payload["metadataVersion"] == 2
+    assert isinstance(payload["filterConfig"], dict)
+    assert isinstance(payload["filterOrder"], list)
+
 
 def test_chart_type_mapping_all():
     """Verify all internal chart types map to valid Omni API types."""

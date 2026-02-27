@@ -199,7 +199,7 @@ def _create_via_import_fallback(
     name: str,
     folder_id: str | None,
 ) -> str:
-    """Create a dashboard via import when the create endpoint returns 404.
+    """Create a dashboard via import when the create endpoint fails.
 
     Converts a create-format payload into an import-format payload and
     calls the import endpoint instead.
@@ -209,6 +209,8 @@ def _create_via_import_fallback(
     """
     model_id = payload.get("modelId", "")
     memberships = []
+    # Build tile layouts (half-width, 2 per row, 51px tall)
+    layouts: list[dict[str, Any]] = []
     for idx, qp in enumerate(payload.get("queryPresentations", []), start=1):
         memberships.append({
             "queryPresentation": {
@@ -217,7 +219,20 @@ def _create_via_import_fallback(
                 "visConfig": qp.get("visConfig", {}),
                 "isSql": qp.get("isSql", False),
                 "queryIdentifierMapKey": qp.get("queryIdentifierMapKey", str(idx)),
+                "type": "query",
+                "prefersChart": qp.get("prefersChart", True),
+                "filterOrder": [],
+                "resultConfig": {},
+                "aiConfig": {},
             }
+        })
+        pos = qp.get("position", {})
+        layouts.append({
+            "i": str(idx),
+            "x": pos.get("x", (idx - 1) % 2 * 12),
+            "y": pos.get("y", (idx - 1) // 2 * 51),
+            "w": pos.get("w", 12),
+            "h": pos.get("h", 51),
         })
 
     export_payload: dict[str, Any] = {
@@ -227,8 +242,23 @@ def _create_via_import_fallback(
             "modelId": model_id,
         },
         "dashboard": {
+            "metadataVersion": 2,
+            "ephemeral": ",".join(f"{i}:" for i in range(1, len(memberships) + 1)),
+            "crossfilterEnabled": False,
+            "facetFilters": False,
             "queryPresentationCollection": {
                 "queryPresentationCollectionMemberships": memberships,
+                "filterConfig": payload.get("filterConfig", {}),
+                "filterConfigVersion": 0,
+                "filterOrder": payload.get("filterOrder", []),
+            },
+            "metadata": {
+                "layouts": {"lg": layouts},
+                "textTiles": [],
+                "hiddenTiles": [],
+                "tileSettings": {},
+                "tileFilterMap": {},
+                "tileControlMap": {},
             },
         },
         "workbookModel": {"base_model_id": model_id},
@@ -288,12 +318,12 @@ def _create_with_vis_configs(
         result = doc_svc.create_dashboard(payload, folder_id=folder_id)
         skeleton_id = result.document_id
     except OmniDashError as create_err:
-        # Fallback: if the create endpoint fails (404 in some Omni envs),
-        # create via import instead.
+        # Fallback: if the create endpoint fails (400/404 in some Omni
+        # envs), create via import instead.
         err_str = str(create_err).lower()
-        if "404" in err_str or "not found" in err_str:
+        if any(tok in err_str for tok in ("404", "not found", "400", "bad request")):
             logger.warning(
-                "create_dashboard returned 404, falling back to import: %s",
+                "create_dashboard failed (%s), falling back to import",
                 create_err,
             )
             skeleton_id = _create_via_import_fallback(
@@ -332,6 +362,9 @@ def _create_with_vis_configs(
             existing_vc["chartType"] = patched_ct
             if "spec" in vc_patch:
                 existing_vc["spec"] = vc_patch["spec"]
+                # Omni reads "config" but our serializer writes "spec" —
+                # copy to both so the reimport picks it up.
+                existing_vc["config"] = vc_patch["spec"]
             if "config" in vc_patch:
                 existing_vc["config"] = vc_patch["config"]
             if vc_patch.get("fields"):

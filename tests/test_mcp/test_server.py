@@ -2124,3 +2124,180 @@ class TestAutoFieldValidation:
         assert len(result["field_errors"]) == 2
         assert "total_spend" in result["field_errors"][0]
         assert "total_clicks" in result["field_errors"][1]
+
+
+class TestVisConfigSpecToConfig:
+    """Test that vis config 'spec' is copied to 'config' during patching.
+
+    Omni reads vis config from 'config' but our serializer writes to 'spec'.
+    The _create_with_vis_configs patching must copy spec→config.
+    """
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch.object(mcp_server, "_get_doc_svc")
+    @patch("omni_dash.mcp.server.get_settings")
+    def test_spec_copied_to_config(self, mock_settings, mock_get_doc_svc, _):
+        from omni_dash.api.documents import DashboardResponse, ImportResponse
+
+        mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+        svc = MagicMock()
+        svc.create_dashboard.return_value = DashboardResponse(
+            document_id="skel-1", name="Test"
+        )
+        # Skeleton export — Omni returns vis config with "config" key
+        svc.export_dashboard.return_value = {
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [{
+                        "queryPresentation": {
+                            "name": "Spend KPI",
+                            "visConfig": {
+                                "visType": "omni-kpi",
+                                "chartType": "kpi",
+                                "config": {
+                                    "alignment": "left",
+                                    "markdownConfig": [{
+                                        "type": "number",
+                                        "config": {"field": {"row": "_first"}}
+                                    }],
+                                },
+                            },
+                        }
+                    }]
+                }
+            },
+            "document": {"sharedModelId": "model-123"},
+            "workbookModel": {},
+            "exportVersion": "0.1",
+        }
+        svc.import_dashboard.return_value = ImportResponse(
+            document_id="final-1", name="Test"
+        )
+        mock_get_doc_svc.return_value = svc
+
+        tiles = [{
+            "name": "Spend KPI",
+            "chart_type": "number",
+            "query": {"table": "t", "fields": ["t.spend"]},
+            "vis_config": {"value_format": "$#,##0"},
+            "size": "quarter",
+        }]
+
+        result = json.loads(mcp_server.create_dashboard(name="Test", tiles=tiles))
+        assert result["status"] == "created"
+
+        # Check that the import payload has spec copied to config
+        import_call = svc.import_dashboard.call_args
+        imported_data = import_call[0][0]
+        qp = imported_data["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]
+        vc = qp.get("visConfig", {})
+
+        # The "config" key must contain our custom markdownConfig with format
+        assert "config" in vc, "visConfig must have 'config' key"
+        mc = vc["config"].get("markdownConfig", [])
+        assert len(mc) > 0, "markdownConfig must have entries"
+        # Check format is set
+        fmt = mc[0].get("config", {}).get("field", {}).get("format")
+        assert fmt == "$#,##0", f"Expected format '$#,##0' but got {fmt}"
+
+
+# ---------------------------------------------------------------------------
+# Import fallback payload completeness
+# ---------------------------------------------------------------------------
+
+
+class TestImportFallbackPayload:
+    """Verify that _create_via_import_fallback produces a payload with all
+    fields the Omni import API requires (metadataVersion, filterOrder, etc.).
+    """
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_fallback_payload_has_required_fields(self, mock_get_doc_svc):
+        from omni_dash.api.documents import ImportResponse
+
+        svc = MagicMock()
+        mock_get_doc_svc.return_value = svc
+        svc.import_dashboard.return_value = ImportResponse(
+            document_id="fb-1", name="Test"
+        )
+
+        payload = {
+            "modelId": "m-1",
+            "name": "Test",
+            "queryPresentations": [
+                {
+                    "name": "Tile A",
+                    "query": {"table": "t", "fields": ["t.x"]},
+                    "queryIdentifierMapKey": "1",
+                },
+                {
+                    "name": "Tile B",
+                    "query": {"table": "t", "fields": ["t.y"]},
+                    "queryIdentifierMapKey": "2",
+                },
+            ],
+        }
+
+        mcp_server._create_via_import_fallback(
+            svc, payload, name="Test", folder_id="f1",
+        )
+
+        call_args = svc.import_dashboard.call_args
+        export_data = call_args[0][0]
+        dash = export_data["dashboard"]
+
+        # metadataVersion must be 2
+        assert dash["metadataVersion"] == 2
+
+        # ephemeral must be a string
+        assert isinstance(dash["ephemeral"], str)
+
+        # queryPresentationCollection must have filterOrder and filterConfig
+        qpc = dash["queryPresentationCollection"]
+        assert isinstance(qpc["filterOrder"], list)
+        assert isinstance(qpc["filterConfig"], dict)
+        assert qpc["filterConfigVersion"] == 0
+
+        # metadata.layouts must exist
+        assert "layouts" in dash["metadata"]
+        assert "lg" in dash["metadata"]["layouts"]
+        assert len(dash["metadata"]["layouts"]["lg"]) == 2
+
+        # Each QP must have required fields
+        for m in qpc["queryPresentationCollectionMemberships"]:
+            qp = m["queryPresentation"]
+            assert qp["type"] == "query"
+            assert isinstance(qp["filterOrder"], list)
+
+        # document must have folderId
+        assert export_data["document"]["folderId"] == "f1"
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_400_error_triggers_fallback(self, mock_get_doc_svc):
+        """OmniDashError('400 Bad Request') should trigger import fallback."""
+        from omni_dash.api.documents import ImportResponse
+        from omni_dash.exceptions import OmniDashError
+
+        svc = MagicMock()
+        mock_get_doc_svc.return_value = svc
+
+        svc.create_dashboard.side_effect = OmniDashError("400 Bad Request: metadataVersion")
+        svc.import_dashboard.return_value = ImportResponse(
+            document_id="fb-400", name="Test"
+        )
+
+        payload = {
+            "modelId": "m-1",
+            "name": "Test",
+            "queryPresentations": [
+                {"name": "Tile A", "query": {"table": "t", "fields": ["t.x"]}},
+            ],
+        }
+
+        dash_id, _ = mcp_server._create_with_vis_configs(
+            payload, name="Test", folder_id=None,
+        )
+        assert dash_id == "fb-400"
+        svc.import_dashboard.assert_called_once()
