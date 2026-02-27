@@ -879,6 +879,10 @@ class DashboardSerializer:
 
             query_presentations.append(qp)
 
+        # Assign query identifier map keys (1-indexed, as Omni expects)
+        for idx, qp in enumerate(query_presentations, start=1):
+            qp["queryIdentifierMapKey"] = str(idx)
+
         payload: dict[str, Any] = {
             "modelId": definition.model_id,
             "name": definition.name,

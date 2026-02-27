@@ -43,6 +43,12 @@ def test_to_omni_payload(sample_definition):
     assert payload["name"] == "SEO Weekly Funnel"
     assert len(payload["queryPresentations"]) == 3
 
+    # Query identifier map keys (1-indexed)
+    for idx, qp in enumerate(payload["queryPresentations"], start=1):
+        assert qp["queryIdentifierMapKey"] == str(idx), (
+            f"QP {idx} missing queryIdentifierMapKey"
+        )
+
     # First tile
     qp0 = payload["queryPresentations"][0]
     assert qp0["name"] == "Organic Visits"

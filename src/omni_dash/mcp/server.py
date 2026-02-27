@@ -209,13 +209,14 @@ def _create_via_import_fallback(
     """
     model_id = payload.get("modelId", "")
     memberships = []
-    for qp in payload.get("queryPresentations", []):
+    for idx, qp in enumerate(payload.get("queryPresentations", []), start=1):
         memberships.append({
             "queryPresentation": {
                 "name": qp.get("name", ""),
                 "query": {"queryJson": qp.get("query", {})},
                 "visConfig": qp.get("visConfig", {}),
                 "isSql": qp.get("isSql", False),
+                "queryIdentifierMapKey": qp.get("queryIdentifierMapKey", str(idx)),
             }
         })
 
