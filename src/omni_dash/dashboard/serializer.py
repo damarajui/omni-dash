@@ -994,6 +994,11 @@ class DashboardSerializer:
             if tile.query.pivots:
                 tile_data["query"]["pivots"] = tile.query.pivots
 
+            if tile.query.is_sql:
+                tile_data["query"]["is_sql"] = True
+            if tile.query.user_sql:
+                tile_data["query"]["user_sql"] = tile.query.user_sql
+
             # Vis config (only non-default values)
             vis: dict[str, Any] = {}
             if tile.vis_config.x_axis:
@@ -1130,6 +1135,8 @@ class DashboardSerializer:
                         filters=filters,
                         limit=query_data.get("limit", 200),
                         pivots=query_data.get("pivots", []),
+                        is_sql=query_data.get("is_sql", False),
+                        user_sql=query_data.get("user_sql"),
                     ),
                     chart_type=tile_data.get("chart_type", "line"),
                     vis_config=vis_config,
@@ -1216,6 +1223,13 @@ class DashboardSerializer:
             raw_query = qp.get("query", {})
             query = raw_query.get("queryJson", raw_query)
 
+            # SQL tile fields
+            is_sql = qp.get("isSql", False)
+            user_sql = (
+                raw_query.get("userEditedSQL")
+                or query.get("userEditedSQL")
+            )
+
             # Chart type is in visConfig.chartType
             vis_config_data = qp.get("visConfig", {})
             # chartType can be explicitly null in exports; fall back to
@@ -1282,6 +1296,8 @@ class DashboardSerializer:
                         filters=filters,
                         limit=query.get("limit", 200),
                         pivots=query.get("pivots", []),
+                        is_sql=is_sql,
+                        user_sql=user_sql,
                     ),
                     chart_type=_OMNI_TO_CHART_TYPE.get(
                         omni_chart_type, omni_chart_type

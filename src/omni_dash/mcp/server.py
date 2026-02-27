@@ -6,6 +6,7 @@ Tools:
   - create_dashboard: Create a new dashboard from a spec
   - update_dashboard: Update an existing dashboard (replace tiles or metadata)
   - add_tiles_to_dashboard: Append tiles to an existing dashboard
+  - update_tile: Update a single tile in-place (SQL, fields, filters, chart type)
   - delete_dashboard: Delete a dashboard by ID
   - clone_dashboard: Clone a dashboard with a new name
   - move_dashboard: Move a dashboard to a different folder
@@ -144,6 +145,58 @@ def _build_dashboard_url(dashboard_id: str) -> str:
     return f"{base_url}/dashboards/{dashboard_id}"
 
 
+def _create_via_import_fallback(
+    doc_svc: DocumentService,
+    payload: dict[str, Any],
+    *,
+    name: str,
+    folder_id: str | None,
+) -> str:
+    """Create a dashboard via import when the create endpoint returns 404.
+
+    Converts a create-format payload into an import-format payload and
+    calls the import endpoint instead.
+
+    Returns:
+        The new dashboard ID.
+    """
+    model_id = payload.get("modelId", "")
+    memberships = []
+    for qp in payload.get("queryPresentations", []):
+        memberships.append({
+            "queryPresentation": {
+                "name": qp.get("name", ""),
+                "query": {"queryJson": qp.get("query", {})},
+                "visConfig": qp.get("visConfig", {}),
+                "isSql": qp.get("isSql", False),
+            }
+        })
+
+    export_payload: dict[str, Any] = {
+        "exportVersion": "0.1",
+        "document": {
+            "name": name or payload.get("name", "Untitled"),
+            "modelId": model_id,
+        },
+        "dashboard": {
+            "queryPresentationCollection": {
+                "queryPresentationCollectionMemberships": memberships,
+            },
+        },
+        "workbookModel": {"base_model_id": model_id},
+    }
+    if folder_id:
+        export_payload["document"]["folderId"] = folder_id
+
+    result = doc_svc.import_dashboard(
+        export_payload,
+        base_model_id=model_id,
+        name=name,
+        folder_id=folder_id,
+    )
+    return result.document_id
+
+
 def _create_with_vis_configs(
     payload: dict[str, Any],
     *,
@@ -183,11 +236,26 @@ def _create_with_vis_configs(
             query_overrides_by_name[qp["name"]] = overrides
 
     doc_svc = _get_doc_svc()
-    result = doc_svc.create_dashboard(payload, folder_id=folder_id)
-    skeleton_id = result.document_id
+    try:
+        result = doc_svc.create_dashboard(payload, folder_id=folder_id)
+        skeleton_id = result.document_id
+    except OmniDashError as create_err:
+        # Fallback: if the create endpoint fails (404 in some Omni envs),
+        # create via import instead.
+        err_str = str(create_err).lower()
+        if "404" in err_str or "not found" in err_str:
+            logger.warning(
+                "create_dashboard returned 404, falling back to import: %s",
+                create_err,
+            )
+            skeleton_id = _create_via_import_fallback(
+                doc_svc, payload, name=name, folder_id=folder_id,
+            )
+        else:
+            raise
 
     if not vis_configs_by_name:
-        return skeleton_id, result.name
+        return skeleton_id, name or "Untitled"
 
     # Patch vis configs via export→reimport
     export_data = doc_svc.export_dashboard(skeleton_id)
@@ -201,7 +269,19 @@ def _create_with_vis_configs(
             vc_patch = vis_configs_by_name[tile_name]
             existing_vc = qp_data.get("visConfig", {})
             existing_vc["visType"] = vc_patch.get("visType")
-            existing_vc["chartType"] = vc_patch.get("chartType", existing_vc.get("chartType"))
+            # chartType can be explicitly null in exports; fall back to
+            # visType mapping, then to "line".
+            patched_ct = vc_patch.get("chartType") or existing_vc.get("chartType")
+            if not patched_ct:
+                _CT_FALLBACK = {
+                    "omni-kpi": "kpi",
+                    "omni-table": "table",
+                    "omni-markdown": "markdown",
+                }
+                patched_ct = _CT_FALLBACK.get(
+                    vc_patch.get("visType", ""), "line"
+                )
+            existing_vc["chartType"] = patched_ct
             if "spec" in vc_patch:
                 existing_vc["spec"] = vc_patch["spec"]
             if "config" in vc_patch:
@@ -640,6 +720,10 @@ def add_tiles_to_dashboard(
     New tiles are appended after the current tiles. Uses the same tile spec
     format as create_dashboard.
 
+    Preserves all existing dashboard state (filters, vis configs, SQL tiles,
+    layout, custom metadata) by injecting new tiles into the raw export
+    rather than round-tripping through DashboardDefinition.
+
     Args:
         dashboard_id: The dashboard to add tiles to.
         tiles: New tile specs to append (same format as create_dashboard).
@@ -648,65 +732,110 @@ def add_tiles_to_dashboard(
     Returns:
         JSON with updated dashboard ID and tile counts.
     """
+    import copy
+
     try:
         if not tiles:
             return json.dumps({"error": "No tiles provided."})
 
-        export_data = _get_doc_svc().export_dashboard(dashboard_id)
+        doc_svc = _get_doc_svc()
+
+        # 1. Export existing dashboard (raw — preserves everything)
+        export_data = doc_svc.export_dashboard(dashboard_id)
         doc = export_data.get("document", {})
         effective_name = doc.get("name", "Untitled")
         effective_folder = doc.get("folderId")
         resolved_model_id = _resolve_model_id_from_export(export_data, model_id)
 
-        # Parse existing dashboard into our definition model
-        existing_def = DashboardSerializer.from_omni_export(export_data)
-        previous_count = len(existing_def.tiles)
+        # Count existing tiles
+        orig_dash = export_data.get("dashboard", {})
+        orig_qpc = orig_dash.get("queryPresentationCollection", {})
+        orig_memberships = orig_qpc.get(
+            "queryPresentationCollectionMemberships", []
+        )
+        previous_count = len(orig_memberships)
 
-        # Build new tiles as a temporary definition
+        # 2. Serialize new tiles through our pipeline
         new_def = DashboardDefinition(
-            name="tmp",
+            name="__add_tiles_tmp__",
             model_id=resolved_model_id,
             tiles=tiles,
         )
+        new_payload = DashboardSerializer.to_omni_create_payload(new_def)
 
-        # Merge tiles
-        combined_tiles = list(existing_def.tiles) + list(new_def.tiles)
-
-        # Create combined definition
-        combined_def = DashboardDefinition(
-            name=effective_name,
-            model_id=resolved_model_id,
-            description=existing_def.description,
-            tiles=combined_tiles,
-            filters=existing_def.filters,
+        # 3. Create temp skeleton with new tiles (gets vis configs applied)
+        temp_id, _ = _create_with_vis_configs(
+            new_payload,
+            name="__add_tiles_tmp__",
             folder_id=effective_folder,
         )
-        combined_def.tiles = LayoutManager.auto_position(combined_def.tiles)
 
-        # Serialize and create with vis config patching
-        payload = DashboardSerializer.to_omni_create_payload(combined_def)
-        new_id, new_name = _create_with_vis_configs(
-            payload, name=effective_name, folder_id=effective_folder,
+        # 4. Export temp skeleton (new tiles now in export format)
+        temp_export = doc_svc.export_dashboard(temp_id)
+        temp_dash = temp_export.get("dashboard", {})
+        temp_qpc = temp_dash.get("queryPresentationCollection", {})
+        temp_memberships = temp_qpc.get(
+            "queryPresentationCollectionMemberships", []
         )
 
-        # Delete old
-        try:
-            _get_doc_svc().delete_dashboard(dashboard_id)
-        except OmniDashError as del_err:
-            return json.dumps({
-                "status": "partial",
-                "warning": f"New dashboard created but original not deleted: {del_err}",
-                "old_dashboard_id": dashboard_id,
-                "new_dashboard_id": new_id,
-                "url": _build_dashboard_url(new_id),
-            })
+        # 5. Calculate layout offset — position new tiles below existing ones
+        orig_layout = (
+            orig_dash.get("metadata", {}).get("layouts", {}).get("lg", [])
+        )
+        max_y = 0
+        for item in orig_layout:
+            bottom = item.get("y", 0) + item.get("h", 0)
+            if bottom > max_y:
+                max_y = bottom
+
+        # 6. Merge temp export's memberships into original export
+        patched = copy.deepcopy(export_data)
+        patched_dash = patched.get("dashboard", {})
+        patched_qpc = patched_dash.get("queryPresentationCollection", {})
+        patched_memberships = patched_qpc.get(
+            "queryPresentationCollectionMemberships", []
+        )
+        patched_memberships.extend(temp_memberships)
+
+        # 7. Merge layout items with offset
+        temp_layout = (
+            temp_dash.get("metadata", {}).get("layouts", {}).get("lg", [])
+        )
+        patched_layout = (
+            patched_dash.get("metadata", {}).get("layouts", {}).get("lg", [])
+        )
+        base_idx = previous_count
+        for item in temp_layout:
+            new_item = dict(item)
+            new_item["i"] = base_idx + 1
+            new_item["y"] = new_item.get("y", 0) + max_y
+            patched_layout.append(new_item)
+            base_idx += 1
+
+        # 8. Reimport merged export
+        reimport_model_id = _resolve_model_id_from_export(patched)
+        reimport_result = doc_svc.import_dashboard(
+            patched,
+            base_model_id=reimport_model_id,
+            name=effective_name,
+            folder_id=effective_folder,
+        )
+        new_id = reimport_result.document_id
+        new_name = reimport_result.name
+
+        # 9. Cleanup: delete original + temp skeleton
+        for del_id in (dashboard_id, temp_id):
+            try:
+                doc_svc.delete_dashboard(del_id)
+            except Exception:
+                pass
 
         return json.dumps({
             "status": "updated",
             "dashboard_id": new_id,
             "name": new_name,
             "previous_tile_count": previous_count,
-            "new_tile_count": len(combined_tiles),
+            "new_tile_count": previous_count + len(tiles),
             "tiles_added": len(tiles),
             "url": _build_dashboard_url(new_id),
         })
@@ -714,6 +843,147 @@ def add_tiles_to_dashboard(
         return json.dumps({"error": str(e)})
     except Exception as e:
         return json.dumps({"error": f"Validation error: {e}"})
+
+
+@mcp.tool()
+def update_tile(
+    dashboard_id: str,
+    tile_name: str,
+    sql: str | None = None,
+    fields: list[str] | None = None,
+    filters: dict[str, Any] | None = None,
+    chart_type: str | None = None,
+    title: str | None = None,
+) -> str:
+    """Update a single tile in an existing dashboard without affecting other tiles.
+
+    Modifies only the specified tile — all other tiles, filters, vis configs,
+    and layout are preserved. Works by patching the raw export directly.
+
+    Args:
+        dashboard_id: The dashboard containing the tile.
+        tile_name: Name of the tile to update (must match exactly).
+        sql: New SQL query. Sets the tile to SQL mode (isSql=True).
+        fields: New field list (e.g., ["table.col1", "table.col2"]).
+        filters: New filter config (Omni format: {field: {kind, type, values}}).
+        chart_type: New chart type (e.g., "bar", "line", "number").
+        title: New tile title/name.
+
+    Returns:
+        JSON with updated dashboard ID and URL.
+    """
+    import copy
+
+    try:
+        if not any([sql, fields, filters, chart_type, title]):
+            return json.dumps({"error": "No updates specified."})
+
+        doc_svc = _get_doc_svc()
+
+        # 1. Export dashboard
+        export_data = doc_svc.export_dashboard(dashboard_id)
+        doc = export_data.get("document", {})
+        effective_name = doc.get("name", "Untitled")
+        effective_folder = doc.get("folderId")
+
+        patched = copy.deepcopy(export_data)
+        dash = patched.get("dashboard", {})
+        qpc = dash.get("queryPresentationCollection", {})
+        memberships = qpc.get("queryPresentationCollectionMemberships", [])
+
+        # 2. Find tile by name
+        target_qp = None
+        for membership in memberships:
+            qp = membership.get("queryPresentation", {})
+            if qp.get("name") == tile_name:
+                target_qp = qp
+                break
+
+        if target_qp is None:
+            available = [
+                m.get("queryPresentation", {}).get("name", "")
+                for m in memberships
+            ]
+            return json.dumps({
+                "error": f"Tile '{tile_name}' not found.",
+                "available_tiles": available,
+            })
+
+        # 3. Patch specified fields
+        modified = False
+
+        if sql is not None:
+            target_qp["isSql"] = True
+            q = target_qp.get("query", {})
+            q_json = q.get("queryJson", q)
+            q_json["userEditedSQL"] = sql
+            modified = True
+
+        if fields is not None:
+            q = target_qp.get("query", {})
+            q_json = q.get("queryJson", q)
+            q_json["fields"] = fields
+            modified = True
+
+        if filters is not None:
+            q = target_qp.get("query", {})
+            q_json = q.get("queryJson", q)
+            q_json["filters"] = filters
+            modified = True
+
+        if chart_type is not None:
+            from omni_dash.dashboard.serializer import _CHART_TYPE_TO_OMNI
+
+            omni_ct = _CHART_TYPE_TO_OMNI.get(chart_type, chart_type)
+            vc = target_qp.get("visConfig", {})
+            vc["chartType"] = omni_ct
+            # Update visType based on chart type
+            if omni_ct in ("kpi", "summaryValue"):
+                vc["visType"] = "omni-kpi"
+            elif omni_ct == "table":
+                vc["visType"] = "omni-table"
+            elif omni_ct == "markdown":
+                vc["visType"] = "omni-markdown"
+            elif omni_ct == "code":
+                vc["visType"] = "vegalite"
+            else:
+                vc["visType"] = "basic"
+            modified = True
+
+        if title is not None:
+            target_qp["name"] = title
+            modified = True
+
+        if modified:
+            vc = target_qp.get("visConfig", {})
+            vc.pop("jsonHash", None)
+
+        # 4. Reimport modified export
+        reimport_model_id = _resolve_model_id_from_export(patched)
+        reimport_result = doc_svc.import_dashboard(
+            patched,
+            base_model_id=reimport_model_id,
+            name=effective_name,
+            folder_id=effective_folder,
+        )
+        new_id = reimport_result.document_id
+
+        # 5. Delete original
+        try:
+            doc_svc.delete_dashboard(dashboard_id)
+        except Exception:
+            pass
+
+        return json.dumps({
+            "status": "updated",
+            "dashboard_id": new_id,
+            "tile_name": title or tile_name,
+            "url": _build_dashboard_url(new_id),
+        })
+    except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+    except Exception as e:
+        return json.dumps({"error": f"Unexpected error: {e}"})
 
 
 @mcp.tool()

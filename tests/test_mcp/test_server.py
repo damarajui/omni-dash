@@ -661,41 +661,102 @@ class TestUpdateDashboard:
 
 
 class TestAddTilesToDashboard:
+    """Tests for the raw-export-injection add_tiles flow."""
+
+    # Rich sample export with QPC structure and layout
+    _EXPORT_WITH_QPC = {
+        "document": {"name": "Dashboard", "sharedModelId": "model-abc", "folderId": "f1"},
+        "dashboard": {
+            "model": {"baseModelId": "model-abc"},
+            "queryPresentationCollection": {
+                "queryPresentationCollectionMemberships": [
+                    {
+                        "queryPresentation": {
+                            "name": "Existing Tile",
+                            "query": {"queryJson": {"table": "t", "fields": ["t.x"]}},
+                            "visConfig": {"visType": "basic", "chartType": "line"},
+                        }
+                    }
+                ]
+            },
+            "metadata": {
+                "layouts": {
+                    "lg": [{"i": 1, "x": 0, "y": 0, "w": 12, "h": 40}]
+                }
+            },
+            "filterConfig": {"abc123": {"fieldName": "t.date", "kind": "date_range"}},
+            "filterOrder": ["abc123"],
+        },
+        "workbookModel": {"base_model_id": "model-abc"},
+        "exportVersion": "0.1",
+    }
+
+    # Temp skeleton export (returned when exporting the new-tile skeleton)
+    _TEMP_EXPORT = {
+        "document": {"name": "__add_tiles_tmp__", "sharedModelId": "model-abc"},
+        "dashboard": {
+            "queryPresentationCollection": {
+                "queryPresentationCollectionMemberships": [
+                    {
+                        "queryPresentation": {
+                            "name": "New Bar",
+                            "query": {"queryJson": {"table": "t", "fields": ["t.a", "t.b"]}},
+                            "visConfig": {"visType": "basic", "chartType": "bar"},
+                        }
+                    }
+                ]
+            },
+            "metadata": {
+                "layouts": {
+                    "lg": [{"i": 1, "x": 0, "y": 0, "w": 6, "h": 40}]
+                }
+            },
+        },
+        "workbookModel": {"base_model_id": "model-abc"},
+        "exportVersion": "0.1",
+    }
+
     @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
     @patch("omni_dash.mcp.server.get_settings")
     @patch("omni_dash.mcp.server.DashboardSerializer")
     def test_adds_tiles(self, mock_serializer, mock_settings, _, mock_doc_svc):
+        import copy
         from omni_dash.api.documents import DashboardResponse, ImportResponse
-        from omni_dash.dashboard.definition import (
-            DashboardDefinition,
-            Tile,
-            TileQuery,
-            TileVisConfig,
-        )
 
         mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
-        mock_doc_svc.export_dashboard.return_value = SAMPLE_EXPORT
+        mock_serializer.to_omni_create_payload.return_value = {
+            "name": "__add_tiles_tmp__",
+            "queryPresentations": [{"name": "New Bar", "visConfig": {"visType": "basic", "chartType": "bar"}}],
+        }
 
-        existing_tile = Tile(
-            name="Existing",
-            chart_type="line",
-            query=TileQuery(table="t", fields=["t.x"]),
-            vis_config=TileVisConfig(),
-        )
-        mock_serializer.from_omni_export.return_value = DashboardDefinition(
-            name="Dashboard",
-            model_id="model-123",
-            tiles=[existing_tile],
-        )
-        mock_serializer.to_omni_create_payload.return_value = {"name": "Dashboard"}
+        # _create_with_vis_configs skeleton export (minimal — vis config patching uses this)
+        skeleton_export = {
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {"queryPresentation": {"name": "New Bar", "visConfig": {"visType": "basic"}}}
+                    ]
+                }
+            },
+            "workbookModel": {"base_model_id": "model-abc"},
+        }
 
+        # export_dashboard called 3 times:
+        # 1. Original dashboard, 2. Skeleton (inside _create_with_vis_configs), 3. Temp (after vis patching)
+        mock_doc_svc.export_dashboard.side_effect = [
+            copy.deepcopy(self._EXPORT_WITH_QPC),  # Original
+            copy.deepcopy(skeleton_export),          # Skeleton (inside _create_with_vis_configs)
+            copy.deepcopy(self._TEMP_EXPORT),        # Temp export (for merging)
+        ]
         mock_doc_svc.create_dashboard.return_value = DashboardResponse(
-            document_id="skeleton-1", name="Dashboard"
+            document_id="skeleton-1", name="__add_tiles_tmp__"
         )
-        # _create_with_vis_configs reimport
-        mock_doc_svc.import_dashboard.return_value = ImportResponse(
-            document_id="updated-1", name="Dashboard"
-        )
+        # import_dashboard called 2 times:
+        # 1. _create_with_vis_configs reimport, 2. Final merged reimport
+        mock_doc_svc.import_dashboard.side_effect = [
+            ImportResponse(document_id="temp-1", name="__add_tiles_tmp__"),  # vis config patched
+            ImportResponse(document_id="updated-1", name="Dashboard"),       # final merged
+        ]
         mock_doc_svc.delete_dashboard.return_value = None
 
         new_tiles = [{
@@ -714,6 +775,17 @@ class TestAddTilesToDashboard:
         assert result["previous_tile_count"] == 1
         assert result["tiles_added"] == 1
         assert result["new_tile_count"] == 2
+
+        # Verify the merged export preserves original filterConfig
+        # The final import_dashboard call is the 2nd one
+        import_call = mock_doc_svc.import_dashboard.call_args_list[-1]
+        imported_data = import_call[0][0] if import_call[0] else import_call[1].get("export_data")
+        if imported_data:
+            dash = imported_data.get("dashboard", {})
+            assert dash.get("filterConfig") == {"abc123": {"fieldName": "t.date", "kind": "date_range"}}
+            assert dash.get("filterOrder") == ["abc123"]
+            memberships = dash["queryPresentationCollection"]["queryPresentationCollectionMemberships"]
+            assert len(memberships) == 2
 
     def test_rejects_empty_tiles(self, mock_doc_svc):
         result = json.loads(mcp_server.add_tiles_to_dashboard(
@@ -734,21 +806,44 @@ class TestAddTilesToDashboard:
     @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
     @patch("omni_dash.mcp.server.get_settings")
     @patch("omni_dash.mcp.server.DashboardSerializer")
-    def test_partial_on_delete_failure(self, mock_serializer, mock_settings, _, mock_doc_svc):
-        from omni_dash.api.documents import DashboardResponse
-        from omni_dash.dashboard.definition import DashboardDefinition
-        from omni_dash.exceptions import OmniAPIError
+    def test_delete_failure_still_succeeds(self, mock_serializer, mock_settings, _, mock_doc_svc):
+        """Delete failures are silently ignored — new dashboard is still created."""
+        import copy
+        from omni_dash.api.documents import DashboardResponse, ImportResponse
 
         mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
-        mock_doc_svc.export_dashboard.return_value = SAMPLE_EXPORT
-        mock_serializer.from_omni_export.return_value = DashboardDefinition(
-            name="D", model_id="m", tiles=[]
-        )
-        mock_serializer.to_omni_create_payload.return_value = {"name": "D"}
+        mock_serializer.to_omni_create_payload.return_value = {
+            "name": "__add_tiles_tmp__",
+            "queryPresentations": [{"name": "X", "visConfig": {"visType": "basic", "chartType": "line"}}],
+        }
+
+        skeleton_export = {
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {"queryPresentation": {"name": "X", "visConfig": {"visType": "basic"}}}
+                    ]
+                }
+            },
+            "workbookModel": {"base_model_id": "model-abc"},
+        }
+
+        # 3 export calls: original, skeleton (inside _create_with_vis_configs), temp
+        mock_doc_svc.export_dashboard.side_effect = [
+            copy.deepcopy(self._EXPORT_WITH_QPC),
+            copy.deepcopy(skeleton_export),
+            copy.deepcopy(self._TEMP_EXPORT),
+        ]
         mock_doc_svc.create_dashboard.return_value = DashboardResponse(
-            document_id="new-1", name="D"
+            document_id="skeleton-1", name="tmp"
         )
-        mock_doc_svc.delete_dashboard.side_effect = OmniAPIError(500, "fail")
+        # 2 import calls: vis config reimport, final merged
+        mock_doc_svc.import_dashboard.side_effect = [
+            ImportResponse(document_id="temp-1", name="tmp"),
+            ImportResponse(document_id="new-1", name="D"),
+        ]
+        # Delete failures are silently caught (called for skeleton + original + temp)
+        mock_doc_svc.delete_dashboard.side_effect = Exception("fail")
 
         tiles = [{
             "name": "X",
@@ -762,8 +857,9 @@ class TestAddTilesToDashboard:
             dashboard_id="orig-1", tiles=tiles
         ))
 
-        assert result["status"] == "partial"
-        assert "warning" in result
+        # Delete failures are best-effort — the new dashboard is still created
+        assert result["status"] == "updated"
+        assert result["dashboard_id"] == "new-1"
 
 
 # ---------------------------------------------------------------------------
@@ -821,6 +917,7 @@ class TestMCPRegistration:
             "create_dashboard",
             "update_dashboard",
             "add_tiles_to_dashboard",
+            "update_tile",
             "delete_dashboard",
             "clone_dashboard",
             "move_dashboard",
@@ -843,7 +940,7 @@ class TestMCPRegistration:
         async def check():
             return len(await mcp_server.mcp.list_tools())
 
-        assert asyncio.run(check()) == 18
+        assert asyncio.run(check()) == 19
 
 
 # ---------------------------------------------------------------------------
@@ -1414,3 +1511,468 @@ class TestSuggestChartFieldFiltering:
         ))
         assert result["fields_analyzed"] == 2
         assert result["chart_type"] == "line"
+
+
+# ---------------------------------------------------------------------------
+# Bug #1: chartType:null fallback in _create_with_vis_configs
+# ---------------------------------------------------------------------------
+
+
+class TestChartTypeNullFallback:
+    """When visConfig.chartType is None, _create_with_vis_configs should
+    fall back to visType mapping (omni-kpi→kpi, etc.) then to 'line'.
+    """
+
+    def _make_skeleton_export(self, *, vis_type: str, chart_type: str | None) -> dict:
+        """Build a minimal export payload for one tile with the given vis/chart types."""
+        return {
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "Tile A",
+                                "visConfig": {
+                                    "visType": vis_type,
+                                    "chartType": chart_type,
+                                    "spec": {},
+                                    "fields": [],
+                                    "jsonHash": "stale",
+                                },
+                            }
+                        }
+                    ]
+                }
+            },
+            "document": {"sharedModelId": "model-123", "name": "Test", "folderId": None},
+            "workbookModel": {},
+            "exportVersion": "0.1",
+        }
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_null_chart_type_falls_back_to_vis_type(self, mock_get_doc_svc):
+        """chartType=None + visType='omni-kpi' → patched chartType should be 'kpi'."""
+        from omni_dash.api.documents import DashboardResponse, ImportResponse
+
+        svc = MagicMock()
+        mock_get_doc_svc.return_value = svc
+
+        svc.create_dashboard.return_value = DashboardResponse(
+            document_id="skel-1", name="Test"
+        )
+        svc.export_dashboard.return_value = self._make_skeleton_export(
+            vis_type="omni-kpi", chart_type=None,
+        )
+        svc.import_dashboard.return_value = ImportResponse(
+            document_id="final-1", name="Test"
+        )
+        svc.delete_dashboard.return_value = None
+
+        # Build a payload that has vis config with visType=omni-kpi
+        payload = {
+            "queryPresentations": [
+                {
+                    "name": "Tile A",
+                    "visConfig": {"visType": "omni-kpi", "chartType": None},
+                    "query": {},
+                }
+            ],
+        }
+
+        mcp_server._create_with_vis_configs(
+            payload, name="Test", folder_id=None,
+        )
+
+        # Verify the reimported export has chartType patched to "kpi"
+        import_call = svc.import_dashboard.call_args
+        imported_data = import_call[0][0]
+        memberships = imported_data["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ]
+        patched_vc = memberships[0]["queryPresentation"]["visConfig"]
+        assert patched_vc["chartType"] == "kpi"
+        assert "jsonHash" not in patched_vc
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_null_chart_type_defaults_to_line(self, mock_get_doc_svc):
+        """chartType=None + visType='basic' (not in fallback map) → chartType='line'."""
+        from omni_dash.api.documents import DashboardResponse, ImportResponse
+
+        svc = MagicMock()
+        mock_get_doc_svc.return_value = svc
+
+        svc.create_dashboard.return_value = DashboardResponse(
+            document_id="skel-1", name="Test"
+        )
+        svc.export_dashboard.return_value = self._make_skeleton_export(
+            vis_type="basic", chart_type=None,
+        )
+        svc.import_dashboard.return_value = ImportResponse(
+            document_id="final-1", name="Test"
+        )
+        svc.delete_dashboard.return_value = None
+
+        payload = {
+            "queryPresentations": [
+                {
+                    "name": "Tile A",
+                    "visConfig": {"visType": "basic", "chartType": None},
+                    "query": {},
+                }
+            ],
+        }
+
+        mcp_server._create_with_vis_configs(
+            payload, name="Test", folder_id=None,
+        )
+
+        import_call = svc.import_dashboard.call_args
+        imported_data = import_call[0][0]
+        memberships = imported_data["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ]
+        patched_vc = memberships[0]["queryPresentation"]["visConfig"]
+        assert patched_vc["chartType"] == "line"
+
+
+# ---------------------------------------------------------------------------
+# Bug #4: update_tile MCP tool
+# ---------------------------------------------------------------------------
+
+
+_UPDATE_TILE_EXPORT: dict[str, Any] = {
+    "document": {"name": "D", "sharedModelId": "m", "folderId": "f"},
+    "dashboard": {
+        "queryPresentationCollection": {
+            "queryPresentationCollectionMemberships": [
+                {
+                    "queryPresentation": {
+                        "name": "Revenue",
+                        "query": {
+                            "queryJson": {"table": "t", "fields": ["t.rev"]},
+                        },
+                        "visConfig": {
+                            "visType": "basic",
+                            "chartType": "line",
+                        },
+                    }
+                }
+            ]
+        },
+        "metadata": {
+            "layouts": {
+                "lg": [{"i": 1, "x": 0, "y": 0, "w": 12, "h": 40}]
+            }
+        },
+    },
+    "workbookModel": {"base_model_id": "m"},
+    "exportVersion": "0.1",
+}
+
+
+class TestUpdateTile:
+    """Tests for the update_tile MCP tool (Bug #4)."""
+
+    def test_updates_sql(self, mock_doc_svc):
+        """Providing sql= sets isSql=True and userEditedSQL in the export."""
+        import copy
+        from omni_dash.api.documents import ImportResponse
+
+        mock_doc_svc.export_dashboard.return_value = copy.deepcopy(_UPDATE_TILE_EXPORT)
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
+            document_id="new-1", name="D"
+        )
+        mock_doc_svc.delete_dashboard.return_value = None
+
+        with patch("omni_dash.mcp.server.get_settings") as mock_s:
+            mock_s.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+            result = json.loads(mcp_server.update_tile(
+                dashboard_id="dash-1",
+                tile_name="Revenue",
+                sql="SELECT 1",
+            ))
+
+        assert result["status"] == "updated"
+        # Inspect the payload passed to import_dashboard
+        import_call = mock_doc_svc.import_dashboard.call_args
+        imported_data = import_call[0][0]
+        qp = imported_data["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]
+        assert qp["isSql"] is True
+        assert qp["query"]["queryJson"]["userEditedSQL"] == "SELECT 1"
+
+    def test_updates_chart_type(self, mock_doc_svc):
+        """Providing chart_type= sets visConfig.chartType and visType."""
+        import copy
+        from omni_dash.api.documents import ImportResponse
+
+        mock_doc_svc.export_dashboard.return_value = copy.deepcopy(_UPDATE_TILE_EXPORT)
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
+            document_id="new-1", name="D"
+        )
+        mock_doc_svc.delete_dashboard.return_value = None
+
+        with patch("omni_dash.mcp.server.get_settings") as mock_s:
+            mock_s.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+            result = json.loads(mcp_server.update_tile(
+                dashboard_id="dash-1",
+                tile_name="Revenue",
+                chart_type="bar",
+            ))
+
+        assert result["status"] == "updated"
+        import_call = mock_doc_svc.import_dashboard.call_args
+        imported_data = import_call[0][0]
+        vc = imported_data["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]["visConfig"]
+        assert vc["chartType"] == "bar"
+        assert vc["visType"] == "basic"
+
+    def test_updates_title(self, mock_doc_svc):
+        """Providing title= renames the QP."""
+        import copy
+        from omni_dash.api.documents import ImportResponse
+
+        mock_doc_svc.export_dashboard.return_value = copy.deepcopy(_UPDATE_TILE_EXPORT)
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
+            document_id="new-1", name="D"
+        )
+        mock_doc_svc.delete_dashboard.return_value = None
+
+        with patch("omni_dash.mcp.server.get_settings") as mock_s:
+            mock_s.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+            result = json.loads(mcp_server.update_tile(
+                dashboard_id="dash-1",
+                tile_name="Revenue",
+                title="New Title",
+            ))
+
+        assert result["status"] == "updated"
+        assert result["tile_name"] == "New Title"
+        import_call = mock_doc_svc.import_dashboard.call_args
+        imported_data = import_call[0][0]
+        qp = imported_data["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]
+        assert qp["name"] == "New Title"
+
+    def test_tile_not_found(self, mock_doc_svc):
+        """Non-existent tile_name returns error with available_tiles list."""
+        import copy
+
+        mock_doc_svc.export_dashboard.return_value = copy.deepcopy(_UPDATE_TILE_EXPORT)
+
+        result = json.loads(mcp_server.update_tile(
+            dashboard_id="dash-1",
+            tile_name="Nonexistent",
+            sql="SELECT 1",
+        ))
+
+        assert "error" in result
+        assert "Nonexistent" in result["error"]
+        assert result["available_tiles"] == ["Revenue"]
+
+    def test_no_updates_specified(self, mock_doc_svc):
+        """Calling with no optional args returns an error."""
+        result = json.loads(mcp_server.update_tile(
+            dashboard_id="dash-1",
+            tile_name="Revenue",
+        ))
+
+        assert "error" in result
+        assert "No updates specified" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# Bug #5: _create_with_vis_configs 404 fallback to import
+# ---------------------------------------------------------------------------
+
+
+class TestCreateDashboard404Fallback:
+    """When create_dashboard returns 404, _create_with_vis_configs
+    should fall back to import instead of failing.
+    """
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_fallback_to_import_on_404(self, mock_get_doc_svc):
+        """OmniDashError('404 Not Found') triggers _create_via_import_fallback."""
+        from omni_dash.api.documents import ImportResponse
+        from omni_dash.exceptions import OmniDashError
+
+        svc = MagicMock()
+        mock_get_doc_svc.return_value = svc
+
+        # create_dashboard raises a 404 error
+        svc.create_dashboard.side_effect = OmniDashError("404 Not Found")
+
+        # import_dashboard is called twice: once by fallback (no vis configs
+        # to patch → returns immediately), and once more isn't needed
+        svc.import_dashboard.return_value = ImportResponse(
+            document_id="fallback-1", name="Test"
+        )
+
+        payload = {
+            "modelId": "m-1",
+            "name": "Test",
+            "queryPresentations": [
+                {
+                    "name": "Tile A",
+                    "query": {"table": "t", "fields": ["t.x"]},
+                }
+            ],
+        }
+
+        dash_id, dash_name = mcp_server._create_with_vis_configs(
+            payload, name="Test", folder_id=None,
+        )
+
+        assert dash_id == "fallback-1"
+        # Verify import_dashboard was called (the fallback path)
+        svc.import_dashboard.assert_called_once()
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_non_404_error_propagates(self, mock_get_doc_svc):
+        """OmniDashError('500 Server Error') should re-raise, not fallback."""
+        from omni_dash.exceptions import OmniDashError
+
+        svc = MagicMock()
+        mock_get_doc_svc.return_value = svc
+
+        svc.create_dashboard.side_effect = OmniDashError("500 Server Error")
+
+        payload = {
+            "modelId": "m-1",
+            "name": "Test",
+            "queryPresentations": [
+                {
+                    "name": "Tile A",
+                    "query": {"table": "t", "fields": ["t.x"]},
+                }
+            ],
+        }
+
+        with pytest.raises(OmniDashError, match="500 Server Error"):
+            mcp_server._create_with_vis_configs(
+                payload, name="Test", folder_id=None,
+            )
+
+        # import_dashboard should NOT have been called
+        svc.import_dashboard.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Bug #2 regression: add_tiles preserves filterConfig and filterOrder
+# ---------------------------------------------------------------------------
+
+
+class TestAddTilesPreservesState:
+    """Explicit test that the rewritten add_tiles preserves
+    filterConfig and filterOrder from the original export.
+    """
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch("omni_dash.mcp.server.get_settings")
+    @patch("omni_dash.mcp.server.DashboardSerializer")
+    def test_preserves_filter_config(self, mock_serializer, mock_settings, _, mock_doc_svc):
+        import copy
+        from omni_dash.api.documents import DashboardResponse, ImportResponse
+
+        mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+        mock_serializer.to_omni_create_payload.return_value = {
+            "name": "__add_tiles_tmp__",
+            "queryPresentations": [
+                {"name": "New Tile", "visConfig": {"visType": "basic", "chartType": "bar"}},
+            ],
+        }
+
+        # Original export with filterConfig + filterOrder
+        orig_export = {
+            "document": {"name": "Dashboard", "sharedModelId": "model-abc", "folderId": "f1"},
+            "dashboard": {
+                "model": {"baseModelId": "model-abc"},
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "Existing",
+                                "query": {"queryJson": {"table": "t", "fields": ["t.x"]}},
+                                "visConfig": {"visType": "basic", "chartType": "line"},
+                            }
+                        }
+                    ]
+                },
+                "metadata": {"layouts": {"lg": [{"i": 1, "x": 0, "y": 0, "w": 12, "h": 40}]}},
+                "filterConfig": {"f1": {"fieldName": "t.date", "kind": "date_range"}},
+                "filterOrder": ["f1"],
+            },
+            "workbookModel": {"base_model_id": "model-abc"},
+            "exportVersion": "0.1",
+        }
+
+        skeleton_export = {
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {"queryPresentation": {"name": "New Tile", "visConfig": {"visType": "basic"}}}
+                    ]
+                }
+            },
+            "workbookModel": {"base_model_id": "model-abc"},
+        }
+
+        temp_export = {
+            "document": {"name": "__add_tiles_tmp__", "sharedModelId": "model-abc"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "New Tile",
+                                "query": {"queryJson": {"table": "t", "fields": ["t.a"]}},
+                                "visConfig": {"visType": "basic", "chartType": "bar"},
+                            }
+                        }
+                    ]
+                },
+                "metadata": {"layouts": {"lg": [{"i": 1, "x": 0, "y": 0, "w": 6, "h": 40}]}},
+            },
+            "workbookModel": {"base_model_id": "model-abc"},
+            "exportVersion": "0.1",
+        }
+
+        mock_doc_svc.export_dashboard.side_effect = [
+            copy.deepcopy(orig_export),
+            copy.deepcopy(skeleton_export),
+            copy.deepcopy(temp_export),
+        ]
+        mock_doc_svc.create_dashboard.return_value = DashboardResponse(
+            document_id="skel-1", name="__add_tiles_tmp__"
+        )
+        mock_doc_svc.import_dashboard.side_effect = [
+            ImportResponse(document_id="temp-1", name="__add_tiles_tmp__"),
+            ImportResponse(document_id="merged-1", name="Dashboard"),
+        ]
+        mock_doc_svc.delete_dashboard.return_value = None
+
+        new_tiles = [{
+            "name": "New Tile",
+            "chart_type": "bar",
+            "query": {"table": "t", "fields": ["t.a"]},
+            "vis_config": {"x_axis": "t.a"},
+            "size": "half",
+        }]
+
+        result = json.loads(mcp_server.add_tiles_to_dashboard(
+            dashboard_id="orig-1", tiles=new_tiles,
+        ))
+
+        assert result["status"] == "updated"
+
+        # The final import (2nd call) must contain the original filterConfig/filterOrder
+        final_import = mock_doc_svc.import_dashboard.call_args_list[-1]
+        imported_data = final_import[0][0]
+        dash = imported_data["dashboard"]
+        assert dash["filterConfig"] == {"f1": {"fieldName": "t.date", "kind": "date_range"}}
+        assert dash["filterOrder"] == ["f1"]
