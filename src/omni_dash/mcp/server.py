@@ -145,6 +145,53 @@ def _build_dashboard_url(dashboard_id: str) -> str:
     return f"{base_url}/dashboards/{dashboard_id}"
 
 
+def _validate_tile_fields(
+    tiles: list[dict[str, Any]], model_id: str
+) -> list[str]:
+    """Check that all field references in tiles exist in the Omni model.
+
+    Returns a list of error strings (empty if all fields are valid).
+    """
+    errors: list[str] = []
+    try:
+        model_svc = _get_model_svc()
+        tables = {
+            t.get("query", {}).get("table", "")
+            for t in tiles
+            if t.get("query", {}).get("table")
+        }
+        available: dict[str, set[str]] = {}
+        for tbl in tables:
+            try:
+                detail = model_svc.get_topic(model_id, tbl)
+                qualified = set()
+                for f in detail.fields:
+                    fname = f.get("name", "")
+                    qualified.add(fname)
+                    qualified.add(f"{tbl}.{fname}")
+                available[tbl] = qualified
+            except Exception:
+                pass  # Table not found — will surface as field errors
+
+        for t in tiles:
+            tile_name = t.get("name", "Untitled")
+            q = t.get("query", {})
+            tbl = q.get("table", "")
+            if tbl not in available:
+                continue  # Can't validate without topic metadata
+            valid_fields = available[tbl]
+            for field in q.get("fields", []):
+                if field not in valid_fields:
+                    errors.append(
+                        f"Tile '{tile_name}': field '{field}' not found "
+                        f"in topic '{tbl}'. Check get_topic_fields for "
+                        f"valid field names."
+                    )
+    except Exception:
+        pass  # Don't block creation if validation itself fails
+    return errors
+
+
 def _create_via_import_fallback(
     doc_svc: DocumentService,
     payload: dict[str, Any],
@@ -419,6 +466,15 @@ def create_dashboard(
             return json.dumps({
                 "error": "No model_id provided and could not auto-discover one. "
                 "Set OMNI_SHARED_MODEL_ID in .env or pass model_id."
+            })
+
+        # Auto-validate field references before creating
+        field_errors = _validate_tile_fields(tiles, resolved_model_id)
+        if field_errors:
+            return json.dumps({
+                "error": "Invalid field references — dashboard NOT created.",
+                "field_errors": field_errors,
+                "hint": "Use get_topic_fields to see valid field names.",
             })
 
         definition = DashboardDefinition(
@@ -746,6 +802,15 @@ def add_tiles_to_dashboard(
         effective_name = doc.get("name", "Untitled")
         effective_folder = doc.get("folderId")
         resolved_model_id = _resolve_model_id_from_export(export_data, model_id)
+
+        # Auto-validate field references before adding
+        field_errors = _validate_tile_fields(tiles, resolved_model_id)
+        if field_errors:
+            return json.dumps({
+                "error": "Invalid field references — tiles NOT added.",
+                "field_errors": field_errors,
+                "hint": "Use get_topic_fields to see valid field names.",
+            })
 
         # Count existing tiles
         orig_dash = export_data.get("dashboard", {})
