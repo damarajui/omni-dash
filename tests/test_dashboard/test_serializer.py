@@ -2964,3 +2964,193 @@ def test_combo_chart_generates_dual_series_types():
     assert spec["series"][0]["yAxis"] == "y"
     assert spec["series"][1]["mark"]["type"] == "line"
     assert spec["series"][1]["yAxis"] == "y2"
+
+
+# ===========================================================================
+# Bug #3: SQL tile round-trip
+# ===========================================================================
+
+
+class TestSQLTileFromExport:
+    """Test from_omni_export extracts SQL tile fields correctly."""
+
+    def _make_sql_export(self, *, is_sql=True, user_sql="SELECT * FROM t",
+                         sql_in_query_json=False):
+        """Build a minimal Omni export with SQL tile fields."""
+        query_json = {
+            "table": "t",
+            "fields": ["t.id"],
+        }
+        if sql_in_query_json:
+            query_json["userEditedSQL"] = user_sql
+
+        raw_query = {"queryJson": query_json}
+        if not sql_in_query_json and user_sql:
+            raw_query["userEditedSQL"] = user_sql
+
+        return {
+            "document": {"name": "Test", "modelId": "m"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "SQL Tile",
+                                "isSql": is_sql,
+                                "query": raw_query,
+                                "visConfig": {
+                                    "visType": "omni-table",
+                                    "chartType": "table",
+                                },
+                            }
+                        }
+                    ]
+                },
+                "metadata": {
+                    "layouts": {
+                        "lg": [
+                            {"i": 1, "x": 0, "y": 0, "w": 24, "h": 40}
+                        ]
+                    }
+                },
+            },
+            "workbookModel": {},
+        }
+
+    def test_extracts_is_sql_from_export(self):
+        """from_omni_export should extract isSql and userEditedSQL from the export."""
+        export_data = self._make_sql_export(
+            is_sql=True, user_sql="SELECT * FROM t"
+        )
+        defn = DashboardSerializer.from_omni_export(export_data)
+
+        assert len(defn.tiles) == 1
+        assert defn.tiles[0].query.is_sql is True
+        assert defn.tiles[0].query.user_sql == "SELECT * FROM t"
+
+    def test_non_sql_tile_defaults(self):
+        """Export without isSql should default to is_sql=False and user_sql=None."""
+        export_data = {
+            "document": {"name": "Test", "modelId": "m"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "Regular Tile",
+                                "query": {
+                                    "queryJson": {
+                                        "table": "t",
+                                        "fields": ["t.id"],
+                                    },
+                                },
+                                "visConfig": {
+                                    "visType": "omni-table",
+                                    "chartType": "table",
+                                },
+                            }
+                        }
+                    ]
+                },
+                "metadata": {"layouts": {"lg": []}},
+            },
+        }
+        defn = DashboardSerializer.from_omni_export(export_data)
+
+        assert defn.tiles[0].query.is_sql is False
+        assert defn.tiles[0].query.user_sql is None
+
+    def test_user_sql_in_query_json(self):
+        """userEditedSQL inside queryJson (not at query root) should still be extracted."""
+        export_data = self._make_sql_export(
+            is_sql=True, user_sql="SELECT 1 AS id", sql_in_query_json=True
+        )
+        defn = DashboardSerializer.from_omni_export(export_data)
+
+        assert defn.tiles[0].query.is_sql is True
+        assert defn.tiles[0].query.user_sql == "SELECT 1 AS id"
+
+
+class TestSQLTileYAMLRoundTrip:
+    """Test YAML serialization/deserialization preserves SQL tile fields."""
+
+    def test_yaml_round_trip_preserves_sql(self):
+        """SQL tile (is_sql=True, user_sql set) should survive a YAML round-trip."""
+        from omni_dash.dashboard.definition import Tile, TileQuery
+
+        original = DashboardDefinition(
+            name="SQL YAML Test",
+            model_id="m-1",
+            tiles=[
+                Tile(
+                    name="Custom SQL",
+                    chart_type="table",
+                    query=TileQuery(
+                        table="t",
+                        fields=["t.id"],
+                        is_sql=True,
+                        user_sql="SELECT * FROM t",
+                    ),
+                ),
+            ],
+        )
+        yaml_str = DashboardSerializer.to_yaml(original)
+        restored = DashboardSerializer.from_yaml(yaml_str)
+
+        assert restored.tiles[0].query.is_sql is True
+        assert restored.tiles[0].query.user_sql == "SELECT * FROM t"
+
+    def test_non_sql_tile_yaml_round_trip(self):
+        """Regular tile (is_sql=False) should stay False/None after YAML round-trip."""
+        from omni_dash.dashboard.definition import Tile, TileQuery
+
+        original = DashboardDefinition(
+            name="Non-SQL YAML Test",
+            model_id="m-1",
+            tiles=[
+                Tile(
+                    name="Regular",
+                    chart_type="line",
+                    query=TileQuery(
+                        table="t",
+                        fields=["t.date", "t.value"],
+                    ),
+                    vis_config=TileVisConfig(x_axis="t.date"),
+                ),
+            ],
+        )
+        yaml_str = DashboardSerializer.to_yaml(original)
+        restored = DashboardSerializer.from_yaml(yaml_str)
+
+        assert restored.tiles[0].query.is_sql is False
+        assert restored.tiles[0].query.user_sql is None
+
+
+class TestSQLTileSerializePayload:
+    """Test to_omni_create_payload produces correct SQL fields."""
+
+    def test_sql_tile_creates_omni_payload(self):
+        """SQL tile should produce isSql and userEditedSQL in the Omni payload."""
+        from omni_dash.dashboard.definition import Tile, TileQuery
+
+        definition = DashboardDefinition(
+            name="SQL Payload Test",
+            model_id="m-1",
+            tiles=[
+                Tile(
+                    name="Custom SQL",
+                    chart_type="table",
+                    query=TileQuery(
+                        table="t",
+                        fields=["t.id"],
+                        is_sql=True,
+                        user_sql="SELECT 1",
+                    ),
+                ),
+            ],
+        )
+        payload = DashboardSerializer.to_omni_create_payload(definition)
+        qp = payload["queryPresentations"][0]
+
+        assert qp["isSql"] is True
+        assert qp["query"]["userEditedSQL"] == "SELECT 1"
