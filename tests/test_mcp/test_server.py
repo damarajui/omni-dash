@@ -1976,3 +1976,151 @@ class TestAddTilesPreservesState:
         dash = imported_data["dashboard"]
         assert dash["filterConfig"] == {"f1": {"fieldName": "t.date", "kind": "date_range"}}
         assert dash["filterOrder"] == ["f1"]
+
+
+class TestAutoFieldValidation:
+    """Tests that create_dashboard and add_tiles auto-validate field references."""
+
+    def _mock_model_svc(self, valid_fields: dict[str, list[str]]):
+        """Create a mock model service that returns specified fields per table."""
+        model_svc = MagicMock()
+
+        def get_topic(model_id, table_name):
+            fields = valid_fields.get(table_name, [])
+            topic = MagicMock()
+            topic.fields = [{"name": f} for f in fields]
+            return topic
+
+        model_svc.get_topic.side_effect = get_topic
+        return model_svc
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch.object(mcp_server, "_get_model_svc")
+    def test_create_blocks_invalid_fields(self, mock_get_model_svc, _):
+        mock_get_model_svc.return_value = self._mock_model_svc({
+            "mart_seo": ["week", "visits", "clicks"],
+        })
+
+        tiles = [{
+            "name": "Bad Tile",
+            "chart_type": "line",
+            "query": {
+                "table": "mart_seo",
+                "fields": ["mart_seo.week", "mart_seo.nonexistent_field"],
+            },
+            "vis_config": {},
+        }]
+
+        result = json.loads(mcp_server.create_dashboard(name="Test", tiles=tiles))
+        assert "error" in result
+        assert "field_errors" in result
+        assert len(result["field_errors"]) == 1
+        assert "nonexistent_field" in result["field_errors"][0]
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch.object(mcp_server, "_get_model_svc")
+    @patch.object(mcp_server, "_get_doc_svc")
+    @patch("omni_dash.mcp.server.get_settings")
+    def test_create_allows_valid_fields(
+        self, mock_settings, mock_doc_svc, mock_get_model_svc, _
+    ):
+        from omni_dash.api.documents import DashboardResponse, ImportResponse
+
+        mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+        mock_get_model_svc.return_value = self._mock_model_svc({
+            "mart_seo": ["week", "visits"],
+        })
+
+        svc = MagicMock()
+        svc.create_dashboard.return_value = DashboardResponse(
+            document_id="skel-1", name="Test"
+        )
+        svc.export_dashboard.return_value = {
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {"queryPresentation": {"name": "Chart", "visConfig": {"chartType": "line"}}}
+                    ]
+                }
+            },
+            "document": {"sharedModelId": "model-123"},
+            "workbookModel": {},
+            "exportVersion": "0.1",
+        }
+        svc.import_dashboard.return_value = ImportResponse(document_id="ok-1", name="Test")
+        mock_doc_svc.return_value = svc
+
+        tiles = [{
+            "name": "Chart",
+            "chart_type": "line",
+            "query": {"table": "mart_seo", "fields": ["mart_seo.week", "mart_seo.visits"]},
+            "vis_config": {},
+        }]
+
+        result = json.loads(mcp_server.create_dashboard(name="Test", tiles=tiles))
+        assert result["status"] == "created"
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch.object(mcp_server, "_get_model_svc")
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_add_tiles_blocks_invalid_fields(
+        self, mock_doc_svc, mock_get_model_svc, _
+    ):
+        mock_get_model_svc.return_value = self._mock_model_svc({
+            "mart_seo": ["week", "visits"],
+        })
+
+        svc = MagicMock()
+        svc.export_dashboard.return_value = {
+            "document": {"name": "Dash", "sharedModelId": "model-123"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": []
+                }
+            },
+            "workbookModel": {"base_model_id": "model-123"},
+            "exportVersion": "0.1",
+        }
+        mock_doc_svc.return_value = svc
+
+        tiles = [{
+            "name": "Bad",
+            "chart_type": "bar",
+            "query": {"table": "mart_seo", "fields": ["mart_seo.fake_field"]},
+            "vis_config": {},
+        }]
+
+        result = json.loads(mcp_server.add_tiles_to_dashboard(
+            dashboard_id="dash-1", tiles=tiles,
+        ))
+        assert "error" in result
+        assert "field_errors" in result
+        assert "fake_field" in result["field_errors"][0]
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch.object(mcp_server, "_get_model_svc")
+    def test_create_catches_multiple_bad_fields(self, mock_get_model_svc, _):
+        mock_get_model_svc.return_value = self._mock_model_svc({
+            "ads": ["date", "spend", "clicks"],
+        })
+
+        tiles = [
+            {
+                "name": "KPI 1",
+                "chart_type": "number",
+                "query": {"table": "ads", "fields": ["ads.total_spend"]},
+                "vis_config": {},
+            },
+            {
+                "name": "KPI 2",
+                "chart_type": "number",
+                "query": {"table": "ads", "fields": ["ads.total_clicks"]},
+                "vis_config": {},
+            },
+        ]
+
+        result = json.loads(mcp_server.create_dashboard(name="Test", tiles=tiles))
+        assert "error" in result
+        assert len(result["field_errors"]) == 2
+        assert "total_spend" in result["field_errors"][0]
+        assert "total_clicks" in result["field_errors"][1]
