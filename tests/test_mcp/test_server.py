@@ -681,7 +681,7 @@ class TestAddTilesToDashboard:
             },
             "metadata": {
                 "layouts": {
-                    "lg": [{"i": 1, "x": 0, "y": 0, "w": 12, "h": 40}]
+                    "lg": [{"i": "1", "x": 0, "y": 0, "w": 12, "h": 40}]
                 }
             },
             "filterConfig": {"abc123": {"fieldName": "t.date", "kind": "date_range"}},
@@ -708,7 +708,7 @@ class TestAddTilesToDashboard:
             },
             "metadata": {
                 "layouts": {
-                    "lg": [{"i": 1, "x": 0, "y": 0, "w": 6, "h": 40}]
+                    "lg": [{"i": "1", "x": 0, "y": 0, "w": 6, "h": 40}]
                 }
             },
         },
@@ -786,6 +786,13 @@ class TestAddTilesToDashboard:
             assert dash.get("filterOrder") == ["abc123"]
             memberships = dash["queryPresentationCollection"]["queryPresentationCollectionMemberships"]
             assert len(memberships) == 2
+
+            # Layout i values must be strings (Omni rejects integers)
+            layouts = dash.get("metadata", {}).get("layouts", {}).get("lg", [])
+            for layout_item in layouts:
+                assert isinstance(layout_item["i"], str), (
+                    f"Layout i must be string, got {type(layout_item['i']).__name__}: {layout_item['i']}"
+                )
 
     def test_rejects_empty_tiles(self, mock_doc_svc):
         result = json.loads(mcp_server.add_tiles_to_dashboard(
@@ -1683,7 +1690,7 @@ _UPDATE_TILE_EXPORT: dict[str, Any] = {
         },
         "metadata": {
             "layouts": {
-                "lg": [{"i": 1, "x": 0, "y": 0, "w": 12, "h": 40}]
+                "lg": [{"i": "1", "x": 0, "y": 0, "w": 12, "h": 40}]
             }
         },
     },
@@ -1925,7 +1932,7 @@ class TestAddTilesPreservesState:
                         }
                     ]
                 },
-                "metadata": {"layouts": {"lg": [{"i": 1, "x": 0, "y": 0, "w": 12, "h": 40}]}},
+                "metadata": {"layouts": {"lg": [{"i": "1", "x": 0, "y": 0, "w": 12, "h": 40}]}},
                 "filterConfig": {"f1": {"fieldName": "t.date", "kind": "date_range"}},
                 "filterOrder": ["f1"],
             },
@@ -1958,7 +1965,7 @@ class TestAddTilesPreservesState:
                         }
                     ]
                 },
-                "metadata": {"layouts": {"lg": [{"i": 1, "x": 0, "y": 0, "w": 6, "h": 40}]}},
+                "metadata": {"layouts": {"lg": [{"i": "1", "x": 0, "y": 0, "w": 6, "h": 40}]}},
             },
             "workbookModel": {"base_model_id": "model-abc"},
             "exportVersion": "0.1",
@@ -2368,4 +2375,247 @@ class TestProfileDataTypeInference:
         result = json.loads(mcp_server.profile_data("t"))
         field_profile = result["fields"]["t.week_start"]
         assert field_profile["inferred_type"] == "date"
+
+
+# ---------------------------------------------------------------------------
+# Bug #6: .get("visConfig", {}) returns detached dict when key missing
+# ---------------------------------------------------------------------------
+
+
+class TestVisConfigSetdefault:
+    """When a skeleton export omits visConfig for a tile, the vis config
+    patching in _create_with_vis_configs must still inject the vis config
+    into the export. Previously used .get() which returned a detached dict.
+    """
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_vis_config_injected_when_missing_from_export(self, mock_get_doc_svc):
+        """visConfig missing from skeleton export → patching must create it."""
+        from omni_dash.api.documents import DashboardResponse, ImportResponse
+
+        svc = MagicMock()
+        mock_get_doc_svc.return_value = svc
+
+        svc.create_dashboard.return_value = DashboardResponse(
+            document_id="skel-1", name="Test"
+        )
+        # Skeleton export has NO visConfig on the tile
+        svc.export_dashboard.return_value = {
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "KPI Spend",
+                                # NO "visConfig" key at all
+                            }
+                        }
+                    ]
+                }
+            },
+            "document": {"sharedModelId": "model-123", "name": "Test", "folderId": None},
+            "workbookModel": {},
+            "exportVersion": "0.1",
+        }
+        svc.import_dashboard.return_value = ImportResponse(
+            document_id="final-1", name="Test"
+        )
+        svc.delete_dashboard.return_value = None
+
+        payload = {
+            "queryPresentations": [
+                {
+                    "name": "KPI Spend",
+                    "visConfig": {
+                        "visType": "omni-kpi",
+                        "chartType": "kpi",
+                        "spec": {
+                            "alignment": "left",
+                            "markdownConfig": [
+                                {"type": "number", "config": {"field": {"format": "$#,##0"}}}
+                            ],
+                        },
+                        "fields": ["t.spend"],
+                    },
+                    "query": {},
+                }
+            ],
+        }
+
+        mcp_server._create_with_vis_configs(
+            payload, name="Test", folder_id=None,
+        )
+
+        import_call = svc.import_dashboard.call_args
+        imported_data = import_call[0][0]
+        qp = imported_data["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]
+        # visConfig must exist and have all patched fields
+        assert "visConfig" in qp, "visConfig must be created when missing"
+        vc = qp["visConfig"]
+        assert vc["visType"] == "omni-kpi"
+        assert vc["chartType"] == "kpi"
+        assert "spec" in vc
+        assert "config" in vc  # spec→config copy
+        assert vc["fields"] == ["t.spend"]
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_multiple_tiles_vis_config_some_missing(self, mock_get_doc_svc):
+        """Mix of tiles with and without visConfig in export — all get patched."""
+        from omni_dash.api.documents import DashboardResponse, ImportResponse
+
+        svc = MagicMock()
+        mock_get_doc_svc.return_value = svc
+
+        svc.create_dashboard.return_value = DashboardResponse(
+            document_id="skel-1", name="Test"
+        )
+        # Tile A has visConfig, Tile B does not
+        svc.export_dashboard.return_value = {
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "Tile A",
+                                "visConfig": {"visType": "basic", "chartType": "line"},
+                            }
+                        },
+                        {
+                            "queryPresentation": {
+                                "name": "Tile B",
+                                # NO visConfig
+                            }
+                        },
+                    ]
+                }
+            },
+            "document": {"sharedModelId": "model-123", "name": "Test", "folderId": None},
+            "workbookModel": {},
+            "exportVersion": "0.1",
+        }
+        svc.import_dashboard.return_value = ImportResponse(
+            document_id="final-1", name="Test"
+        )
+        svc.delete_dashboard.return_value = None
+
+        payload = {
+            "queryPresentations": [
+                {
+                    "name": "Tile A",
+                    "visConfig": {
+                        "visType": "basic",
+                        "chartType": "bar",
+                        "spec": {"version": 0, "configType": "cartesian"},
+                    },
+                    "query": {},
+                },
+                {
+                    "name": "Tile B",
+                    "visConfig": {
+                        "visType": "omni-kpi",
+                        "chartType": "kpi",
+                        "spec": {"markdownConfig": [{"type": "number"}]},
+                        "fields": ["t.count"],
+                    },
+                    "query": {},
+                },
+            ],
+        }
+
+        mcp_server._create_with_vis_configs(
+            payload, name="Test", folder_id=None,
+        )
+
+        import_call = svc.import_dashboard.call_args
+        imported_data = import_call[0][0]
+        memberships = imported_data["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ]
+
+        # Tile A (had visConfig) — patched in place
+        vc_a = memberships[0]["queryPresentation"]["visConfig"]
+        assert vc_a["chartType"] == "bar"
+        assert vc_a["visType"] == "basic"
+
+        # Tile B (missing visConfig) — must be created
+        assert "visConfig" in memberships[1]["queryPresentation"], (
+            "visConfig must be injected for tiles missing it"
+        )
+        vc_b = memberships[1]["queryPresentation"]["visConfig"]
+        assert vc_b["chartType"] == "kpi"
+        assert vc_b["visType"] == "omni-kpi"
+        assert vc_b["fields"] == ["t.count"]
+
+
+class TestUpdateTileNoVisConfig:
+    """update_tile must work even when the export has no visConfig for the tile."""
+
+    def test_chart_type_change_when_vis_config_missing(self, mock_doc_svc):
+        """chart_type= on a tile with no visConfig in export → visConfig created."""
+        import copy
+        from omni_dash.api.documents import ImportResponse
+
+        # Export with NO visConfig on the tile
+        export = copy.deepcopy(_UPDATE_TILE_EXPORT)
+        del export["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]["visConfig"]
+
+        mock_doc_svc.export_dashboard.return_value = export
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
+            document_id="new-1", name="D"
+        )
+        mock_doc_svc.delete_dashboard.return_value = None
+
+        with patch("omni_dash.mcp.server.get_settings") as mock_s:
+            mock_s.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+            result = json.loads(mcp_server.update_tile(
+                dashboard_id="dash-1",
+                tile_name="Revenue",
+                chart_type="bar",
+            ))
+
+        assert result["status"] == "updated"
+        import_call = mock_doc_svc.import_dashboard.call_args
+        imported_data = import_call[0][0]
+        qp = imported_data["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]
+        assert "visConfig" in qp, "visConfig must be created when missing"
+        assert qp["visConfig"]["chartType"] == "bar"
+        assert qp["visConfig"]["visType"] == "basic"
+
+    def test_title_change_when_vis_config_missing(self, mock_doc_svc):
+        """title= change with no visConfig → jsonHash cleanup still works."""
+        import copy
+        from omni_dash.api.documents import ImportResponse
+
+        export = copy.deepcopy(_UPDATE_TILE_EXPORT)
+        del export["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]["visConfig"]
+
+        mock_doc_svc.export_dashboard.return_value = export
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
+            document_id="new-1", name="D"
+        )
+        mock_doc_svc.delete_dashboard.return_value = None
+
+        with patch("omni_dash.mcp.server.get_settings") as mock_s:
+            mock_s.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+            result = json.loads(mcp_server.update_tile(
+                dashboard_id="dash-1",
+                tile_name="Revenue",
+                title="New Name",
+            ))
+
+        assert result["status"] == "updated"
+        import_call = mock_doc_svc.import_dashboard.call_args
+        imported_data = import_call[0][0]
+        qp = imported_data["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]
+        assert qp["name"] == "New Name"
 

@@ -349,7 +349,7 @@ def _build_series_entry(s: dict[str, Any]) -> dict[str, Any]:
         if "dash" in s:
             mark["line"] = {"dash": s["dash"], "width": s.get("line_width", 2)}
         if "point" in s:
-            mark["line"] = mark.get("line", {})
+            mark.setdefault("line", {})
             mark["line"]["point"] = s["point"]
         entry["mark"] = mark
     elif "color" in s:
