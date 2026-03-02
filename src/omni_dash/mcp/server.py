@@ -1548,7 +1548,21 @@ def generate_dashboard(
         model_svc = _get_model_svc()
 
         adapter = OmniModelAdapter(model_svc, mid)
-        ai = DashboardAI(adapter, model="claude-sonnet-4-5-20250929")
+
+        def _ai_query_fn(table: str, fields: list[str], limit: int) -> list[dict]:
+            """Bridge AI query_data tool to Omni query runner."""
+            from omni_dash.api.queries import QueryBuilder
+
+            builder = QueryBuilder(mid, table)
+            builder._fields = fields
+            builder._limit = min(limit, 25)
+            spec = builder.build()
+            result = _get_query_runner().run(spec)
+            return result.rows[:limit]
+
+        ai = DashboardAI(
+            adapter, model="claude-sonnet-4-5-20250929", query_fn=_ai_query_fn,
+        )
 
         result = ai.generate(prompt)
         definition = result.definition
