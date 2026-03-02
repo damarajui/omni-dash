@@ -32,14 +32,19 @@ class ChartRecommendation:
 
 
 def classify_field(field_info: dict[str, Any]) -> FieldInfo:
-    """Classify a field from Omni topic metadata into FieldInfo."""
+    """Classify a field from Omni topic metadata into FieldInfo.
+
+    Omni topics often mark all columns as 'dimension' (LookML sense)
+    regardless of data type.  We supplement the Omni type with
+    name-based heuristics to distinguish dates, numbers, and strings.
+    """
     name = field_info.get("name", "")
     ftype = field_info.get("type", "").lower()
-    aggregation = field_info.get("aggregation", "")
-    label = field_info.get("label", "").lower()
+    aggregation = field_info.get("aggregation", "") or field_info.get("aggregate_type", "")
     raw_name = name.split(".")[-1].lower() if "." in name else name.lower()
 
-    # Determine field type
+    # --- Data type detection (not LookML dimension/measure) ---
+    # 1. Explicit data-type from Omni
     if ftype in ("date", "datetime", "timestamp", "time"):
         field_type = "date"
     elif ftype in ("number", "integer", "float", "decimal", "numeric", "int"):
@@ -47,10 +52,28 @@ def classify_field(field_info: dict[str, Any]) -> FieldInfo:
     elif ftype in ("boolean", "bool"):
         field_type = "boolean"
     else:
-        field_type = "string"
+        # 2. Name-based heuristics (critical — Omni often returns 'dimension' for all)
+        _DATE_NAMES = {"date", "day", "week", "month", "year", "quarter",
+                       "week_start", "week_end", "month_start", "date_day"}
+        _DATE_SUFFIXES = ("_date", "_at", "_day", "_week", "_month",
+                          "_timestamp", "_time")
+        _NUM_SUFFIXES = ("_count", "_total", "_sum", "_avg", "_rate",
+                         "_pct", "_percent", "_ratio")
+        _NUM_NAMES = {"spend", "clicks", "impressions", "revenue", "arr",
+                      "cost", "ctr", "cpc", "cac", "ltv", "nrr", "mrr",
+                      "signups", "count", "amount", "price", "sessions",
+                      "visits", "conversions", "customers", "paywall",
+                      "sign_ups", "retention"}
 
-    # Determine if measure or dimension
-    is_measure = bool(aggregation) or field_type == "number"
+        if raw_name in _DATE_NAMES or any(raw_name.endswith(s) for s in _DATE_SUFFIXES):
+            field_type = "date"
+        elif raw_name in _NUM_NAMES or any(raw_name.endswith(s) for s in _NUM_SUFFIXES):
+            field_type = "number"
+        else:
+            field_type = "string"
+
+    # --- Measure vs dimension ---
+    is_measure = bool(aggregation) or ftype == "measure" or field_type == "number"
     is_dimension = not is_measure
 
     # Heuristic: fields ending with _id, _name, _type, _status are dimensions
@@ -59,7 +82,7 @@ def classify_field(field_info: dict[str, Any]) -> FieldInfo:
         is_dimension = True
         is_measure = False
 
-    # Heuristic: date fields are dimensions
+    # Date fields are always dimensions
     if field_type == "date":
         is_dimension = True
         is_measure = False

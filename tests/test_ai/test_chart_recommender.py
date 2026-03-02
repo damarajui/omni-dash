@@ -107,6 +107,55 @@ class TestClassifyField:
         assert fi.is_measure is True
 
 
+
+    def test_omni_dimension_date_by_name(self):
+        """Omni returns type='dimension' for date columns — detect by name."""
+        fi = classify_field({"name": "t.date", "type": "dimension"})
+        assert fi.field_type == "date"
+        assert fi.is_dimension is True
+
+    def test_omni_dimension_week_start_by_name(self):
+        fi = classify_field({"name": "t.week_start", "type": "dimension"})
+        assert fi.field_type == "date"
+
+    def test_omni_dimension_spend_by_name(self):
+        """Omni returns type='dimension' for numeric columns — detect by name."""
+        fi = classify_field({"name": "t.spend", "type": "dimension"})
+        assert fi.field_type == "number"
+        assert fi.is_measure is True
+
+    def test_omni_dimension_clicks_by_name(self):
+        fi = classify_field({"name": "t.clicks", "type": "dimension"})
+        assert fi.field_type == "number"
+        assert fi.is_measure is True
+
+    def test_omni_dimension_ctr_by_name(self):
+        fi = classify_field({"name": "t.ctr", "type": "dimension"})
+        assert fi.field_type == "number"
+        assert fi.is_measure is True
+
+    def test_omni_dimension_campaign_name_stays_string(self):
+        fi = classify_field({"name": "t.campaign_name", "type": "dimension"})
+        assert fi.field_type == "string"
+        assert fi.is_dimension is True
+
+    def test_omni_measure_type(self):
+        """Fields with type='measure' should be measures even without aggregation."""
+        fi = classify_field({"name": "t.count", "type": "measure"})
+        assert fi.is_measure is True
+
+    def test_real_omni_date_spend_clicks(self):
+        """Simulates real Omni topic: date + spend + clicks all as 'dimension'."""
+        fields = [
+            classify_field({"name": "date", "type": "dimension"}),
+            classify_field({"name": "spend", "type": "dimension"}),
+            classify_field({"name": "clicks", "type": "dimension"}),
+        ]
+        rec = recommend_chart(fields)
+        assert rec.chart_type == "line", f"Expected line for date+spend+clicks, got {rec.chart_type}"
+        assert rec.confidence >= 0.85
+
+
 class TestInferFormat:
     def test_revenue_gets_currency(self):
         assert _infer_format("t.revenue") == "USDCURRENCY_0"

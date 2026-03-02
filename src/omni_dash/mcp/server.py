@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import os
 from pathlib import Path
 from typing import Any
@@ -1496,11 +1497,13 @@ def profile_data(
                 except (ValueError, TypeError):
                     profile["min"] = str(min(non_null, key=str))
                     profile["max"] = str(max(non_null, key=str))
+                    # Detect dates by ISO format (YYYY-MM-DD), not hyphens
                     sample = str(non_null[0])
-                    if len(sample) >= 8 and ("-" in sample or "/" in sample):
-                        profile["inferred_type"] = "date"
-                    else:
-                        profile["inferred_type"] = "string"
+                    is_date = False
+                    if 8 <= len(sample) <= 25:
+                        if re.match(r"^\d{4}[-/]\d{2}[-/]\d{2}", sample):
+                            is_date = True
+                    profile["inferred_type"] = "date" if is_date else "string"
 
             profiles[field_name] = profile
 
