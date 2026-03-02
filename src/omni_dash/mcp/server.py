@@ -346,7 +346,7 @@ def _create_with_vis_configs(
         tile_name = qp_data.get("name", "")
         if tile_name in vis_configs_by_name:
             vc_patch = vis_configs_by_name[tile_name]
-            existing_vc = qp_data.get("visConfig", {})
+            existing_vc = qp_data.setdefault("visConfig", {})
             existing_vc["visType"] = vc_patch.get("visType")
             # chartType can be explicitly null in exports; fall back to
             # visType mapping, then to "line".
@@ -907,7 +907,7 @@ def add_tiles_to_dashboard(
         base_idx = previous_count
         for item in temp_layout:
             new_item = dict(item)
-            new_item["i"] = base_idx + 1
+            new_item["i"] = str(base_idx + 1)
             new_item["y"] = new_item.get("y", 0) + max_y
             patched_layout.append(new_item)
             base_idx += 1
@@ -1035,7 +1035,7 @@ def update_tile(
             from omni_dash.dashboard.serializer import _CHART_TYPE_TO_OMNI
 
             omni_ct = _CHART_TYPE_TO_OMNI.get(chart_type, chart_type)
-            vc = target_qp.get("visConfig", {})
+            vc = target_qp.setdefault("visConfig", {})
             vc["chartType"] = omni_ct
             # Update visType based on chart type
             if omni_ct in ("kpi", "summaryValue"):
@@ -1055,7 +1055,7 @@ def update_tile(
             modified = True
 
         if modified:
-            vc = target_qp.get("visConfig", {})
+            vc = target_qp.setdefault("visConfig", {})
             vc.pop("jsonHash", None)
 
         # 4. Reimport modified export

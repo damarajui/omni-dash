@@ -3165,3 +3165,30 @@ class TestSQLTileSerializePayload:
 
         assert qp["isSql"] is True
         assert qp["query"]["userEditedSQL"] == "SELECT 1"
+
+
+def test_series_entry_point_without_dash():
+    """point config on a series without dash must still populate mark.line.point."""
+    from omni_dash.dashboard.serializer import _build_series_entry
+
+    entry = _build_series_entry({
+        "field": "t.revenue",
+        "mark_type": "line",
+        "point": True,
+    })
+    assert entry["mark"]["type"] == "line"
+    assert entry["mark"]["line"]["point"] is True
+
+
+def test_series_entry_point_with_dash():
+    """point + dash on the same series → both live under mark.line."""
+    from omni_dash.dashboard.serializer import _build_series_entry
+
+    entry = _build_series_entry({
+        "field": "t.revenue",
+        "mark_type": "line",
+        "dash": [4, 2],
+        "point": True,
+    })
+    assert entry["mark"]["line"]["dash"] == [4, 2]
+    assert entry["mark"]["line"]["point"] is True
