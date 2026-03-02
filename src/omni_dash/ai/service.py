@@ -52,11 +52,13 @@ class DashboardAI:
         model: str = "claude-sonnet-4-5-20250929",
         max_turns: int = 10,
         api_key: str | None = None,
+        query_fn: Any | None = None,
     ):
         self._registry = registry
         self._model = model
         self._max_turns = max_turns
         self._api_key = api_key
+        self._query_fn = query_fn
 
     def generate(
         self,
@@ -101,7 +103,7 @@ class DashboardAI:
         client = anthropic.Anthropic(api_key=api_key)
         tools = get_tool_definitions()
         system_prompt = build_system_prompt()
-        executor = ToolExecutor(self._registry)
+        executor = ToolExecutor(self._registry, query_fn=self._query_fn)
 
         messages: list[dict[str, Any]] = [
             {"role": "user", "content": description},

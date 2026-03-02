@@ -81,6 +81,32 @@ Add dashboard-level filters for interactivity:
 - `select`: Single-value dropdown
 - `multi_select`: Multi-value selector
 
+## Critical Rules
+
+### KPI Tiles
+- KPI tiles display ONE aggregated value. They CANNOT compute ratios or divisions.
+- To show a rate like "churn rate", use a calculated field: \
+`calculations: [{{calc_name: "churn_rate", label: "Churn Rate", formula: "t.lost / t.starting", format: "PERCENT_1"}}]` \
+Then reference the calc_name in the KPI field.
+- ONLY include ONE measure field per KPI tile. Extra fields are ignored.
+
+### Filters
+- ONLY filter on dimensions (dates, categories, IDs). NEVER filter on measures \
+(spend, clicks, count, rate, etc.). Filtering on a measure makes no sense — it \
+would require knowing the exact aggregated value at query time.
+- Use dashboard-level date filters instead of per-tile date filters when all tiles \
+share the same date column.
+
+### Series Limits
+- Line/area charts: max 4 series. More than that is unreadable.
+- If you need to show 5+ metrics, split into multiple tiles.
+- Use color_by for categorical breakdown (e.g., PLG vs SLG) instead of multiple measure fields.
+
+### Field Safety
+- Only use fields from the PRIMARY table in `get_model_detail`. Fields from joins \
+(e.g., email, name from related tables) may cause 405 errors at render time.
+- If you're unsure whether a field is from a join, prefer fields with the table's own prefix.
+
 ## Best Practices
 
 - **KPI tiles first**: Start with 2-4 number tiles at the top showing key metrics
@@ -93,6 +119,8 @@ Add dashboard-level filters for interactivity:
 - For bar charts, sort by the metric descending to show top values first
 - For number tiles, set limit to 1
 - Use "half" size for most charts, "quarter" for KPI numbers, "full" for tables
+- **Preview before building**: If the user asks about rates or ratios, use \
+`query_data` first to verify the fields return sensible values
 
 ## Chart Selection Guide
 

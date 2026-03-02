@@ -62,14 +62,14 @@ def executor(mock_registry):
 
 
 class TestToolDefinitions:
-    def test_returns_four_tools(self):
+    def test_returns_five_tools(self):
         tools = get_tool_definitions()
-        assert len(tools) == 4
+        assert len(tools) == 5
 
     def test_tool_names(self):
         tools = get_tool_definitions()
         names = {t["name"] for t in tools}
-        assert names == {"list_models", "get_model_detail", "search_models", "create_dashboard"}
+        assert names == {"list_models", "get_model_detail", "search_models", "query_data", "create_dashboard"}
 
     def test_all_tools_have_required_fields(self):
         tools = get_tool_definitions()
@@ -99,6 +99,15 @@ class TestToolDefinitions:
         tile_props = create_tool["input_schema"]["properties"]["tiles"]["items"]["properties"]
         chart_type_enum = tile_props["chart_type"]["enum"]
         assert set(chart_type_enum) == {ct.value for ct in ChartType}
+
+    def test_query_data_schema(self):
+        tools = get_tool_definitions()
+        query_tool = next(t for t in tools if t["name"] == "query_data")
+        schema = query_tool["input_schema"]
+        assert "table" in schema["properties"]
+        assert "fields" in schema["properties"]
+        assert "limit" in schema["properties"]
+        assert schema["required"] == ["table", "fields"]
 
 
 class TestToolExecutor:
@@ -231,3 +240,63 @@ class TestToolExecutor:
         assert is_error
         data = json.loads(result)
         assert "not found" in data["error"]
+
+
+class TestQueryDataTool:
+    """Tests for the query_data tool execution."""
+
+    def test_query_data_returns_rows(self, mock_registry):
+        fake_rows = [
+            {"week_start": "2025-01-06", "visits": 1200},
+            {"week_start": "2025-01-13", "visits": 1350},
+        ]
+        query_fn = MagicMock(return_value=fake_rows)
+        executor = ToolExecutor(mock_registry, query_fn=query_fn)
+
+        result, is_error = executor.execute(
+            "query_data",
+            {"table": "mart_seo", "fields": ["mart_seo.week_start", "mart_seo.visits"]},
+        )
+        assert not is_error
+        data = json.loads(result)
+        assert data["table"] == "mart_seo"
+        assert data["row_count"] == 2
+        assert len(data["rows"]) == 2
+        query_fn.assert_called_once_with("mart_seo", ["mart_seo.week_start", "mart_seo.visits"], 5)
+
+    def test_query_data_no_query_fn(self, mock_registry):
+        executor = ToolExecutor(mock_registry)  # No query_fn
+        result, is_error = executor.execute(
+            "query_data",
+            {"table": "t", "fields": ["t.a"]},
+        )
+        assert not is_error  # Returns error in JSON, not a tool error
+        data = json.loads(result)
+        assert "not available" in data["error"]
+
+    def test_query_data_caps_limit(self, mock_registry):
+        query_fn = MagicMock(return_value=[{"x": 1}] * 50)
+        executor = ToolExecutor(mock_registry, query_fn=query_fn)
+
+        executor.execute("query_data", {"table": "t", "fields": ["t.x"], "limit": 100})
+        # Should cap at 25
+        query_fn.assert_called_once_with("t", ["t.x"], 25)
+
+    def test_query_data_handles_exception(self, mock_registry):
+        query_fn = MagicMock(side_effect=Exception("connection timeout"))
+        executor = ToolExecutor(mock_registry, query_fn=query_fn)
+
+        result, is_error = executor.execute(
+            "query_data",
+            {"table": "t", "fields": ["t.a"]},
+        )
+        assert not is_error  # Error is in the JSON response, not a tool-level error
+        data = json.loads(result)
+        assert "connection timeout" in data["error"]
+
+    def test_query_data_default_limit(self, mock_registry):
+        query_fn = MagicMock(return_value=[])
+        executor = ToolExecutor(mock_registry, query_fn=query_fn)
+
+        executor.execute("query_data", {"table": "t", "fields": ["t.a"]})
+        query_fn.assert_called_once_with("t", ["t.a"], 5)

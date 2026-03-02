@@ -1,10 +1,11 @@
 """Tool definitions for Claude's function calling in dashboard generation.
 
-Defines 4 tools that Claude can use to explore the dbt data catalog
+Defines 5 tools that Claude can use to explore the dbt data catalog
 and create validated dashboard definitions:
 - list_models: Discover available dbt models
 - get_model_detail: Get column metadata for a specific model
 - search_models: Search models by keyword
+- query_data: Preview sample rows to validate assumptions
 - create_dashboard: Validate and build a DashboardDefinition
 """
 
@@ -81,6 +82,38 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                     },
                 },
                 "required": ["keyword"],
+            },
+        },
+        {
+            "name": "query_data",
+            "description": (
+                "Run a quick query against a table and return sample rows. "
+                "Use this to verify fields return sensible data before building "
+                "a dashboard. Especially useful for validating rates, checking "
+                "what values exist in categorical columns, and confirming date ranges."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "table": {
+                        "type": "string",
+                        "description": "Table/model name (e.g., 'mart_seo_weekly_funnel').",
+                    },
+                    "fields": {
+                        "type": "array",
+                        "description": (
+                            "Qualified field names to query "
+                            "(e.g., ['mart_seo.week_start', 'mart_seo.visits'])."
+                        ),
+                        "items": {"type": "string"},
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max rows to return (default 5, max 25).",
+                        "default": 5,
+                    },
+                },
+                "required": ["table", "fields"],
             },
         },
         {
@@ -523,8 +556,13 @@ def _build_dashboard_schema() -> dict[str, Any]:
 class ToolExecutor:
     """Executes tool calls against the ModelRegistry and validates dashboard definitions."""
 
-    def __init__(self, registry: ModelRegistry):
+    def __init__(
+        self,
+        registry: ModelRegistry,
+        query_fn: Any | None = None,
+    ):
         self._registry = registry
+        self._query_fn = query_fn  # Optional: (table, fields, limit) -> list[dict]
         self._last_valid_definition: DashboardDefinition | None = None
 
     @property
@@ -544,6 +582,8 @@ class ToolExecutor:
                 return self._get_model_detail(tool_input), False
             elif tool_name == "search_models":
                 return self._search_models(tool_input), False
+            elif tool_name == "query_data":
+                return self._query_data(tool_input), False
             elif tool_name == "create_dashboard":
                 return self._create_dashboard(tool_input)
             else:
@@ -598,6 +638,26 @@ class ToolExecutor:
             for m in models[:10]
         ]
         return json.dumps(result)
+
+    def _query_data(self, tool_input: dict[str, Any]) -> str:
+        """Run a sample query and return rows for data validation."""
+        if self._query_fn is None:
+            return json.dumps({
+                "error": "query_data not available (no query runner configured)."
+            })
+        table = tool_input["table"]
+        fields = tool_input["fields"]
+        limit = min(tool_input.get("limit", 5), 25)
+        try:
+            rows = self._query_fn(table, fields, limit)
+            return json.dumps({
+                "table": table,
+                "fields": fields,
+                "rows": rows[:limit],
+                "row_count": len(rows),
+            }, default=str)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
 
     def _create_dashboard(self, tool_input: dict[str, Any]) -> tuple[str, bool]:
         """Validate and create a DashboardDefinition from tool input.
