@@ -1055,6 +1055,28 @@ class TestSuggestChart:
         assert result["confidence"] > 0
         assert "alternatives" in result
 
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    def test_omni_dimension_types_still_recommend_line(self, _, mock_model_svc):
+        """When Omni returns type='dimension' for all fields, name heuristics kick in."""
+        from omni_dash.api.models import TopicDetail
+
+        mock_model_svc.get_topic.return_value = TopicDetail(
+            name="mart_ads",
+            label="Ads",
+            fields=[
+                {"name": "date", "type": "dimension"},
+                {"name": "spend", "type": "dimension"},
+                {"name": "clicks", "type": "dimension"},
+            ],
+        )
+
+        result = json.loads(mcp_server.suggest_chart(table="mart_ads"))
+        assert result["chart_type"] == "line", (
+            f"Expected line for date+spend+clicks (all dimension), got {result['chart_type']}"
+        )
+        assert result["confidence"] >= 0.85
+
     @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
     def test_handles_topic_error(self, _, mock_model_svc):
         from omni_dash.exceptions import OmniAPIError
@@ -2301,3 +2323,49 @@ class TestImportFallbackPayload:
         )
         assert dash_id == "fb-400"
         svc.import_dashboard.assert_called_once()
+
+
+class TestProfileDataTypeInference:
+    """Verify that profile_data correctly infers string vs date types."""
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    def test_string_with_hyphens_not_detected_as_date(self, _mock_mid, mock_model_svc, mock_query_runner):
+        from omni_dash.api.models import TopicDetail
+        from omni_dash.api.queries import QueryResult
+
+        mock_model_svc.get_topic.return_value = TopicDetail(
+            name="t", label="", fields=[{"name": "campaign_name"}],
+        )
+        mock_query_runner.run.return_value = QueryResult(
+            fields=["t.campaign_name"],
+            rows=[
+                {"t.campaign_name": "Search - Customer Support Automation"},
+                {"t.campaign_name": "Display - Rmkt"},
+            ],
+            row_count=2,
+        )
+
+        result = json.loads(mcp_server.profile_data("t"))
+        field_profile = result["fields"]["t.campaign_name"]
+        assert field_profile["inferred_type"] == "string", (
+            f"Expected string, got {field_profile['inferred_type']}"
+        )
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    def test_iso_date_detected_as_date(self, _mock_mid, mock_model_svc, mock_query_runner):
+        from omni_dash.api.models import TopicDetail
+        from omni_dash.api.queries import QueryResult
+
+        mock_model_svc.get_topic.return_value = TopicDetail(
+            name="t", label="", fields=[{"name": "week_start"}],
+        )
+        mock_query_runner.run.return_value = QueryResult(
+            fields=["t.week_start"],
+            rows=[{"t.week_start": "2026-02-27"}],
+            row_count=1,
+        )
+
+        result = json.loads(mcp_server.profile_data("t"))
+        field_profile = result["fields"]["t.week_start"]
+        assert field_profile["inferred_type"] == "date"
+
