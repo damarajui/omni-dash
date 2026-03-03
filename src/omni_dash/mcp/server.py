@@ -175,7 +175,7 @@ def _validate_tile_fields(
         available: dict[str, set[str]] = {}
         for tbl in tables:
             try:
-                detail = model_svc.get_topic(model_id, tbl)
+                detail = model_svc.get_topic_native(model_id, tbl)
                 qualified = set()
                 for f in detail.fields:
                     fname = f.get("name", "")
@@ -1320,7 +1320,7 @@ def suggest_chart(
 
         mid = model_id or _get_shared_model_id()
         model_svc = _get_model_svc()
-        detail = model_svc.get_topic(mid, table)
+        detail = model_svc.get_topic_native(mid, table)
 
         # Filter to requested fields if specified
         all_fields = detail.fields
@@ -1433,7 +1433,7 @@ def validate_dashboard(
                 tables = {t.query.table for t in parsed_tiles if t.query.table}
                 available_fields = {}
                 for tbl in tables:
-                    detail = model_svc.get_topic(mid, tbl)
+                    detail = model_svc.get_topic_native(mid, tbl)
                     available_fields[tbl] = {
                         f.get("name", "") for f in detail.fields
                     } | {
@@ -1487,7 +1487,7 @@ def profile_data(
 
         if not fields:
             try:
-                detail = model_svc.get_topic(mid, table)
+                detail = model_svc.get_topic_native(mid, table)
                 fields = [f.get("name", "") for f in detail.fields[:20]]
             except Exception:
                 # Fallback for non-topic views (e.g. Snowflake views not

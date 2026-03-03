@@ -997,7 +997,7 @@ class TestProfileDataFallback:
         from omni_dash.api.models import TopicDetail
         from omni_dash.api.queries import QueryResult
 
-        mock_model_svc.get_topic.return_value = TopicDetail(
+        mock_model_svc.get_topic_native.return_value = TopicDetail(
             name="mart_seo",
             label="SEO",
             fields=[{"name": "week_start"}, {"name": "visits"}],
@@ -1020,7 +1020,7 @@ class TestProfileDataFallback:
         from omni_dash.api.queries import QueryResult
 
         # get_topic raises — simulates non-topic Snowflake view
-        mock_model_svc.get_topic.side_effect = Exception("Topic not found")
+        mock_model_svc.get_topic_native.side_effect = Exception("Topic not found")
         # Both the discovery query and profiling query return the same result
         mock_query_runner.run.return_value = QueryResult(
             fields=["mart_seo.week_start", "mart_seo.visits"],
@@ -1043,7 +1043,7 @@ class TestProfileDataFallback:
     def test_profile_data_fallback_query_also_fails(self, _mock_mid, mock_model_svc, mock_query_runner):
         """When both get_topic and the fallback query fail, return a clear error."""
         # get_topic fails (non-topic view)
-        mock_model_svc.get_topic.side_effect = Exception("Topic not found")
+        mock_model_svc.get_topic_native.side_effect = Exception("Topic not found")
         # Fallback query also fails (e.g. view doesn't exist in Snowflake)
         mock_query_runner.run.side_effect = Exception("Query execution failed")
 
@@ -1063,7 +1063,7 @@ class TestSuggestChart:
     def test_date_and_measure_recommends_line(self, _, mock_model_svc):
         from omni_dash.api.models import TopicDetail
 
-        mock_model_svc.get_topic.return_value = TopicDetail(
+        mock_model_svc.get_topic_native.return_value = TopicDetail(
             name="mart_seo",
             label="SEO",
             fields=[
@@ -1082,7 +1082,7 @@ class TestSuggestChart:
     def test_category_and_measure_recommends_bar(self, _, mock_model_svc):
         from omni_dash.api.models import TopicDetail
 
-        mock_model_svc.get_topic.return_value = TopicDetail(
+        mock_model_svc.get_topic_native.return_value = TopicDetail(
             name="mart_channels",
             label="Channels",
             fields=[
@@ -1102,7 +1102,7 @@ class TestSuggestChart:
         """When Omni returns type='dimension' for all fields, name heuristics kick in."""
         from omni_dash.api.models import TopicDetail
 
-        mock_model_svc.get_topic.return_value = TopicDetail(
+        mock_model_svc.get_topic_native.return_value = TopicDetail(
             name="mart_ads",
             label="Ads",
             fields=[
@@ -1122,7 +1122,7 @@ class TestSuggestChart:
     def test_handles_topic_error(self, _, mock_model_svc):
         from omni_dash.exceptions import OmniAPIError
 
-        mock_model_svc.get_topic.side_effect = OmniAPIError(404, "Topic not found")
+        mock_model_svc.get_topic_native.side_effect = OmniAPIError(404, "Topic not found")
 
         result = json.loads(mcp_server.suggest_chart(table="nonexistent"))
         assert "error" in result
@@ -1139,7 +1139,7 @@ class TestValidateDashboard:
         # Mock get_topic so field existence checks pass
         from omni_dash.api.models import TopicDetail
 
-        mock_model_svc.get_topic.return_value = TopicDetail(
+        mock_model_svc.get_topic_native.return_value = TopicDetail(
             name="t",
             label="T",
             fields=[
@@ -1183,7 +1183,7 @@ class TestValidateDashboard:
     @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
     def test_sort_field_not_in_query_warns(self, _, mock_model_svc):
         """Sort field not in query fields should produce a warning."""
-        mock_model_svc.get_topic.side_effect = Exception("skip field check")
+        mock_model_svc.get_topic_native.side_effect = Exception("skip field check")
 
         tiles = [{
             "name": "Sorted Chart",
@@ -1341,7 +1341,7 @@ class TestProfileDataErrors:
         from omni_dash.api.models import TopicDetail
         from omni_dash.api.queries import QueryResult
 
-        mock_model_svc.get_topic.return_value = TopicDetail(
+        mock_model_svc.get_topic_native.return_value = TopicDetail(
             name="empty_table",
             label="Empty",
             fields=[{"name": "col1"}, {"name": "col2"}],
@@ -1532,7 +1532,7 @@ class TestSuggestChartFieldFiltering:
     def test_filters_to_requested_fields(self, _, mock_model_svc):
         from omni_dash.api.models import TopicDetail
 
-        mock_model_svc.get_topic.return_value = TopicDetail(
+        mock_model_svc.get_topic_native.return_value = TopicDetail(
             name="mart_seo",
             label="SEO",
             fields=[
@@ -1555,7 +1555,7 @@ class TestSuggestChartFieldFiltering:
     def test_qualified_field_names_filter(self, _, mock_model_svc):
         from omni_dash.api.models import TopicDetail
 
-        mock_model_svc.get_topic.return_value = TopicDetail(
+        mock_model_svc.get_topic_native.return_value = TopicDetail(
             name="mart_seo",
             label="SEO",
             fields=[
@@ -2051,7 +2051,7 @@ class TestAutoFieldValidation:
             topic.fields = [{"name": f} for f in fields]
             return topic
 
-        model_svc.get_topic.side_effect = get_topic
+        model_svc.get_topic_native.side_effect = get_topic
         return model_svc
 
     @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
@@ -2371,7 +2371,7 @@ class TestProfileDataTypeInference:
         from omni_dash.api.models import TopicDetail
         from omni_dash.api.queries import QueryResult
 
-        mock_model_svc.get_topic.return_value = TopicDetail(
+        mock_model_svc.get_topic_native.return_value = TopicDetail(
             name="t", label="", fields=[{"name": "campaign_name"}],
         )
         mock_query_runner.run.return_value = QueryResult(
@@ -2394,7 +2394,7 @@ class TestProfileDataTypeInference:
         from omni_dash.api.models import TopicDetail
         from omni_dash.api.queries import QueryResult
 
-        mock_model_svc.get_topic.return_value = TopicDetail(
+        mock_model_svc.get_topic_native.return_value = TopicDetail(
             name="t", label="", fields=[{"name": "week_start"}],
         )
         mock_query_runner.run.return_value = QueryResult(
