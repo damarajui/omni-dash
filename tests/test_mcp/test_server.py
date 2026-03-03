@@ -2619,3 +2619,84 @@ class TestUpdateTileNoVisConfig:
         ][0]["queryPresentation"]
         assert qp["name"] == "New Name"
 
+
+class TestUpdateTileQueryMutation:
+    """update_tile must persist query changes even when query/queryJson keys are missing."""
+
+    def test_sql_update_when_query_missing(self, mock_doc_svc):
+        """sql= on a tile with NO query key → query and queryJson created."""
+        import copy
+        from omni_dash.api.documents import ImportResponse
+
+        export = copy.deepcopy(_UPDATE_TILE_EXPORT)
+        # Remove the query entirely
+        del export["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]["query"]
+
+        mock_doc_svc.export_dashboard.return_value = export
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
+            document_id="new-1", name="D"
+        )
+        mock_doc_svc.delete_dashboard.return_value = None
+
+        with patch("omni_dash.mcp.server.get_settings") as mock_s:
+            mock_s.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+            result = json.loads(mcp_server.update_tile(
+                dashboard_id="dash-1",
+                tile_name="Revenue",
+                sql="SELECT 1",
+            ))
+
+        assert result["status"] == "updated"
+        import_call = mock_doc_svc.import_dashboard.call_args
+        imported_data = import_call[0][0]
+        qp = imported_data["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]
+        assert qp["isSql"] is True
+        # The query and queryJson should be created with the SQL
+        assert "query" in qp
+        q = qp["query"]
+        # queryJson key should exist and contain the SQL
+        q_json = q.get("queryJson", q)
+        assert q_json["userEditedSQL"] == "SELECT 1"
+
+    def test_fields_update_when_queryjson_missing(self, mock_doc_svc):
+        """fields= on a tile where query exists but queryJson is missing."""
+        import copy
+        from omni_dash.api.documents import ImportResponse
+
+        export = copy.deepcopy(_UPDATE_TILE_EXPORT)
+        # Flatten: query has fields directly, no queryJson wrapper
+        qp = export["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]
+        flat_query = {"table": "t", "fields": ["t.old_field"]}
+        qp["query"] = flat_query  # No queryJson key
+
+        mock_doc_svc.export_dashboard.return_value = export
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
+            document_id="new-1", name="D"
+        )
+        mock_doc_svc.delete_dashboard.return_value = None
+
+        with patch("omni_dash.mcp.server.get_settings") as mock_s:
+            mock_s.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+            result = json.loads(mcp_server.update_tile(
+                dashboard_id="dash-1",
+                tile_name="Revenue",
+                fields=["t.new_field_a", "t.new_field_b"],
+            ))
+
+        assert result["status"] == "updated"
+        import_call = mock_doc_svc.import_dashboard.call_args
+        imported_data = import_call[0][0]
+        qp = imported_data["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]
+        # Fields should be updated in-place
+        q = qp["query"]
+        q_json = q.get("queryJson", q)
+        assert q_json["fields"] == ["t.new_field_a", "t.new_field_b"]
+
