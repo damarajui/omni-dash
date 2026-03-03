@@ -565,7 +565,7 @@ class ModelService:
             return None
         ts = self._cache_ts_map.get(key, 0.0)
         if ts and time.monotonic() - ts > self._cache_ttl:
-            del self._cache[key]
+            self._cache.pop(key, None)
             self._cache_ts_map.pop(key, None)
             return None
         return entry
