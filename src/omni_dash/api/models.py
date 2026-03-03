@@ -71,7 +71,8 @@ class ModelService:
         self._client = client
         self._cache_ttl = cache_ttl
         self._cache: dict[str, Any] = {}
-        self._cache_ts: float = 0.0
+        self._cache_ts: float = 0.0  # Kept for backward compat
+        self._cache_ts_map: dict[str, float] = {}  # Per-key TTL
 
     def list_models(self) -> list[OmniModel]:
         """List all models in the organization.
@@ -558,18 +559,21 @@ class ModelService:
     # -- Cache helpers --
 
     def _get_cache(self, key: str) -> dict | None:
-        """Get a value from the in-memory cache (with TTL check)."""
-        if self._cache_ts and time.monotonic() - self._cache_ts > self._cache_ttl:
-            self._cache.clear()
-            self._cache_ts = 0.0
+        """Get a value from the in-memory cache (with per-key TTL check)."""
+        entry = self._cache.get(key)
+        if entry is None:
             return None
-        return self._cache.get(key)
+        ts = self._cache_ts_map.get(key, 0.0)
+        if ts and time.monotonic() - ts > self._cache_ttl:
+            del self._cache[key]
+            self._cache_ts_map.pop(key, None)
+            return None
+        return entry
 
     def _set_cache(self, key: str, value: dict) -> None:
         """Set a value in the in-memory cache."""
         self._cache[key] = value
-        if not self._cache_ts:
-            self._cache_ts = time.monotonic()
+        self._cache_ts_map[key] = time.monotonic()
 
     def save_cache(self, path: Path | None = None) -> None:
         """Persist cache to disk."""
@@ -591,14 +595,15 @@ class ModelService:
             ts = data.get("timestamp", 0)
             if time.time() - ts < self._cache_ttl:
                 self._cache = data.get("entries", {})
-                self._cache_ts = time.monotonic()
+                now = time.monotonic()
+                self._cache_ts_map = {k: now for k in self._cache}
         except (json.JSONDecodeError, KeyError):
             logger.warning("Corrupt cache file, ignoring: %s", path)
 
     def clear_cache(self, path: Path | None = None) -> None:
         """Clear in-memory and on-disk cache."""
         self._cache.clear()
-        self._cache_ts = 0.0
+        self._cache_ts_map.clear()
         path = path or Path(CACHE_FILE)
         if path.exists():
             path.unlink()

@@ -3371,3 +3371,83 @@ class TestSuggestChartFieldMatchingBaseView:
 
         assert result.get("fields_analyzed") == 2
 
+
+class TestCreateDashboardFilterCarrythrough:
+    """create_dashboard should carry filterConfig through vis config patching."""
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch.object(mcp_server, "_get_doc_svc")
+    @patch("omni_dash.mcp.server.get_settings")
+    def test_filters_in_reimported_export(self, mock_settings, mock_get_doc_svc, _):
+        from omni_dash.api.documents import DashboardResponse, ImportResponse
+
+        mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+        svc = MagicMock()
+        svc.create_dashboard.return_value = DashboardResponse(
+            document_id="skel-1", name="Test"
+        )
+        # Skeleton export has no filters (Omni ignores them on create)
+        svc.export_dashboard.return_value = {
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "Chart",
+                                "visConfig": {"visType": None, "chartType": "line"},
+                            }
+                        }
+                    ],
+                    "filterConfig": {},
+                    "filterOrder": [],
+                }
+            },
+            "document": {"sharedModelId": "model-123"},
+            "workbookModel": {},
+            "exportVersion": "0.1",
+        }
+        svc.import_dashboard.return_value = ImportResponse(
+            document_id="final-1", name="Test"
+        )
+        mock_get_doc_svc.return_value = svc
+
+        tiles = [{
+            "name": "Chart",
+            "chart_type": "line",
+            "query": {"table": "t", "fields": ["t.f"]},
+            "vis_config": {"x_axis": "t.f"},
+        }]
+        # Pass dashboard-level filters
+        filters = [{"field": "t.date", "filter_type": "date", "label": "Date Filter"}]
+
+        result = json.loads(mcp_server.create_dashboard(
+            name="Test", tiles=tiles, filters=filters,
+        ))
+        assert result["status"] == "created"
+
+        # Check the reimport payload contains filterConfig
+        import_call = svc.import_dashboard.call_args
+        imported = import_call[0][0]
+        qpc = imported["dashboard"]["queryPresentationCollection"]
+        assert qpc.get("filterConfig"), "filterConfig should be non-empty"
+        assert qpc.get("filterOrder"), "filterOrder should be non-empty"
+
+
+class TestPerKeyCacheTTL:
+    """Cache should evict keys independently, not all at once."""
+
+    def test_fresh_key_survives_when_old_key_expires(self):
+        import time
+        from omni_dash.api.models import ModelService
+        svc = ModelService(MagicMock(), cache_ttl=10)
+
+        # Set old key, backdate its timestamp
+        svc._set_cache("old", {"v": 1})
+        svc._cache_ts_map["old"] = time.monotonic() - 20  # 20s ago, past TTL
+
+        # Set fresh key
+        svc._set_cache("fresh", {"v": 2})
+
+        # Old key should be expired, fresh key should survive
+        assert svc._get_cache("old") is None
+        assert svc._get_cache("fresh") == {"v": 2}

@@ -419,6 +419,18 @@ def _create_with_vis_configs(
                     if key in q_overrides and not q_json.get(key):
                         q_json[key] = q_overrides[key]
 
+    # Inject dashboard-level filters from original payload into the export.
+    # Omni's create endpoint ignores filterConfig, so we carry it through.
+    orig_fc = payload.get("filterConfig", {})
+    orig_fo = payload.get("filterOrder", [])
+    if orig_fc:
+        qpc.setdefault("filterConfig", {}).update(orig_fc)
+    if orig_fo:
+        existing_fo = qpc.get("filterOrder", [])
+        qpc["filterOrder"] = existing_fo + [
+            f for f in orig_fo if f not in existing_fo
+        ]
+
     reimport_model_id = _resolve_model_id_from_export(patched)
     reimport_result = doc_svc.import_dashboard(
         patched,
@@ -1311,8 +1323,8 @@ def query_data(
         limit = min(limit, 1000)
 
         builder = QueryBuilder(resolved_model_id, resolved_table)
-        builder._fields = fields  # Already qualified
-        builder._limit = limit
+        builder.fields(fields)
+        builder.limit(limit)
         if sorts:
             # Normalize sort keys to snake_case (Omni API format)
             normalized = []
