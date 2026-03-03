@@ -199,6 +199,14 @@ def _validate_tile_fields(
                     fname = f.get("name", "")
                     qualified.add(fname)
                     qualified.add(f"{tbl}.{fname}")
+                    # Also accept base_view-qualified names (PR #41 changed
+                    # field qualification to use base_view instead of topic name)
+                    qname = f.get("qualified_name", "")
+                    if qname:
+                        qualified.add(qname)
+                if detail.base_view and detail.base_view != tbl:
+                    # Also accept table reference via base_view name
+                    available[detail.base_view] = qualified
                 available[tbl] = qualified
             except Exception:
                 pass  # Table not found — will surface as field errors
@@ -476,18 +484,23 @@ def get_dashboard(dashboard_id: str) -> str:
     """
     try:
         dash = _get_doc_svc().get_dashboard(dashboard_id)
-        return json.dumps(
-            {
-                "document_id": dash.document_id,
-                "name": dash.name,
-                "model_id": dash.model_id,
-                "tile_count": len(dash.query_presentations),
-                "query_presentations": dash.query_presentations[:5],  # preview
-                "created_at": dash.created_at,
-                "updated_at": dash.updated_at,
-            },
-            indent=2,
-        )
+        total_tiles = len(dash.query_presentations)
+        preview_limit = 10
+        result_data: dict[str, Any] = {
+            "document_id": dash.document_id,
+            "name": dash.name,
+            "model_id": dash.model_id,
+            "tile_count": total_tiles,
+            "query_presentations": dash.query_presentations[:preview_limit],
+            "created_at": dash.created_at,
+            "updated_at": dash.updated_at,
+        }
+        if total_tiles > preview_limit:
+            result_data["note"] = (
+                f"Showing first {preview_limit} of {total_tiles} tiles. "
+                "Use export_dashboard to see all tiles."
+            )
+        return json.dumps(result_data, indent=2)
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
@@ -529,6 +542,9 @@ def create_dashboard(
         JSON with created dashboard URL and ID.
     """
     try:
+        if not tiles:
+            return json.dumps({"error": "tiles array cannot be empty."})
+
         resolved_model_id = model_id or _get_shared_model_id()
         if not resolved_model_id:
             return json.dumps({
@@ -938,20 +954,63 @@ def add_tiles_to_dashboard(
         )
         patched_memberships.extend(temp_memberships)
 
-        # 7. Merge layout items with offset
+        # 7. Merge layout items with offset AND update ephemeral field.
+        # The `ephemeral` field maps layout indices to tile miniUuids:
+        #   "1:ecYPPwXE,2:0fhTwpih,..."
+        # Without updating it, Omni silently ignores new tiles on import.
         temp_layout = (
             temp_dash.get("metadata", {}).get("layouts", {}).get("lg", [])
         )
         patched_layout = (
             patched_dash.get("metadata", {}).get("layouts", {}).get("lg", [])
         )
+
+        # Get ephemeral entries from temp export for new tiles
+        temp_ephemeral = temp_dash.get("ephemeral", "")
+        temp_eph_parts = [
+            p.strip() for p in temp_ephemeral.split(",") if p.strip()
+        ]
+        # Build mapping of temp layout index -> miniUuid
+        temp_eph_map: dict[str, str] = {}
+        for part in temp_eph_parts:
+            if ":" in part:
+                idx, mini = part.split(":", 1)
+                temp_eph_map[idx] = mini
+
+        # Also get miniUuids directly from temp memberships as fallback
+        temp_mini_uuids = []
+        for tm in temp_memberships:
+            qp = tm.get("queryPresentation", {})
+            mini = qp.get("miniUuid", "")
+            if mini:
+                temp_mini_uuids.append(mini)
+
+        # Build new ephemeral entries for the appended tiles
+        new_eph_parts: list[str] = []
         base_idx = previous_count
-        for item in temp_layout:
+        for idx_offset, item in enumerate(temp_layout):
+            new_i = str(base_idx + 1)
+            old_i = str(item.get("i", idx_offset + 1))
+            # Get miniUuid from ephemeral map, or from membership list
+            mini = temp_eph_map.get(old_i, "")
+            if not mini and idx_offset < len(temp_mini_uuids):
+                mini = temp_mini_uuids[idx_offset]
+            if mini:
+                new_eph_parts.append(f"{new_i}:{mini}")
+
             new_item = dict(item)
-            new_item["i"] = str(base_idx + 1)
+            new_item["i"] = new_i
             new_item["y"] = new_item.get("y", 0) + max_y
             patched_layout.append(new_item)
             base_idx += 1
+
+        # Append new ephemeral entries to original
+        orig_ephemeral = patched_dash.get("ephemeral", "")
+        if new_eph_parts:
+            sep = "," if orig_ephemeral else ""
+            patched_dash["ephemeral"] = (
+                orig_ephemeral + sep + ",".join(new_eph_parts)
+            )
 
         # 8. Reimport merged export
         reimport_model_id = _resolve_model_id_from_export(patched)
@@ -1056,19 +1115,19 @@ def update_tile(
         if sql is not None:
             target_qp["isSql"] = True
             q = target_qp.setdefault("query", {})
-            q_json = q.setdefault("queryJson", q)
+            q_json = q.setdefault("queryJson", {})
             q_json["userEditedSQL"] = sql
             modified = True
 
         if fields is not None:
             q = target_qp.setdefault("query", {})
-            q_json = q.setdefault("queryJson", q)
+            q_json = q.setdefault("queryJson", {})
             q_json["fields"] = fields
             modified = True
 
         if filters is not None:
             q = target_qp.setdefault("query", {})
-            q_json = q.setdefault("queryJson", q)
+            q_json = q.setdefault("queryJson", {})
             q_json["filters"] = filters
             modified = True
 
@@ -1340,6 +1399,8 @@ def suggest_chart(
         from omni_dash.ai.chart_recommender import classify_field, recommend_chart
 
         mid = model_id or _get_shared_model_id()
+        if not mid:
+            return json.dumps({"error": "No model_id found. Set OMNI_SHARED_MODEL_ID."})
         model_svc = _get_model_svc()
         detail = model_svc.get_topic_native(mid, table)
 
@@ -1350,6 +1411,7 @@ def suggest_chart(
             all_fields = [
                 f for f in all_fields
                 if f.get("name", "") in field_set
+                or f.get("qualified_name", "") in field_set
                 or f"{table}.{f.get('name', '')}" in field_set
             ]
 
@@ -1503,16 +1565,22 @@ def profile_data(
     """
     try:
         mid = model_id or _get_shared_model_id()
+        if not mid:
+            return json.dumps({"error": "No model_id found. Set OMNI_SHARED_MODEL_ID."})
         model_svc = _get_model_svc()
         query_runner = _get_query_runner()
 
         # Resolve topic names with spaces to base_view names
         resolved_table = _resolve_table_name(table, mid)
 
+        auto_discovered = False
         if not fields:
             try:
                 detail = model_svc.get_topic_native(mid, table)
+                all_field_count = len(detail.fields)
                 fields = [f.get("name", "") for f in detail.fields[:20]]
+                if all_field_count > 20:
+                    auto_discovered = True
             except Exception:
                 # Fallback for non-topic views (e.g. Snowflake views not
                 # registered as Omni topics): discover fields via a small
@@ -1581,15 +1649,17 @@ def profile_data(
 
             profiles[field_name] = profile
 
-        return json.dumps(
-            {
-                "table": table,
-                "row_count": result.row_count,
-                "fields": profiles,
-            },
-            indent=2,
-            default=str,
-        )
+        response: dict[str, Any] = {
+            "table": table,
+            "row_count": result.row_count,
+            "fields": profiles,
+        }
+        if auto_discovered:
+            response["note"] = (
+                f"Profiled first 20 of {all_field_count} fields. "
+                "Pass specific field names to profile others."
+            )
+        return json.dumps(response, indent=2, default=str)
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
@@ -1621,6 +1691,8 @@ def generate_dashboard(
         from omni_dash.ai.service import DashboardAI
 
         mid = model_id or _get_shared_model_id()
+        if not mid:
+            return json.dumps({"error": "No model_id found. Set OMNI_SHARED_MODEL_ID."})
         model_svc = _get_model_svc()
 
         adapter = OmniModelAdapter(model_svc, mid)
