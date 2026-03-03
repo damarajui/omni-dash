@@ -378,6 +378,27 @@ class TestQueryData:
         assert "error" in result
         assert "fields" in result["error"]
 
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch.object(mcp_server, "_get_query_runner")
+    @patch.object(mcp_server, "_resolve_table_name", return_value="mart_google_ads_performance")
+    def test_resolves_topic_with_spaces(self, mock_resolve, mock_get_runner, _):
+        from omni_dash.api.queries import QueryResult
+
+        runner = MagicMock()
+        runner.run.return_value = QueryResult(
+            fields=["mart_google_ads_performance.spend"],
+            rows=[{"mart_google_ads_performance.spend": 100}],
+            row_count=1,
+        )
+        mock_get_runner.return_value = runner
+
+        result = json.loads(mcp_server.query_data(
+            table="Google Ads Performance",
+            fields=["mart_google_ads_performance.spend"],
+        ))
+        assert result["row_count"] == 1
+        mock_resolve.assert_called_once_with("Google Ads Performance", "model-123")
+
 
 # ---------------------------------------------------------------------------
 # list_folders
