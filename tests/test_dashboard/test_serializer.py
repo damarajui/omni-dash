@@ -1745,6 +1745,18 @@ def test_color_by_takes_precedence_over_color():
     assert vc.color_by == "t.source"
 
 
+def test_markdown_alias_maps_to_markdown_template():
+    """Passing 'markdown' in vis_config dict should map to markdown_template."""
+    vc = TileVisConfig(**{"markdown": "# Hello World"})
+    assert vc.markdown_template == "# Hello World"
+
+
+def test_markdown_template_takes_precedence():
+    """Explicit markdown_template should take precedence over markdown alias."""
+    vc = TileVisConfig(**{"markdown": "ignored", "markdown_template": "# Real"})
+    assert vc.markdown_template == "# Real"
+
+
 # ---------------------------------------------------------------------------
 # Date filter normalization
 # ---------------------------------------------------------------------------
