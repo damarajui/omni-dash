@@ -164,7 +164,7 @@ class TestGetTopic:
         measures = [f for f in result.fields if f["type"] == "measure"]
         assert len(dims) == 2
         assert len(measures) == 1
-        assert measures[0]["qualified_name"] == "my_topic.total"
+        assert measures[0]["qualified_name"] == "my_view.total"
 
     def test_hidden_fields_excluded(self, service, mock_client):
         mock_client.get.return_value = {
@@ -401,7 +401,7 @@ class TestGetTopicNative:
         dim = next(f for f in detail.fields if f["name"] == "order_id")
         assert dim["type"] == "dimension"
         assert dim["data_type"] == "STRING"
-        assert dim["qualified_name"] == "orders.order_id"
+        assert dim["qualified_name"] == "fact_orders.order_id"
         assert dim["description"] == "Unique order identifier"
         assert dim["format"] == "ID"
         assert dim["sql"] == '"ORDER_ID"'

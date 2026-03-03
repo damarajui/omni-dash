@@ -129,6 +129,24 @@ def _get_shared_model_id() -> str:
     return ""
 
 
+def _resolve_table_name(table: str, model_id: str) -> str:
+    """Resolve a topic name to its base_view name for querying.
+
+    Omni's query API requires underscored names (no spaces). If the table
+    name contains spaces (e.g., "Google Ads Performance"), look up the
+    topic to find its base_view.
+    """
+    if " " not in table:
+        return table
+    try:
+        detail = _get_model_svc().get_topic_native(model_id, table)
+        if detail.base_view:
+            return detail.base_view
+    except Exception:
+        pass
+    return table
+
+
 def _resolve_model_id_from_export(
     export_data: dict[str, Any], user_model_id: str = ""
 ) -> str:
@@ -1228,9 +1246,12 @@ def query_data(
         if not resolved_model_id:
             return json.dumps({"error": "No model_id found. Set OMNI_SHARED_MODEL_ID."})
 
+        # Resolve topic names with spaces to base_view names
+        resolved_table = _resolve_table_name(table, resolved_model_id)
+
         limit = min(limit, 1000)
 
-        builder = QueryBuilder(resolved_model_id, table)
+        builder = QueryBuilder(resolved_model_id, resolved_table)
         builder._fields = fields  # Already qualified
         builder._limit = limit
         if sorts:
@@ -1485,6 +1506,9 @@ def profile_data(
         model_svc = _get_model_svc()
         query_runner = _get_query_runner()
 
+        # Resolve topic names with spaces to base_view names
+        resolved_table = _resolve_table_name(table, mid)
+
         if not fields:
             try:
                 detail = model_svc.get_topic_native(mid, table)
@@ -1494,8 +1518,8 @@ def profile_data(
                 # registered as Omni topics): discover fields via a small
                 # query and extract column names from the result.
                 try:
-                    builder = QueryBuilder(table=table, model_id=mid)
-                    builder._fields = [f"{table}.*"]
+                    builder = QueryBuilder(table=resolved_table, model_id=mid)
+                    builder._fields = [f"{resolved_table}.*"]
                     builder._limit = 1
                     sample_result = query_runner.run(builder.build())
                     if sample_result.fields:
@@ -1512,9 +1536,9 @@ def profile_data(
                          "The table may not exist or is not queryable."}
                     )
 
-        qualified = [f if "." in f else f"{table}.{f}" for f in fields]
+        qualified = [f if "." in f else f"{resolved_table}.{f}" for f in fields]
 
-        builder = QueryBuilder(table=table, model_id=mid)
+        builder = QueryBuilder(table=resolved_table, model_id=mid)
         builder._fields = qualified
         builder._limit = min(sample_size, 1000)
         result = query_runner.run(builder.build())

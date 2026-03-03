@@ -238,6 +238,10 @@ class ModelService:
             views_info: list[dict[str, Any]] = []
             all_fields: list[dict[str, Any]] = []
 
+            # Use base_view for field qualification — topic names can have
+            # spaces which Omni's query API rejects.
+            field_prefix = base_view or topic_name
+
             for view in views_raw:
                 view_name = view.get("name", "")
                 dims = view.get("dimensions", [])
@@ -253,7 +257,7 @@ class ModelService:
                     field_name = dim.get("field_name", "")
                     all_fields.append({
                         "name": field_name,
-                        "qualified_name": f"{topic_name}.{field_name}",
+                        "qualified_name": f"{field_prefix}.{field_name}",
                         "view": view_name,
                         "type": "dimension",
                         "data_type": dim.get("data_type", ""),
@@ -267,7 +271,7 @@ class ModelService:
                     field_name = measure.get("field_name", "")
                     all_fields.append({
                         "name": field_name,
-                        "qualified_name": f"{topic_name}.{field_name}",
+                        "qualified_name": f"{field_prefix}.{field_name}",
                         "view": view_name,
                         "type": "measure",
                         "data_type": measure.get("data_type", ""),
@@ -325,6 +329,10 @@ class ModelService:
         views_info: list[dict[str, Any]] = []
         all_fields: list[dict[str, Any]] = []
 
+        # Use base_view for field qualification — topic names can have
+        # spaces which Omni's query API rejects.
+        field_prefix = base_view or topic_name
+
         for view_name in view_names:
             view_data = self._find_view_file(files, view_name)
             if not view_data:
@@ -343,7 +351,7 @@ class ModelService:
                     continue
                 field_info: dict[str, Any] = {
                     "name": dim_name,
-                    "qualified_name": f"{topic_name}.{dim_name}",
+                    "qualified_name": f"{field_prefix}.{dim_name}",
                     "view": view_name,
                     "type": "dimension",
                 }
@@ -358,7 +366,7 @@ class ModelService:
                     continue
                 field_info = {
                     "name": measure_name,
-                    "qualified_name": f"{topic_name}.{measure_name}",
+                    "qualified_name": f"{field_prefix}.{measure_name}",
                     "view": view_name,
                     "type": "measure",
                 }
