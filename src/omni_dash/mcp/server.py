@@ -393,8 +393,8 @@ def _create_with_vis_configs(
     # Delete the skeleton (best-effort)
     try:
         doc_svc.delete_dashboard(skeleton_id)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to delete skeleton %s: %s", skeleton_id, e)
 
     return reimport_result.document_id, reimport_result.name
 
@@ -927,8 +927,8 @@ def add_tiles_to_dashboard(
         for del_id in (dashboard_id, temp_id):
             try:
                 doc_svc.delete_dashboard(del_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to delete %s during add_tiles cleanup: %s", del_id, e)
 
         return json.dumps({
             "status": "updated",
@@ -1014,20 +1014,20 @@ def update_tile(
 
         if sql is not None:
             target_qp["isSql"] = True
-            q = target_qp.get("query", {})
-            q_json = q.get("queryJson", q)
+            q = target_qp.setdefault("query", {})
+            q_json = q.setdefault("queryJson", q)
             q_json["userEditedSQL"] = sql
             modified = True
 
         if fields is not None:
-            q = target_qp.get("query", {})
-            q_json = q.get("queryJson", q)
+            q = target_qp.setdefault("query", {})
+            q_json = q.setdefault("queryJson", q)
             q_json["fields"] = fields
             modified = True
 
         if filters is not None:
-            q = target_qp.get("query", {})
-            q_json = q.get("queryJson", q)
+            q = target_qp.setdefault("query", {})
+            q_json = q.setdefault("queryJson", q)
             q_json["filters"] = filters
             modified = True
 
@@ -1071,8 +1071,8 @@ def update_tile(
         # 5. Delete original
         try:
             doc_svc.delete_dashboard(dashboard_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to delete original %s after update_tile: %s", dashboard_id, e)
 
         return json.dumps({
             "status": "updated",
@@ -1571,6 +1571,11 @@ def generate_dashboard(
             definition.folder_id = folder_id
 
         payload = DashboardSerializer.to_omni_create_payload(definition)
+        logger.info(
+            "generate_dashboard: %d tiles, model_id=%s",
+            len(payload.get("queryPresentations", [])),
+            payload.get("modelId", "MISSING"),
+        )
         dash_id, dash_name = _create_with_vis_configs(
             payload, name=definition.name, folder_id=folder_id or None,
         )
