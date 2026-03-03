@@ -23,11 +23,13 @@ def _reset_globals():
     mcp_server._doc_svc = None
     mcp_server._model_svc = None
     mcp_server._query_runner = None
+    mcp_server._shared_model_id = ""
     yield
     mcp_server._client = None
     mcp_server._doc_svc = None
     mcp_server._model_svc = None
     mcp_server._query_runner = None
+    mcp_server._shared_model_id = ""
 
 
 @pytest.fixture
@@ -1046,41 +1048,32 @@ class TestProfileDataFallback:
         assert "error" not in result
 
     @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
-    def test_profile_data_non_topic_fallback(self, _mock_mid, mock_model_svc, mock_query_runner):
+    def test_profile_data_non_topic_returns_helpful_error(self, _mock_mid, mock_model_svc, mock_query_runner):
+        """When topic introspection fails, return a clear error with guidance."""
+        mock_model_svc.get_topic_native.side_effect = Exception("Topic not found")
+
+        result = json.loads(mcp_server.profile_data("unknown_view"))
+        assert "error" in result
+        assert "unknown_view" in result["error"]
+        assert "Pass explicit field names" in result["error"]
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    def test_profile_data_with_explicit_fields_bypasses_discovery(self, _mock_mid, mock_model_svc, mock_query_runner):
+        """Passing explicit fields skips topic introspection entirely."""
         from omni_dash.api.queries import QueryResult
 
-        # get_topic raises — simulates non-topic Snowflake view
-        mock_model_svc.get_topic_native.side_effect = Exception("Topic not found")
-        # Both the discovery query and profiling query return the same result
         mock_query_runner.run.return_value = QueryResult(
-            fields=["mart_seo.week_start", "mart_seo.visits"],
-            rows=[
-                {"mart_seo.week_start": "2026-01-01", "mart_seo.visits": 100},
-            ],
+            fields=["mart_seo.visits"],
+            rows=[{"mart_seo.visits": 100}],
             row_count=1,
         )
 
-        result = json.loads(mcp_server.profile_data("mart_seo"))
-        # Fallback should discover fields and profile them successfully
+        result = json.loads(mcp_server.profile_data(
+            "mart_seo", fields=["mart_seo.visits"],
+        ))
         assert "error" not in result
-        assert "fields" in result
-        assert "mart_seo.week_start" in result["fields"]
         assert "mart_seo.visits" in result["fields"]
-        # query_runner.run called twice: once for discovery, once for profiling
-        assert mock_query_runner.run.call_count == 2
-
-    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
-    def test_profile_data_fallback_query_also_fails(self, _mock_mid, mock_model_svc, mock_query_runner):
-        """When both get_topic and the fallback query fail, return a clear error."""
-        # get_topic fails (non-topic view)
-        mock_model_svc.get_topic_native.side_effect = Exception("Topic not found")
-        # Fallback query also fails (e.g. view doesn't exist in Snowflake)
-        mock_query_runner.run.side_effect = Exception("Query execution failed")
-
-        result = json.loads(mcp_server.profile_data("nonexistent_view"))
-        assert "error" in result
-        assert "nonexistent_view" in result["error"]
-        assert "not queryable" in result["error"]
+        mock_model_svc.get_topic_native.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -3870,3 +3863,115 @@ class TestFilterOverrideAlwaysApplied:
         ][0]["queryPresentation"]
         actual_filters = qp["query"]["queryJson"]["filters"]
         assert actual_filters == user_filters
+
+
+class TestSharedModelIdCache:
+    """_get_shared_model_id should cache its result."""
+
+    def test_caches_env_var_result(self):
+        """Once resolved from env var, should not re-read settings."""
+        with patch.object(mcp_server, "get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(omni_shared_model_id="m1")
+
+            # First call
+            result1 = mcp_server._get_shared_model_id()
+            assert result1 == "m1"
+
+            # Second call should use cache (settings not re-read)
+            mock_settings.reset_mock()
+            result2 = mcp_server._get_shared_model_id()
+            assert result2 == "m1"
+            mock_settings.assert_not_called()
+
+    def test_caches_discovered_model_id(self, mock_model_svc):
+        """Once discovered via API, should not call list_models again."""
+        with patch.object(mcp_server, "get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(omni_shared_model_id="")
+            mock_model_svc.list_models.return_value = [
+                MagicMock(id="found-id", model_kind="shared"),
+            ]
+
+            result1 = mcp_server._get_shared_model_id()
+            assert result1 == "found-id"
+
+            # Second call should use cache
+            mock_model_svc.list_models.reset_mock()
+            result2 = mcp_server._get_shared_model_id()
+            assert result2 == "found-id"
+            mock_model_svc.list_models.assert_not_called()
+
+
+class TestMoveDashboardDeleteCatch:
+    """move_dashboard should catch all exceptions on delete, not just OmniDashError."""
+
+    def test_catches_runtime_error_on_delete(self, mock_doc_svc):
+        """Non-OmniDashError exceptions should still produce partial status."""
+        mock_doc_svc.export_dashboard.return_value = {
+            "document": {"name": "Test", "modelId": "m1"},
+            "dashboard": {},
+            "workbookModel": {"base_model_id": "m1"},
+        }
+        mock_doc_svc.import_dashboard.return_value = MagicMock(
+            document_id="new-id", name="Test"
+        )
+        mock_doc_svc.delete_dashboard.side_effect = RuntimeError("connection reset")
+
+        result = json.loads(mcp_server.move_dashboard("old-id", "folder-1"))
+
+        assert result["status"] == "partial"
+        assert "new_dashboard_id" in result
+        assert result["new_dashboard_id"] == "new-id"
+
+
+class TestPayloadNotMutated:
+    """_create_with_vis_configs should not mutate the caller's payload."""
+
+    def test_vis_config_preserved_in_caller_payload(self, mock_doc_svc):
+        """After _create_with_vis_configs, original payload should still have visConfig."""
+        mock_doc_svc.create_dashboard.return_value = MagicMock(document_id="skel-1")
+        mock_doc_svc.export_dashboard.return_value = {
+            "document": {"name": "Test", "modelId": "m1"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "Tile1",
+                                "visConfig": {},
+                                "query": {"queryJson": {}},
+                            }
+                        }
+                    ]
+                },
+                "metadata": {"layouts": {"lg": []}},
+            },
+            "workbookModel": {"base_model_id": "m1"},
+        }
+        mock_doc_svc.import_dashboard.return_value = MagicMock(
+            document_id="final-id", name="Test"
+        )
+
+        # Keep a reference to the original vis config
+        original_vc = {"visType": "basic", "chartType": "line"}
+        payload = {
+            "queryPresentations": [
+                {
+                    "name": "Tile1",
+                    "query": {"table": "t", "fields": ["t.a"]},
+                    "visConfig": dict(original_vc),  # copy
+                }
+            ],
+            "modelId": "m1",
+        }
+        # Store a reference to the ORIGINAL qp list before the call
+        original_qps = payload["queryPresentations"]
+
+        mcp_server._create_with_vis_configs(
+            payload, name="Test", folder_id=None,
+        )
+
+        # The payload's queryPresentations should now be a different list
+        # (deep-copied), so the original list should still have visConfig
+        assert "visConfig" in original_qps[0], (
+            "Original payload's visConfig was mutated by _create_with_vis_configs"
+        )
