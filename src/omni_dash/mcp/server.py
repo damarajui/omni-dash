@@ -442,6 +442,8 @@ def list_dashboards(folder_id: str | None = None) -> str:
         )
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
@@ -469,6 +471,8 @@ def get_dashboard(dashboard_id: str) -> str:
             indent=2,
         )
     except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+    except Exception as e:
         return json.dumps({"error": str(e)})
 
 
@@ -571,6 +575,8 @@ def delete_dashboard(dashboard_id: str) -> str:
         return json.dumps({"status": "deleted", "dashboard_id": dashboard_id})
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
@@ -587,6 +593,8 @@ def export_dashboard(dashboard_id: str) -> str:
         export = _get_doc_svc().export_dashboard(dashboard_id)
         return json.dumps(export, indent=2)
     except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+    except Exception as e:
         return json.dumps({"error": str(e)})
 
 
@@ -668,6 +676,8 @@ def clone_dashboard(
         })
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
@@ -720,6 +730,8 @@ def move_dashboard(
             "url": _build_dashboard_url(result.document_id),
         })
     except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+    except Exception as e:
         return json.dumps({"error": str(e)})
 
 
@@ -1130,6 +1142,8 @@ def list_topics(model_id: str = "") -> str:
         )
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
@@ -1166,6 +1180,8 @@ def get_topic_fields(topic_name: str, model_id: str = "") -> str:
         )
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
@@ -1194,6 +1210,11 @@ def query_data(
         JSON with fields and data rows.
     """
     try:
+        if not table:
+            return json.dumps({"error": "table is required"})
+        if not fields:
+            return json.dumps({"error": "fields list cannot be empty"})
+
         resolved_model_id = model_id or _get_shared_model_id()
         if not resolved_model_id:
             return json.dumps({"error": "No model_id found. Set OMNI_SHARED_MODEL_ID."})
@@ -1218,10 +1239,11 @@ def query_data(
         spec = builder.build()
         result = _get_query_runner().run(spec)
 
+        rows = result.rows or []
         return json.dumps(
             {
                 "fields": result.fields,
-                "rows": result.rows[:limit],
+                "rows": rows[:limit],
                 "row_count": result.row_count,
                 "truncated": result.truncated,
             },
@@ -1229,6 +1251,8 @@ def query_data(
             default=str,
         )
     except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+    except Exception as e:
         return json.dumps({"error": str(e)})
 
 
@@ -1253,6 +1277,8 @@ def list_folders() -> str:
             indent=2,
         )
     except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+    except Exception as e:
         return json.dumps({"error": str(e)})
 
 
@@ -1312,6 +1338,8 @@ def suggest_chart(
             indent=2,
         )
     except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+    except Exception as e:
         return json.dumps({"error": str(e)})
 
 
@@ -1416,6 +1444,8 @@ def validate_dashboard(
             indent=2,
         )
     except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+    except Exception as e:
         return json.dumps({"error": str(e)})
 
 
@@ -1528,6 +1558,8 @@ def profile_data(
             default=str,
         )
     except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+    except Exception as e:
         return json.dumps({"error": str(e)})
 
 
