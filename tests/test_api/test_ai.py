@@ -86,7 +86,6 @@ class TestOmniAIServiceGenerateQuery:
         body = call_args.kwargs.get("json") or call_args[1].get("json")
         assert body["modelId"] == "model-1"
         assert body["prompt"] == "Show me revenue by month"
-        assert body["structured"] is True
 
     def test_generate_with_topic(self, ai_svc, mock_client):
         mock_client.post.return_value = {

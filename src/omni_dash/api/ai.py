@@ -56,7 +56,7 @@ class AIJobStatus(BaseModel):
     job_id: str
     conversation_id: str = ""
     status: str = "QUEUED"
-    progress: float | None = None
+    progress: dict[str, Any] | float | None = None
     result_summary: str | None = None
     error: str | None = None
     omni_chat_url: str = ""
@@ -135,8 +135,8 @@ class OmniAIService:
             body["branchId"] = branch_id
         if context_query:
             body["contextQuery"] = context_query
-        if structured:
-            body["structured"] = True
+        # Note: Omni's "structured" param is undocumented and expects a string,
+        # not a boolean. Omit it — the default response format is sufficient.
 
         logger.info("Omni AI generate_query: prompt=%r, topic=%s", prompt[:80], topic_name)
         result = self._client.post("/api/v1/ai/generate-query", json=body)
@@ -241,7 +241,7 @@ class OmniAIService:
 
         return AIJobStatus(
             job_id=job_id,
-            status=result.get("status", "UNKNOWN"),
+            status=result.get("state") or result.get("status", "UNKNOWN"),
             progress=result.get("progress"),
             result_summary=result.get("resultSummary"),
             error=result.get("error"),
