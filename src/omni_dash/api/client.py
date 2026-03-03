@@ -253,7 +253,10 @@ class OmniClient:
             for raw_line in response.text.strip().split("\n"):
                 raw_line = raw_line.strip()
                 if raw_line:
-                    lines.append(json_lib.loads(raw_line))
+                    try:
+                        lines.append(json_lib.loads(raw_line))
+                    except json_lib.JSONDecodeError:
+                        logger.warning("Skipping invalid NDJSON line: %s", raw_line[:200])
 
             # Omni sometimes returns {"message": ...} on soft rate limits (HTTP 200)
             if len(lines) == 1 and "message" in lines[0] and "jobs_submitted" not in lines[0]:

@@ -150,6 +150,30 @@ class TestGetRaw:
                 client.get_raw("/api/v1/dashboards/xxx/download")
 
 
+class TestNdjsonResilience:
+    """post_ndjson gracefully handles invalid JSON lines."""
+
+    def test_skips_invalid_json_lines(self, client):
+        response = MagicMock()
+        response.status_code = 200
+        response.text = '{"valid": 1}\nNOT_JSON\n{"valid": 2}\n'
+
+        with patch.object(client._http, "request", return_value=response):
+            result = client.post_ndjson("/api/v1/query/run")
+            assert len(result) == 2
+            assert result[0] == {"valid": 1}
+            assert result[1] == {"valid": 2}
+
+    def test_all_invalid_lines_returns_empty(self, client):
+        response = MagicMock()
+        response.status_code = 200
+        response.text = "garbage\nmore_garbage\n"
+
+        with patch.object(client._http, "request", return_value=response):
+            result = client.post_ndjson("/api/v1/query/run")
+            assert result == []
+
+
 class TestPing:
     def test_ping_success(self, client):
         with patch.object(client, "get", return_value=[{"id": "m1"}]):

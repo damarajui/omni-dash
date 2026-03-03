@@ -214,3 +214,55 @@ class TestUpdateFilters:
         """clear_existing_draft alone without filter changes should raise."""
         with pytest.raises(ValueError, match="Must provide at least one"):
             service.update_filters("dash-1", clear_existing_draft=True)
+
+
+# ---------------------------------------------------------------------------
+# get_dashboard layouts from metadata path
+# ---------------------------------------------------------------------------
+
+
+class TestGetDashboardLayouts:
+    """get_dashboard reads layouts from metadata.layouts.lg."""
+
+    def test_layouts_from_metadata(self, service, mock_client):
+        """Layouts nested under metadata.layouts.lg are extracted."""
+        mock_client.get.return_value = {
+            "id": "dash-1",
+            "name": "Test",
+            "modelId": "m1",
+            "queryPresentations": [],
+            "metadata": {
+                "layouts": {
+                    "lg": [{"i": "1", "x": 0, "y": 0, "w": 12, "h": 6}]
+                },
+                "textTiles": [{"id": "tt1"}],
+                "tileSettings": {"s1": "v1"},
+            },
+        }
+        result = service.get_dashboard("dash-1")
+        assert len(result.layouts) == 1
+        assert result.layouts[0]["w"] == 12
+        assert len(result.text_tiles) == 1
+        assert result.tile_settings == {"s1": "v1"}
+
+    def test_layouts_fallback_to_top_level(self, service, mock_client):
+        """If no metadata.layouts.lg, fall back to top-level layouts."""
+        mock_client.get.return_value = {
+            "id": "dash-2",
+            "name": "Test 2",
+            "queryPresentations": [],
+            "layouts": [{"i": "1", "x": 0, "y": 0, "w": 6, "h": 4}],
+        }
+        result = service.get_dashboard("dash-2")
+        assert len(result.layouts) == 1
+        assert result.layouts[0]["w"] == 6
+
+    def test_no_layouts_returns_empty(self, service, mock_client):
+        """No layouts anywhere returns empty list."""
+        mock_client.get.return_value = {
+            "id": "dash-3",
+            "name": "Test 3",
+            "queryPresentations": [],
+        }
+        result = service.get_dashboard("dash-3")
+        assert result.layouts == []

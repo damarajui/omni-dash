@@ -140,14 +140,22 @@ class DocumentService:
         if not result or not isinstance(result, dict):
             raise DocumentNotFoundError(document_id)
 
+        # Layouts may be nested at metadata.layouts.lg (like create/export
+        # responses) or at top-level layouts (varies by Omni API version).
+        metadata = result.get("metadata", {})
+        layouts = (
+            metadata.get("layouts", {}).get("lg", [])
+            or result.get("layouts", [])
+        )
+
         return DashboardResponse(
             document_id=result.get("id", document_id),
             name=result.get("name", ""),
             model_id=result.get("modelId", ""),
             query_presentations=result.get("queryPresentations", []),
-            layouts=result.get("layouts", []),
-            text_tiles=result.get("textTiles", []),
-            tile_settings=result.get("tileSettings", {}),
+            layouts=layouts,
+            text_tiles=metadata.get("textTiles", result.get("textTiles", [])),
+            tile_settings=metadata.get("tileSettings", result.get("tileSettings", {})),
             created_at=result.get("createdAt", ""),
             updated_at=result.get("updatedAt", ""),
         )

@@ -7,9 +7,12 @@ explore dbt models and generate validated DashboardDefinition objects.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
+
+_DEFAULT_AI_MODEL = os.environ.get("OMNI_DASH_AI_MODEL", "claude-sonnet-4-5-20250929")
 
 from omni_dash.ai.prompts import build_system_prompt
 from omni_dash.ai.tools import ToolExecutor, get_tool_definitions
@@ -49,7 +52,7 @@ class DashboardAI:
         self,
         registry: ModelRegistry,
         *,
-        model: str = "claude-sonnet-4-5-20250929",
+        model: str = _DEFAULT_AI_MODEL,
         max_turns: int = 10,
         api_key: str | None = None,
         query_fn: Any | None = None,

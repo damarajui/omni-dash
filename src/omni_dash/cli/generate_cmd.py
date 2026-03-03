@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,8 @@ def generate(
         None, "--dbt-path", help="Path to dbt project. Defaults to DBT_PROJECT_PATH env var."
     ),
     model: str = typer.Option(
-        "claude-sonnet-4-5-20250929", "--model", "-m", help="Claude model to use for generation."
+        os.environ.get("OMNI_DASH_AI_MODEL", "claude-sonnet-4-5-20250929"),
+        "--model", "-m", help="Claude model to use for generation.",
     ),
     output: str | None = typer.Option(
         None, "--output", "-o", help="Save dashboard definition as YAML to this path."
