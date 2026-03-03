@@ -321,7 +321,8 @@ class TestCache:
     def test_cache_expires(self, service):
         service._cache_ttl = 0  # Expire immediately
         service._set_cache("key1", {"a": 1})
-        service._cache_ts = time.monotonic() - 1  # Force expiry
+        # Force per-key timestamp into the past
+        service._cache_ts_map["key1"] = time.monotonic() - 1
         assert service._get_cache("key1") is None
 
     def test_clear_cache(self, service, tmp_path):
