@@ -1385,7 +1385,17 @@ class DashboardSerializer:
             # Layout position — Omni uses a 24-col grid, we use 12-col.
             # Scale x and w by half; height is in Omni's own units so
             # clamp to a sensible range.
-            layout = layout_map.get(i + 1)
+            # Use queryIdentifierMapKey (not enumerate index) to match
+            # layout items — they can be non-sequential after add_tiles.
+            layout_key = qp.get("queryIdentifierMapKey")
+            if layout_key is not None:
+                try:
+                    layout_key = int(layout_key)
+                except (ValueError, TypeError):
+                    layout_key = i + 1
+            else:
+                layout_key = i + 1
+            layout = layout_map.get(layout_key)
             position = None
             if layout:
                 scaled_x = max(0, min(11, layout["x"] // 2))

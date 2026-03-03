@@ -3474,3 +3474,84 @@ class TestYamlRoundTripCalculations:
         assert calc.label == "Conversion Rate"
         assert calc.formula == "t.b / t.a"
         assert calc.format == "PERCENT_1"
+
+
+# ---------------------------------------------------------------------------
+# from_omni_export: layout lookup uses queryIdentifierMapKey
+# ---------------------------------------------------------------------------
+
+
+class TestFromOmniExportLayoutKey:
+    """from_omni_export uses queryIdentifierMapKey for layout lookup."""
+
+    def test_non_sequential_layout_keys(self):
+        from omni_dash.dashboard.serializer import DashboardSerializer
+
+        # Simulate an export where tiles have non-sequential keys (after add_tiles)
+        export_data = {
+            "document": {"name": "Test", "modelId": "m1"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "Tile A",
+                                "queryIdentifierMapKey": "1",
+                                "query": {"queryJson": {"table": "t", "fields": ["t.a"]}},
+                                "visConfig": {"chartType": "line"},
+                            }
+                        },
+                        {
+                            "queryPresentation": {
+                                "name": "Tile B",
+                                "queryIdentifierMapKey": "5",  # non-sequential!
+                                "query": {"queryJson": {"table": "t", "fields": ["t.b"]}},
+                                "visConfig": {"chartType": "bar"},
+                            }
+                        },
+                    ],
+                },
+                "metadata": {
+                    "layouts": {
+                        "lg": [
+                            {"i": "1", "x": 0, "y": 0, "w": 24, "h": 50},
+                            {"i": "5", "x": 0, "y": 50, "w": 24, "h": 50},
+                        ]
+                    }
+                },
+            },
+        }
+
+        defn = DashboardSerializer.from_omni_export(export_data)
+        assert len(defn.tiles) == 2
+        # Tile B should get its layout from key "5", not from enumerate index 1+1=2
+        assert defn.tiles[1].position is not None
+        assert defn.tiles[1].position.y == 50
+
+    def test_missing_key_falls_back_to_index(self):
+        from omni_dash.dashboard.serializer import DashboardSerializer
+
+        export_data = {
+            "document": {"name": "Test"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "Tile",
+                                "query": {"queryJson": {"table": "t", "fields": ["t.a"]}},
+                                "visConfig": {"chartType": "line"},
+                            }
+                        },
+                    ],
+                },
+                "metadata": {
+                    "layouts": {
+                        "lg": [{"i": "1", "x": 0, "y": 0, "w": 24, "h": 50}]
+                    }
+                },
+            },
+        }
+
+        defn = DashboardSerializer.from_omni_export(export_data)
+        assert defn.tiles[0].position is not None

@@ -233,7 +233,24 @@ class OmniClient:
             if timeout is not None:
                 req_kwargs["timeout"] = timeout
 
-            response = self._http.request("POST", path, **req_kwargs)
+            try:
+                response = self._http.request("POST", path, **req_kwargs)
+            except httpx.TimeoutException as e:
+                last_error = OmniAPIError(0, f"NDJSON request timed out: {e}")
+                if attempt < MAX_RETRIES:
+                    wait = RETRY_BACKOFF_BASE ** attempt
+                    logger.warning("NDJSON timeout (attempt %d/%d), retrying in %.1fs", attempt + 1, MAX_RETRIES + 1, wait)
+                    time.sleep(wait)
+                    continue
+                raise last_error from e
+            except httpx.RequestError as e:
+                last_error = OmniAPIError(0, f"NDJSON connection error: {e}")
+                if attempt < MAX_RETRIES:
+                    wait = RETRY_BACKOFF_BASE ** attempt
+                    logger.warning("NDJSON connection error (attempt %d/%d), retrying in %.1fs", attempt + 1, MAX_RETRIES + 1, wait)
+                    time.sleep(wait)
+                    continue
+                raise last_error from e
 
             if response.status_code in (401, 403):
                 raise AuthenticationError(response.text)
@@ -245,6 +262,15 @@ class OmniClient:
                     attempt + 1, MAX_RETRIES + 1, retry_after,
                 )
                 time.sleep(retry_after)
+                continue
+            if response.status_code >= 500 and attempt < MAX_RETRIES:
+                wait = RETRY_BACKOFF_BASE ** attempt
+                last_error = OmniAPIError(response.status_code, response.text, response.text)
+                logger.warning(
+                    "NDJSON server error %d (attempt %d/%d), retrying in %.1fs",
+                    response.status_code, attempt + 1, MAX_RETRIES + 1, wait,
+                )
+                time.sleep(wait)
                 continue
             if response.status_code >= 400:
                 raise OmniAPIError(response.status_code, response.text, response.text)
