@@ -72,6 +72,7 @@ _client: OmniClient | None = None
 _doc_svc: DocumentService | None = None
 _model_svc: ModelService | None = None
 _query_runner: QueryRunner | None = None
+_ai_svc: Any = None  # OmniAIService, lazy-loaded
 
 
 def _get_client() -> OmniClient:
@@ -100,6 +101,16 @@ def _get_query_runner() -> QueryRunner:
     if _query_runner is None:
         _query_runner = QueryRunner(_get_client())
     return _query_runner
+
+
+def _get_ai_svc():
+    """Lazy-init the Omni AI service."""
+    global _ai_svc
+    if _ai_svc is None:
+        from omni_dash.api.ai import OmniAIService
+
+        _ai_svc = OmniAIService(_get_client())
+    return _ai_svc
 
 
 def _get_shared_model_id() -> str:
@@ -1570,12 +1581,24 @@ def generate_dashboard(
         if folder_id:
             definition.folder_id = folder_id
 
+        # Auto-position tiles on grid (same as create_dashboard)
+        definition.tiles = LayoutManager.auto_position(definition.tiles)
+
         payload = DashboardSerializer.to_omni_create_payload(definition)
+        n_qps = len(payload.get("queryPresentations", []))
         logger.info(
             "generate_dashboard: %d tiles, model_id=%s",
-            len(payload.get("queryPresentations", [])),
+            n_qps,
             payload.get("modelId", "MISSING"),
         )
+        if n_qps == 0:
+            return json.dumps({
+                "error": "AI generated 0 tiles — nothing to create. "
+                "Try a more specific prompt or check available tables with list_topics.",
+                "reasoning": result.reasoning,
+                "tool_calls_made": result.tool_calls_made,
+            })
+
         dash_id, dash_name = _create_with_vis_configs(
             payload, name=definition.name, folder_id=folder_id or None,
         )
@@ -1594,3 +1617,119 @@ def generate_dashboard(
         )
     except Exception as e:
         return json.dumps({"error": str(e)})
+
+
+# ---------------------------------------------------------------------------
+# Omni native AI tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def ai_generate_query(
+    prompt: str,
+    topic_name: str = "",
+    model_id: str = "",
+) -> str:
+    """Convert natural language to a structured Omni query using Omni's native AI.
+
+    Omni's AI has full knowledge of the semantic model — joins, measures,
+    dimensions, and relationships. Returns a query spec that can be run
+    directly or used to build dashboard tiles.
+
+    Args:
+        prompt: Natural language query (e.g., "Show me revenue by month").
+        topic_name: Optional topic to scope the query to.
+        model_id: Omni model ID. Auto-discovered if omitted.
+
+    Returns:
+        JSON with table, fields, sorts, filters, and the raw Omni response.
+    """
+    try:
+        mid = model_id or _get_shared_model_id()
+        ai = _get_ai_svc()
+        result = ai.generate_query(
+            mid,
+            prompt,
+            topic_name=topic_name or None,
+        )
+        return json.dumps({
+            "table": result.table,
+            "fields": result.fields,
+            "sorts": result.sorts,
+            "filters": result.filters,
+            "limit": result.limit,
+            "calculations": result.calculations,
+        }, indent=2)
+    except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+    except Exception as e:
+        return json.dumps({"error": f"AI query generation failed: {e}"})
+
+
+@mcp.tool()
+def ai_pick_topic(
+    prompt: str,
+    model_id: str = "",
+) -> str:
+    """Use Omni's AI to pick the best data topic for a question.
+
+    Analyzes the prompt and the semantic model to find the most relevant
+    topic (table/view) to query.
+
+    Args:
+        prompt: Natural language question (e.g., "What are our top customers?").
+        model_id: Omni model ID. Auto-discovered if omitted.
+
+    Returns:
+        JSON with the recommended topic name.
+    """
+    try:
+        mid = model_id or _get_shared_model_id()
+        ai = _get_ai_svc()
+        topic = ai.pick_topic(mid, prompt)
+        return json.dumps({"topic": topic})
+    except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+    except Exception as e:
+        return json.dumps({"error": f"Topic selection failed: {e}"})
+
+
+@mcp.tool()
+def ai_analyze(
+    prompt: str,
+    topic_name: str = "",
+    model_id: str = "",
+) -> str:
+    """Run an AI-powered data analysis using Omni's native AI.
+
+    Omni's AI will explore the data, run queries, and return a markdown
+    summary with insights. Takes 15-60 seconds for complex analyses.
+
+    Args:
+        prompt: Analysis request (e.g., "Analyze our churn patterns").
+        topic_name: Optional topic to scope the analysis.
+        model_id: Omni model ID. Auto-discovered if omitted.
+
+    Returns:
+        JSON with the AI's analysis, summary, and actions taken.
+    """
+    try:
+        mid = model_id or _get_shared_model_id()
+        ai = _get_ai_svc()
+        job = ai.create_job(
+            mid,
+            prompt,
+            topic_name=topic_name or None,
+        )
+        result = ai.wait_for_job(job.job_id, timeout=120.0)
+        return json.dumps({
+            "summary": result.result_summary,
+            "message": result.message,
+            "topic": result.topic,
+            "actions_count": len(result.actions),
+            "omni_chat_url": result.omni_chat_url,
+        }, indent=2)
+    except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+    except Exception as e:
+        return json.dumps({"error": f"AI analysis failed: {e}"})
