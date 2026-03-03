@@ -1151,7 +1151,7 @@ def get_topic_fields(topic_name: str, model_id: str = "") -> str:
         if not resolved_model_id:
             return json.dumps({"error": "No model_id found. Set OMNI_SHARED_MODEL_ID."})
 
-        detail = _get_model_svc().get_topic(resolved_model_id, topic_name)
+        detail = _get_model_svc().get_topic_native(resolved_model_id, topic_name)
         return json.dumps(
             {
                 "name": detail.name,
@@ -1733,3 +1733,63 @@ def ai_analyze(
         return json.dumps({"error": str(e)})
     except Exception as e:
         return json.dumps({"error": f"AI analysis failed: {e}"})
+
+
+# ---------------------------------------------------------------------------
+# Dashboard filter management
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def get_dashboard_filters(dashboard_id: str) -> str:
+    """Get the filter configuration for a dashboard.
+
+    Returns the current filters, their types, values, and ordering.
+    Useful for understanding what filters exist before updating them.
+
+    Args:
+        dashboard_id: The dashboard identifier.
+
+    Returns:
+        JSON with filters dict, filterOrder list, and controls.
+    """
+    try:
+        result = _get_doc_svc().get_filters(dashboard_id)
+        return json.dumps(result, indent=2)
+    except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+    except Exception as e:
+        return json.dumps({"error": f"Failed to get filters: {e}"})
+
+
+@mcp.tool()
+def update_dashboard_filters(
+    dashboard_id: str,
+    filters: dict[str, Any] | None = None,
+    filter_order: list[str] | None = None,
+) -> str:
+    """Update existing filter values on a dashboard.
+
+    Can only modify filters that already exist. Filter IDs must match
+    those returned by get_dashboard_filters. To add NEW filters,
+    use update_dashboard with filter configs instead.
+
+    Args:
+        dashboard_id: The dashboard to update.
+        filters: Dict of filter_id -> {kind, type, values, fieldName, ...}.
+        filter_order: New ordering of filter IDs.
+
+    Returns:
+        JSON with updated filter configuration.
+    """
+    try:
+        result = _get_doc_svc().update_filters(
+            dashboard_id,
+            filters=filters,
+            filter_order=filter_order,
+        )
+        return json.dumps(result, indent=2)
+    except OmniDashError as e:
+        return json.dumps({"error": str(e)})
+    except Exception as e:
+        return json.dumps({"error": f"Failed to update filters: {e}"})

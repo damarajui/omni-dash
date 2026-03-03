@@ -146,3 +146,55 @@ class TestDownloadDashboard:
         mock_client.get_raw.return_value = b"a,b\n1,2"
         result = service.download_dashboard("d1", file_format="csv")
         assert result == b"a,b\n1,2"
+
+
+class TestGetFilters:
+    def test_returns_filter_config(self, service, mock_client):
+        mock_client.get.return_value = {
+            "identifier": "dash-1",
+            "filters": {"f1": {"type": "string", "kind": "EQUALS", "values": ["active"]}},
+            "filterOrder": ["f1"],
+            "controls": [],
+        }
+        result = service.get_filters("dash-1")
+        assert result["identifier"] == "dash-1"
+        assert "f1" in result["filters"]
+        assert result["filterOrder"] == ["f1"]
+        mock_client.get.assert_called_once_with("/api/v1/dashboards/dash-1/filters")
+
+    def test_non_dict_returns_empty(self, service, mock_client):
+        mock_client.get.return_value = None
+        result = service.get_filters("dash-1")
+        assert result == {"filters": {}, "filterOrder": [], "controls": []}
+
+
+class TestUpdateFilters:
+    def test_patches_filters(self, service, mock_client):
+        mock_client.patch.return_value = {
+            "filters": {"f1": {"values": ["shipped"]}},
+            "filterOrder": ["f1"],
+        }
+        result = service.update_filters(
+            "dash-1",
+            filters={"f1": {"values": ["shipped"]}},
+        )
+        assert result["filters"]["f1"]["values"] == ["shipped"]
+        mock_client.patch.assert_called_once_with(
+            "/api/v1/dashboards/dash-1/filters",
+            json={"filters": {"f1": {"values": ["shipped"]}}},
+        )
+
+    def test_patches_filter_order(self, service, mock_client):
+        mock_client.patch.return_value = {"filterOrder": ["f2", "f1"]}
+        service.update_filters("dash-1", filter_order=["f2", "f1"])
+        body = mock_client.patch.call_args[1]["json"]
+        assert body["filterOrder"] == ["f2", "f1"]
+
+    def test_empty_body_raises(self, service, mock_client):
+        with pytest.raises(ValueError, match="Must provide at least one"):
+            service.update_filters("dash-1")
+
+    def test_non_dict_response_returns_empty(self, service, mock_client):
+        mock_client.patch.return_value = None
+        result = service.update_filters("dash-1", filters={"f1": {"values": []}})
+        assert result == {}

@@ -294,7 +294,7 @@ class TestGetTopicFields:
     def test_returns_topic_detail(self, _, mock_model_svc):
         from omni_dash.api.models import TopicDetail
 
-        mock_model_svc.get_topic.return_value = TopicDetail(
+        mock_model_svc.get_topic_native.return_value = TopicDetail(
             name="mart_seo",
             label="SEO Funnel",
             fields=[{"name": "week_start", "type": "date"}],
@@ -942,6 +942,8 @@ class TestMCPRegistration:
             "ai_generate_query",
             "ai_pick_topic",
             "ai_analyze",
+            "get_dashboard_filters",
+            "update_dashboard_filters",
         }
         assert expected == names
 
@@ -951,7 +953,7 @@ class TestMCPRegistration:
         async def check():
             return len(await mcp_server.mcp.list_tools())
 
-        assert asyncio.run(check()) == 22
+        assert asyncio.run(check()) == 24
 
 
 # ---------------------------------------------------------------------------
@@ -2824,4 +2826,78 @@ class TestAIAnalyze:
         result = json.loads(mcp_server.ai_analyze(prompt="test"))
         assert "error" in result
         assert "timed out" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# get_dashboard_filters
+# ---------------------------------------------------------------------------
+
+
+class TestGetDashboardFilters:
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_returns_filters(self, mock_get_doc):
+        doc_svc = MagicMock()
+        doc_svc.get_filters.return_value = {
+            "identifier": "dash-1",
+            "filters": {"f1": {"type": "string", "kind": "EQUALS", "values": ["active"]}},
+            "filterOrder": ["f1"],
+            "controls": [],
+        }
+        mock_get_doc.return_value = doc_svc
+
+        result = json.loads(mcp_server.get_dashboard_filters("dash-1"))
+        assert result["identifier"] == "dash-1"
+        assert "f1" in result["filters"]
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_error_returns_json(self, mock_get_doc):
+        doc_svc = MagicMock()
+        doc_svc.get_filters.side_effect = Exception("Connection failed")
+        mock_get_doc.return_value = doc_svc
+
+        result = json.loads(mcp_server.get_dashboard_filters("dash-1"))
+        assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# update_dashboard_filters
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateDashboardFilters:
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_updates_filters(self, mock_get_doc):
+        doc_svc = MagicMock()
+        doc_svc.update_filters.return_value = {
+            "filters": {"f1": {"values": ["shipped"]}},
+            "filterOrder": ["f1"],
+        }
+        mock_get_doc.return_value = doc_svc
+
+        result = json.loads(mcp_server.update_dashboard_filters(
+            dashboard_id="dash-1",
+            filters={"f1": {"values": ["shipped"]}},
+        ))
+        assert result["filters"]["f1"]["values"] == ["shipped"]
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_update_filter_order(self, mock_get_doc):
+        doc_svc = MagicMock()
+        doc_svc.update_filters.return_value = {"filterOrder": ["f2", "f1"]}
+        mock_get_doc.return_value = doc_svc
+
+        result = json.loads(mcp_server.update_dashboard_filters(
+            dashboard_id="dash-1",
+            filter_order=["f2", "f1"],
+        ))
+        assert result["filterOrder"] == ["f2", "f1"]
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_error_returns_json(self, mock_get_doc):
+        doc_svc = MagicMock()
+        doc_svc.update_filters.side_effect = ValueError("Must provide at least one")
+        mock_get_doc.return_value = doc_svc
+
+        result = json.loads(mcp_server.update_dashboard_filters(dashboard_id="dash-1"))
+        assert "error" in result
 

@@ -215,6 +215,78 @@ class ModelService:
 
         return sorted(topics, key=lambda t: t.name)
 
+    def get_topic_native(self, model_id: str, topic_name: str) -> TopicDetail:
+        """Get topic details via Omni's native topic API endpoint.
+
+        Uses GET /api/v1/models/{modelId}/topic/{topicName} which returns
+        structured data with views, dimensions, measures, data types, and
+        join relationships — richer than YAML parsing.
+
+        Falls back to YAML-based get_topic() if the native endpoint fails.
+        """
+        try:
+            result = self._client.get(
+                f"/api/v1/models/{model_id}/topic/{topic_name}"
+            )
+            if not isinstance(result, dict) or not result.get("success"):
+                return self.get_topic(model_id, topic_name)
+
+            topic = result["topic"]
+            base_view = topic.get("base_view_name", "")
+            views_raw = topic.get("views", [])
+
+            views_info: list[dict[str, Any]] = []
+            all_fields: list[dict[str, Any]] = []
+
+            for view in views_raw:
+                view_name = view.get("name", "")
+                dims = view.get("dimensions", [])
+                measures = view.get("measures", [])
+
+                views_info.append({
+                    "name": view_name,
+                    "dimension_count": len(dims),
+                    "measure_count": len(measures),
+                })
+
+                for dim in dims:
+                    field_name = dim.get("field_name", "")
+                    all_fields.append({
+                        "name": field_name,
+                        "qualified_name": f"{topic_name}.{field_name}",
+                        "view": view_name,
+                        "type": "dimension",
+                        "data_type": dim.get("data_type", ""),
+                        "label": dim.get("view_label", ""),
+                    })
+
+                for measure in measures:
+                    field_name = measure.get("field_name", "")
+                    all_fields.append({
+                        "name": field_name,
+                        "qualified_name": f"{topic_name}.{field_name}",
+                        "view": view_name,
+                        "type": "measure",
+                        "data_type": measure.get("data_type", ""),
+                        "aggregate_type": measure.get("type", ""),
+                        "label": measure.get("view_label", ""),
+                    })
+
+            return TopicDetail(
+                name=topic_name,
+                label=topic.get("label", ""),
+                description=topic.get("description", ""),
+                base_view=base_view,
+                views=views_info,
+                fields=all_fields,
+            )
+        except (OmniAPIError, KeyError, TypeError) as e:
+            logger.debug(
+                "Native topic endpoint failed for %s, falling back to YAML: %s",
+                topic_name, e,
+            )
+            return self.get_topic(model_id, topic_name)
+
     def get_topic(self, model_id: str, topic_name: str) -> TopicDetail:
         """Get full topic details including resolved views and fields.
 
