@@ -73,6 +73,7 @@ _doc_svc: DocumentService | None = None
 _model_svc: ModelService | None = None
 _query_runner: QueryRunner | None = None
 _ai_svc: Any = None  # OmniAIService, lazy-loaded
+_shared_model_id: str = ""  # Cached model ID to avoid repeated API calls
 
 
 def _get_client() -> OmniClient:
@@ -114,17 +115,26 @@ def _get_ai_svc():
 
 
 def _get_shared_model_id() -> str:
-    """Get the shared model ID from settings or discover it."""
+    """Get the shared model ID from settings or discover it.
+
+    Result is cached to avoid hitting the Omni API on every tool call.
+    """
+    global _shared_model_id
+    if _shared_model_id:
+        return _shared_model_id
     settings = get_settings()
     model_id = settings.omni_shared_model_id
     if model_id:
+        _shared_model_id = model_id
         return model_id
     # Fall back to finding a shared model
     models = _get_model_svc().list_models()
     for m in models:
         if m.model_kind == "shared":
+            _shared_model_id = m.id
             return m.id
     if models:
+        _shared_model_id = models[0].id
         return models[0].id
     return ""
 
@@ -331,11 +341,13 @@ def _create_with_vis_configs(
     """
     import copy
 
-    # Extract vis configs and query overrides before sending
-    # (create endpoint ignores visConfig; export may lose filters/pivots)
+    # Extract vis configs and query overrides before sending.
+    # Deep-copy queryPresentations to avoid mutating the caller's payload.
+    qps = copy.deepcopy(payload.get("queryPresentations", []))
+    payload["queryPresentations"] = qps
     vis_configs_by_name: dict[str, dict] = {}
     query_overrides_by_name: dict[str, dict] = {}
-    for qp in payload.get("queryPresentations", []):
+    for qp in qps:
         vc = qp.pop("visConfig", None)
         if vc and vc.get("visType"):
             vis_configs_by_name[qp["name"]] = vc
@@ -772,7 +784,7 @@ def move_dashboard(
 
         try:
             _get_doc_svc().delete_dashboard(dashboard_id)
-        except OmniDashError as del_err:
+        except Exception as del_err:
             return json.dumps({
                 "status": "partial",
                 "warning": f"Dashboard copied but original not deleted: {del_err}",
@@ -1640,27 +1652,11 @@ def profile_data(
                 if all_field_count > 20:
                     auto_discovered = True
             except Exception:
-                # Fallback for non-topic views (e.g. Snowflake views not
-                # registered as Omni topics): discover fields via a small
-                # query and extract column names from the result.
-                try:
-                    builder = QueryBuilder(table=resolved_table, model_id=mid)
-                    builder.fields([f"{resolved_table}.*"])
-                    builder.limit(1)
-                    sample_result = query_runner.run(builder.build())
-                    if sample_result.fields:
-                        fields = sample_result.fields[:20]
-                    elif sample_result.rows:
-                        fields = list(sample_result.rows[0].keys())[:20]
-                    else:
-                        return json.dumps(
-                            {"error": f"Could not discover fields for '{table}'."}
-                        )
-                except Exception:
-                    return json.dumps(
-                        {"error": f"Could not discover fields for '{table}'. "
-                         "The table may not exist or is not queryable."}
-                    )
+                return json.dumps(
+                    {"error": f"Could not discover fields for '{table}'. "
+                     "Pass explicit field names to profile, or check that "
+                     "the table exists with list_topics."}
+                )
 
         qualified = [f if "." in f else f"{resolved_table}.{f}" for f in fields]
 
