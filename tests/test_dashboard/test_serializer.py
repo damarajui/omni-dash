@@ -3204,3 +3204,86 @@ def test_series_entry_point_with_dash():
     })
     assert entry["mark"]["line"]["dash"] == [4, 2]
     assert entry["mark"]["line"]["point"] is True
+
+
+# ---------------------------------------------------------------------------
+# number_range filter improvements
+# ---------------------------------------------------------------------------
+
+
+class TestNumberRangeFilter:
+    """number_range filter accepts dict, list, or single value."""
+
+    def test_dict_min_max(self):
+        from omni_dash.dashboard.definition import DashboardFilter
+        from omni_dash.dashboard.serializer import _to_omni_filter_from_dashboard
+
+        f = DashboardFilter(field="t.x", filter_type="number_range", default_value={"min": 10, "max": 100})
+        result = _to_omni_filter_from_dashboard(f)
+        assert result["left_side"] == "10"
+        assert result["right_side"] == "100"
+        assert result["kind"] == "BETWEEN"
+
+    def test_list_min_max(self):
+        from omni_dash.dashboard.definition import DashboardFilter
+        from omni_dash.dashboard.serializer import _to_omni_filter_from_dashboard
+
+        f = DashboardFilter(field="t.x", filter_type="number_range", default_value=[5, 50])
+        result = _to_omni_filter_from_dashboard(f)
+        assert result["left_side"] == "5"
+        assert result["right_side"] == "50"
+
+    def test_single_value_no_upper_bound(self):
+        from omni_dash.dashboard.definition import DashboardFilter
+        from omni_dash.dashboard.serializer import _to_omni_filter_from_dashboard
+
+        f = DashboardFilter(field="t.x", filter_type="number_range", default_value=42)
+        result = _to_omni_filter_from_dashboard(f)
+        assert result["left_side"] == "42"
+        assert result["right_side"] == ""
+
+    def test_none_value(self):
+        from omni_dash.dashboard.definition import DashboardFilter
+        from omni_dash.dashboard.serializer import _to_omni_filter_from_dashboard
+
+        f = DashboardFilter(field="t.x", filter_type="number_range", default_value=None)
+        result = _to_omni_filter_from_dashboard(f)
+        assert result["left_side"] == "0"
+        assert result["right_side"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Date filter normalization: "past N days" and "last N days"
+# ---------------------------------------------------------------------------
+
+
+class TestDateFilterNormalizationExtended:
+    """_normalize_date_to_days handles 'past N days' and 'last N days'."""
+
+    def test_past_30_days(self):
+        from omni_dash.dashboard.serializer import _normalize_date_to_days
+
+        left, right = _normalize_date_to_days("past 30 days")
+        assert left == "30 days ago"
+        assert right == "30 days"
+
+    def test_last_7_days(self):
+        from omni_dash.dashboard.serializer import _normalize_date_to_days
+
+        left, right = _normalize_date_to_days("last 7 days")
+        assert left == "7 days ago"
+        assert right == "7 days"
+
+    def test_past_90_days(self):
+        from omni_dash.dashboard.serializer import _normalize_date_to_days
+
+        left, right = _normalize_date_to_days("past 90 days")
+        assert left == "90 days ago"
+        assert right == "90 days"
+
+    def test_last_1_day(self):
+        from omni_dash.dashboard.serializer import _normalize_date_to_days
+
+        left, right = _normalize_date_to_days("last 1 day")
+        assert left == "1 days ago"
+        assert right == "1 days"

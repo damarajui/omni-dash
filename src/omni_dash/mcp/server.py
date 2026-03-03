@@ -1776,8 +1776,9 @@ def generate_dashboard(
             result = _get_query_runner().run(spec)
             return result.rows[:limit]
 
+        ai_model = os.environ.get("OMNI_DASH_AI_MODEL", "claude-sonnet-4-5-20250929")
         ai = DashboardAI(
-            adapter, model="claude-sonnet-4-5-20250929", query_fn=_ai_query_fn,
+            adapter, model=ai_model, query_fn=_ai_query_fn,
         )
 
         result = ai.generate(prompt)

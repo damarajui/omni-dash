@@ -239,7 +239,13 @@ def _normalize_date_to_days(value: str) -> tuple[str, str]:
         n = int(m.group(1))
         return f"{n} days ago", f"{n} days"
 
-    # "last N weeks" / "N weeks ago" / "N complete weeks ago"
+    # "past N days" / "last N days"
+    m = re.match(r"^(?:past|last)\s+(\d+)\s+days?$", s)
+    if m:
+        n = int(m.group(1))
+        return f"{n} days ago", f"{n} days"
+
+    # "last N weeks" / "N weeks ago" / "N complete weeks ago" / "past N weeks"
     m = re.search(r"(\d+)\s+(?:complete\s+)?weeks?", s)
     if m:
         n = int(m.group(1)) * 7
@@ -308,11 +314,21 @@ def _to_omni_filter_from_dashboard(dash_filter: DashboardFilter) -> dict[str, An
             "appliedLabels": {},
         }
     elif ft == "number_range":
+        # Accept dict {min, max}, list [min, max], or single value (lower bound only)
+        if isinstance(value, dict):
+            left = str(value.get("min", value.get("left", 0)))
+            right = str(value.get("max", value.get("right", "")))
+        elif isinstance(value, (list, tuple)) and len(value) >= 2:
+            left = str(value[0])
+            right = str(value[1])
+        else:
+            left = str(value) if value else "0"
+            right = ""
         return {
             "kind": "BETWEEN",
             "type": "number",
-            "left_side": str(value) if value else "0",
-            "right_side": "999999999",
+            "left_side": left,
+            "right_side": right,
             "is_negative": False,
         }
     elif ft == "text":
