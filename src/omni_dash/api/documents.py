@@ -316,3 +316,56 @@ class DocumentService:
             timeout=120.0,
         )
         return result
+
+    # -- Dashboard Filters --
+
+    def get_filters(self, dashboard_id: str) -> dict[str, Any]:
+        """Get the filter configuration for a dashboard.
+
+        Returns:
+            Dict with keys: filters (filter defs), filterOrder (list of IDs),
+            controls (list of control configs), identifier (dashboard ID).
+        """
+        result = self._client.get(f"/api/v1/dashboards/{dashboard_id}/filters")
+        if not isinstance(result, dict):
+            return {"filters": {}, "filterOrder": [], "controls": []}
+        return result
+
+    def update_filters(
+        self,
+        dashboard_id: str,
+        *,
+        filters: dict[str, dict[str, Any]] | None = None,
+        filter_order: list[str] | None = None,
+        controls: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Update existing filters on a dashboard via PATCH.
+
+        Note: This can only modify filters that already exist on the dashboard.
+        To add new filters, use export/reimport. Filter IDs must match existing
+        filter IDs from get_filters().
+
+        Args:
+            dashboard_id: Dashboard to update.
+            filters: Dict of filter_id -> filter config to update.
+            filter_order: New ordering of filter IDs.
+            controls: Updated control configurations.
+
+        Returns:
+            Updated filter configuration.
+        """
+        body: dict[str, Any] = {}
+        if filters is not None:
+            body["filters"] = filters
+        if filter_order is not None:
+            body["filterOrder"] = filter_order
+        if controls is not None:
+            body["controls"] = controls
+
+        if not body:
+            raise ValueError("Must provide at least one of: filters, filter_order, controls")
+
+        result = self._client.patch(
+            f"/api/v1/dashboards/{dashboard_id}/filters", json=body
+        )
+        return result if isinstance(result, dict) else {}

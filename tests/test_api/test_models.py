@@ -344,3 +344,108 @@ class TestCache:
 
     def test_load_nonexistent_no_error(self, service, tmp_path):
         service.load_cache(tmp_path / "nope.json")  # Should not raise
+
+
+class TestGetTopicNative:
+    def test_parses_native_response(self, service, mock_client):
+        mock_client.get.return_value = {
+            "success": True,
+            "topic": {
+                "name": "orders",
+                "label": "Orders",
+                "base_view_name": "fact_orders",
+                "views": [
+                    {
+                        "name": "fact_orders",
+                        "dimensions": [
+                            {
+                                "field_name": "order_id",
+                                "view_name": "fact_orders",
+                                "data_type": "STRING",
+                                "view_label": "Orders",
+                            },
+                            {
+                                "field_name": "created_at",
+                                "view_name": "fact_orders",
+                                "data_type": "TIMESTAMP",
+                                "view_label": "Orders",
+                            },
+                        ],
+                        "measures": [
+                            {
+                                "field_name": "total_revenue",
+                                "view_name": "fact_orders",
+                                "data_type": "NUMBER",
+                                "type": "sum",
+                                "view_label": "Orders",
+                            },
+                        ],
+                    }
+                ],
+            },
+        }
+        detail = service.get_topic_native("m1", "orders")
+        assert detail.name == "orders"
+        assert detail.label == "Orders"
+        assert detail.base_view == "fact_orders"
+        assert len(detail.views) == 1
+        assert detail.views[0]["dimension_count"] == 2
+        assert detail.views[0]["measure_count"] == 1
+        assert len(detail.fields) == 3
+        # Check dimension
+        dim = next(f for f in detail.fields if f["name"] == "order_id")
+        assert dim["type"] == "dimension"
+        assert dim["data_type"] == "STRING"
+        assert dim["qualified_name"] == "orders.order_id"
+        # Check measure
+        m = next(f for f in detail.fields if f["name"] == "total_revenue")
+        assert m["type"] == "measure"
+        assert m["aggregate_type"] == "sum"
+
+    def test_falls_back_on_non_success(self, service, mock_client):
+        """When native endpoint returns non-success, falls back to YAML get_topic."""
+        from unittest.mock import patch
+
+        mock_client.get.return_value = {"success": False}
+        fallback_detail = TopicDetail(name="orders", label="Orders", fields=[])
+        with patch.object(service, "get_topic", return_value=fallback_detail) as mock_yaml:
+            result = service.get_topic_native("m1", "orders")
+            mock_yaml.assert_called_once_with("m1", "orders")
+            assert result.name == "orders"
+
+    def test_falls_back_on_api_error(self, service, mock_client):
+        """OmniAPIError from native call triggers YAML fallback."""
+        from unittest.mock import patch
+
+        mock_client.get.side_effect = OmniAPIError(404, "Not found")
+        fallback_detail = TopicDetail(name="orders", label="Orders", fields=[])
+        with patch.object(service, "get_topic", return_value=fallback_detail) as mock_yaml:
+            result = service.get_topic_native("m1", "orders")
+            mock_yaml.assert_called_once_with("m1", "orders")
+            assert result.name == "orders"
+
+    def test_multi_view_topic(self, service, mock_client):
+        """Topic spanning multiple views merges all fields."""
+        mock_client.get.return_value = {
+            "success": True,
+            "topic": {
+                "name": "sales",
+                "label": "Sales",
+                "base_view_name": "fact_sales",
+                "views": [
+                    {
+                        "name": "fact_sales",
+                        "dimensions": [{"field_name": "id", "data_type": "STRING"}],
+                        "measures": [],
+                    },
+                    {
+                        "name": "dim_customer",
+                        "dimensions": [{"field_name": "name", "data_type": "STRING"}],
+                        "measures": [{"field_name": "count", "type": "count", "data_type": "NUMBER"}],
+                    },
+                ],
+            },
+        }
+        detail = service.get_topic_native("m1", "sales")
+        assert len(detail.views) == 2
+        assert len(detail.fields) == 3  # 2 dims + 1 measure
