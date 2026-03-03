@@ -350,6 +350,16 @@ class TestQueryData:
         spec = runner.run.call_args[0][0]
         assert spec.limit == 1000
 
+    def test_empty_table_returns_error(self):
+        result = json.loads(mcp_server.query_data(table="", fields=["t.f"]))
+        assert "error" in result
+        assert "table" in result["error"]
+
+    def test_empty_fields_returns_error(self):
+        result = json.loads(mcp_server.query_data(table="t", fields=[]))
+        assert "error" in result
+        assert "fields" in result["error"]
+
 
 # ---------------------------------------------------------------------------
 # list_folders
@@ -1131,38 +1141,26 @@ class TestValidateDashboard:
         assert result["errors"] == []
 
     @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
-    def test_invalid_chart_type_raises(self, _):
-        """Tile with chart_type not in ChartType enum raises Pydantic ValidationError.
-
-        validate_dashboard only catches OmniDashError, so Pydantic
-        ValidationError from the Tile constructor propagates.
-        """
-        from pydantic import ValidationError
-
+    def test_invalid_chart_type_returns_error(self, _):
+        """Tile with invalid chart_type returns a JSON error."""
         tiles = [{
             "name": "Bad Chart",
             "chart_type": "nonexistent_type",
             "query": {"table": "t", "fields": ["t.x"]},
         }]
-        with pytest.raises(ValidationError, match="chart_type"):
-            mcp_server.validate_dashboard(tiles=tiles)
+        result = json.loads(mcp_server.validate_dashboard(tiles=tiles))
+        assert "error" in result
 
     @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
-    def test_missing_fields_raises(self, _):
-        """Tile with empty fields list raises Pydantic ValidationError.
-
-        The TileQuery field_validator rejects empty fields lists before
-        validate_definition runs, and this error is not caught.
-        """
-        from pydantic import ValidationError
-
+    def test_missing_fields_returns_error(self, _):
+        """Tile with empty fields list returns a JSON error."""
         tiles = [{
             "name": "Empty Fields",
             "chart_type": "line",
             "query": {"table": "t", "fields": []},
         }]
-        with pytest.raises(ValidationError, match="At least one field"):
-            mcp_server.validate_dashboard(tiles=tiles)
+        result = json.loads(mcp_server.validate_dashboard(tiles=tiles))
+        assert "error" in result
 
     @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
     def test_sort_field_not_in_query_warns(self, _, mock_model_svc):

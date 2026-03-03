@@ -363,6 +363,9 @@ class TestGetTopicNative:
                                 "view_name": "fact_orders",
                                 "data_type": "STRING",
                                 "view_label": "Orders",
+                                "description": "Unique order identifier",
+                                "format": "ID",
+                                "sql": '"ORDER_ID"',
                             },
                             {
                                 "field_name": "created_at",
@@ -378,6 +381,8 @@ class TestGetTopicNative:
                                 "data_type": "NUMBER",
                                 "type": "sum",
                                 "view_label": "Orders",
+                                "description": "Sum of revenue",
+                                "sql": 'SUM("REVENUE")',
                             },
                         ],
                     }
@@ -392,15 +397,24 @@ class TestGetTopicNative:
         assert detail.views[0]["dimension_count"] == 2
         assert detail.views[0]["measure_count"] == 1
         assert len(detail.fields) == 3
-        # Check dimension
+        # Check dimension with enriched fields
         dim = next(f for f in detail.fields if f["name"] == "order_id")
         assert dim["type"] == "dimension"
         assert dim["data_type"] == "STRING"
         assert dim["qualified_name"] == "orders.order_id"
-        # Check measure
+        assert dim["description"] == "Unique order identifier"
+        assert dim["format"] == "ID"
+        assert dim["sql"] == '"ORDER_ID"'
+        # Check dimension without enriched fields (defaults to "")
+        dim2 = next(f for f in detail.fields if f["name"] == "created_at")
+        assert dim2["description"] == ""
+        assert dim2["format"] == ""
+        # Check measure with enriched fields
         m = next(f for f in detail.fields if f["name"] == "total_revenue")
         assert m["type"] == "measure"
         assert m["aggregate_type"] == "sum"
+        assert m["description"] == "Sum of revenue"
+        assert m["sql"] == 'SUM("REVENUE")'
 
     def test_falls_back_on_non_success(self, service, mock_client):
         """When native endpoint returns non-success, falls back to YAML get_topic."""

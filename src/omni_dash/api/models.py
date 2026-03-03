@@ -258,6 +258,9 @@ class ModelService:
                         "type": "dimension",
                         "data_type": dim.get("data_type", ""),
                         "label": dim.get("view_label", ""),
+                        "description": dim.get("description", ""),
+                        "format": dim.get("format", ""),
+                        "sql": dim.get("sql", ""),
                     })
 
                 for measure in measures:
@@ -270,6 +273,8 @@ class ModelService:
                         "data_type": measure.get("data_type", ""),
                         "aggregate_type": measure.get("type", ""),
                         "label": measure.get("view_label", ""),
+                        "description": measure.get("description", ""),
+                        "sql": measure.get("sql", ""),
                     })
 
             return TopicDetail(
