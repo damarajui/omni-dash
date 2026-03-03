@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from omni_dash.exceptions import OmniAPIError
 from omni_dash.mcp import server as mcp_server
 
 
@@ -938,6 +939,9 @@ class TestMCPRegistration:
             "validate_dashboard",
             "profile_data",
             "generate_dashboard",
+            "ai_generate_query",
+            "ai_pick_topic",
+            "ai_analyze",
         }
         assert expected == names
 
@@ -947,7 +951,7 @@ class TestMCPRegistration:
         async def check():
             return len(await mcp_server.mcp.list_tools())
 
-        assert asyncio.run(check()) == 19
+        assert asyncio.run(check()) == 22
 
 
 # ---------------------------------------------------------------------------
@@ -1193,7 +1197,10 @@ class TestGenerateDashboard:
         from omni_dash.dashboard.definition import DashboardDefinition, Tile, TileQuery
 
         mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
-        mock_serializer.to_omni_create_payload.return_value = {"name": "SEO Trends"}
+        mock_serializer.to_omni_create_payload.return_value = {
+            "name": "SEO Trends",
+            "queryPresentations": [{"queryIdentifierMapKey": "1"}],
+        }
 
         mock_definition = DashboardDefinition(
             name="SEO Trends",
@@ -1213,7 +1220,9 @@ class TestGenerateDashboard:
         mock_ai_cls.return_value.generate.return_value = mock_ai_result
 
         with patch("omni_dash.ai.omni_adapter.OmniModelAdapter") as _mock_adapter, \
-             patch("omni_dash.ai.service.DashboardAI", mock_ai_cls):
+             patch("omni_dash.ai.service.DashboardAI", mock_ai_cls), \
+             patch("omni_dash.mcp.server.LayoutManager") as mock_lm:
+            mock_lm.auto_position.side_effect = lambda tiles: tiles
             result = json.loads(mcp_server.generate_dashboard(prompt="Show me SEO trends"))
 
         assert result["dashboard_id"] == "dash-gen-1"
@@ -1242,7 +1251,10 @@ class TestGenerateDashboard:
         from omni_dash.dashboard.definition import DashboardDefinition, Tile, TileQuery
 
         mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
-        mock_serializer.to_omni_create_payload.return_value = {"name": "D"}
+        mock_serializer.to_omni_create_payload.return_value = {
+            "name": "D",
+            "queryPresentations": [{"queryIdentifierMapKey": "1"}],
+        }
         mock_create.return_value = ("dash-f1", "D")
 
         mock_definition = DashboardDefinition(
@@ -1259,7 +1271,8 @@ class TestGenerateDashboard:
         mock_ai_cls.return_value.generate.return_value = mock_ai_result
 
         with patch("omni_dash.ai.omni_adapter.OmniModelAdapter"), \
-             patch("omni_dash.ai.service.DashboardAI", mock_ai_cls):
+             patch("omni_dash.ai.service.DashboardAI", mock_ai_cls), \
+             patch("omni_dash.mcp.server.LayoutManager"):
             mcp_server.generate_dashboard(prompt="test", folder_id="folder-abc")
 
         _, kwargs = mock_create.call_args
@@ -2699,4 +2712,116 @@ class TestUpdateTileQueryMutation:
         q = qp["query"]
         q_json = q.get("queryJson", q)
         assert q_json["fields"] == ["t.new_field_a", "t.new_field_b"]
+
+
+# ---------------------------------------------------------------------------
+# Omni Native AI MCP Tools
+# ---------------------------------------------------------------------------
+
+
+class TestAIGenerateQuery:
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-1")
+    @patch.object(mcp_server, "_get_ai_svc")
+    def test_basic_generate(self, mock_get_ai, _):
+        from omni_dash.api.ai import GeneratedQuery
+
+        mock_ai = MagicMock()
+        mock_ai.generate_query.return_value = GeneratedQuery(
+            table="orders",
+            fields=["orders.total", "orders.date"],
+            sorts=[{"column_name": "orders.date", "sort_descending": True}],
+            limit=100,
+        )
+        mock_get_ai.return_value = mock_ai
+
+        result = json.loads(mcp_server.ai_generate_query(prompt="Show revenue"))
+        assert result["table"] == "orders"
+        assert result["fields"] == ["orders.total", "orders.date"]
+        assert result["limit"] == 100
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-1")
+    @patch.object(mcp_server, "_get_ai_svc")
+    def test_with_topic(self, mock_get_ai, _):
+        from omni_dash.api.ai import GeneratedQuery
+
+        mock_ai = MagicMock()
+        mock_ai.generate_query.return_value = GeneratedQuery(table="t", fields=["t.x"])
+        mock_get_ai.return_value = mock_ai
+
+        mcp_server.ai_generate_query(prompt="test", topic_name="orders")
+        mock_ai.generate_query.assert_called_once_with(
+            "model-1", "test", topic_name="orders",
+        )
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-1")
+    @patch.object(mcp_server, "_get_ai_svc")
+    def test_api_error_returns_json(self, mock_get_ai, _):
+        mock_ai = MagicMock()
+        mock_ai.generate_query.side_effect = OmniAPIError(403, "AI not enabled")
+        mock_get_ai.return_value = mock_ai
+
+        result = json.loads(mcp_server.ai_generate_query(prompt="test"))
+        assert "error" in result
+        assert "AI not enabled" in result["error"]
+
+
+class TestAIPickTopic:
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-1")
+    @patch.object(mcp_server, "_get_ai_svc")
+    def test_basic_pick(self, mock_get_ai, _):
+        mock_ai = MagicMock()
+        mock_ai.pick_topic.return_value = "customers"
+        mock_get_ai.return_value = mock_ai
+
+        result = json.loads(mcp_server.ai_pick_topic(prompt="top customers"))
+        assert result["topic"] == "customers"
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-1")
+    @patch.object(mcp_server, "_get_ai_svc")
+    def test_error_returns_json(self, mock_get_ai, _):
+        mock_ai = MagicMock()
+        mock_ai.pick_topic.side_effect = Exception("Connection failed")
+        mock_get_ai.return_value = mock_ai
+
+        result = json.loads(mcp_server.ai_pick_topic(prompt="test"))
+        assert "error" in result
+
+
+class TestAIAnalyze:
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-1")
+    @patch.object(mcp_server, "_get_ai_svc")
+    def test_basic_analyze(self, mock_get_ai, _):
+        from omni_dash.api.ai import AIJobResult, AIJobStatus
+
+        mock_ai = MagicMock()
+        mock_ai.create_job.return_value = AIJobStatus(
+            job_id="job-1", conversation_id="conv-1",
+        )
+        mock_ai.wait_for_job.return_value = AIJobResult(
+            message="Churn is increasing",
+            result_summary="5% monthly churn",
+            topic="customers",
+            actions=[{"type": "query"}],
+        )
+        mock_get_ai.return_value = mock_ai
+
+        result = json.loads(mcp_server.ai_analyze(prompt="Analyze churn"))
+        assert result["summary"] == "5% monthly churn"
+        assert result["message"] == "Churn is increasing"
+        assert result["topic"] == "customers"
+        assert result["actions_count"] == 1
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-1")
+    @patch.object(mcp_server, "_get_ai_svc")
+    def test_analyze_timeout_returns_error(self, mock_get_ai, _):
+        from omni_dash.api.ai import AIJobStatus
+
+        mock_ai = MagicMock()
+        mock_ai.create_job.return_value = AIJobStatus(job_id="job-1")
+        mock_ai.wait_for_job.side_effect = OmniAPIError(0, "timed out")
+        mock_get_ai.return_value = mock_ai
+
+        result = json.loads(mcp_server.ai_analyze(prompt="test"))
+        assert "error" in result
+        assert "timed out" in result["error"]
 

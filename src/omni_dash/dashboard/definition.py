@@ -33,6 +33,17 @@ class ChartType(str, Enum):
     PIVOT_TABLE = "pivot_table"
     TEXT = "text"
     VEGALITE = "vegalite"
+    # Extended Omni chart types
+    BOXPLOT = "boxplot"
+    MAP = "map"
+    REGION_MAP = "region_map"
+    SANKEY = "sankey"
+    STACKED_BAR_PERCENT = "stacked_bar_percent"
+    STACKED_AREA_PERCENT = "stacked_area_percent"
+    COLUMN = "column"
+    COLUMN_STACKED = "column_stacked"
+    COLUMN_GROUPED = "column_grouped"
+    SINGLE_RECORD = "single_record"
 
 
 class TileSize(str, Enum):
@@ -72,6 +83,16 @@ CHART_TYPE_DEFAULTS: dict[str, tuple[int, int]] = {
     "heatmap": (12, 6),
     "text": (12, 2),
     "vegalite": (6, 5),
+    "boxplot": (6, 4),
+    "map": (6, 5),
+    "region_map": (6, 5),
+    "sankey": (6, 5),
+    "stacked_bar_percent": (6, 4),
+    "stacked_area_percent": (6, 4),
+    "column": (6, 4),
+    "column_stacked": (6, 4),
+    "column_grouped": (6, 4),
+    "single_record": (6, 4),
 }
 
 

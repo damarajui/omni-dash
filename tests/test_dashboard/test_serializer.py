@@ -2768,11 +2768,11 @@ def test_from_export_column_stacked_maps_to_stacked_bar():
         },
     }
     defn = DashboardSerializer.from_omni_export(export_data)
-    assert defn.tiles[0].chart_type == "stacked_bar"
+    assert defn.tiles[0].chart_type == "column_stacked"
 
 
-def test_from_export_column_grouped_maps_to_grouped_bar():
-    """Omni 'columnGrouped' should reverse map to internal 'grouped_bar'."""
+def test_from_export_column_grouped_maps_to_column_grouped():
+    """Omni 'columnGrouped' should reverse map to internal 'column_grouped'."""
     export_data = {
         "document": {"name": "Test", "modelId": "m1"},
         "dashboard": {
@@ -2785,7 +2785,7 @@ def test_from_export_column_grouped_maps_to_grouped_bar():
         },
     }
     defn = DashboardSerializer.from_omni_export(export_data)
-    assert defn.tiles[0].chart_type == "grouped_bar"
+    assert defn.tiles[0].chart_type == "column_grouped"
 
 
 def test_from_export_markdown_maps_to_text():
