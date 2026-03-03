@@ -463,3 +463,53 @@ class TestGetTopicNative:
         detail = service.get_topic_native("m1", "sales")
         assert len(detail.views) == 2
         assert len(detail.fields) == 3  # 2 dims + 1 measure
+
+    def test_falls_back_to_yaml_when_native_returns_no_fields(self, service, mock_client):
+        """When native endpoint returns success but empty views, fall back to YAML."""
+        from unittest.mock import patch
+
+        # Native returns success=True but no views (no fields)
+        mock_client.get.return_value = {
+            "success": True,
+            "topic": {
+                "name": "dim_identities",
+                "label": "Identities",
+                "base_view_name": "",
+                "views": [],  # No views → no fields
+            },
+        }
+
+        yaml_detail = TopicDetail(
+            name="dim_identities",
+            label="Identities",
+            base_view="dim_identities",
+            fields=[{"name": "email", "qualified_name": "dim_identities.email", "type": "dimension"}],
+        )
+        with patch.object(service, "get_topic", return_value=yaml_detail) as mock_yaml:
+            result = service.get_topic_native("m1", "dim_identities")
+            mock_yaml.assert_called_once_with("m1", "dim_identities")
+            assert len(result.fields) == 1
+            assert result.fields[0]["name"] == "email"
+
+    def test_no_yaml_fallback_when_native_has_fields(self, service, mock_client):
+        """When native endpoint has fields, do not call YAML fallback."""
+        from unittest.mock import patch
+
+        mock_client.get.return_value = {
+            "success": True,
+            "topic": {
+                "name": "orders",
+                "base_view_name": "fact_orders",
+                "views": [
+                    {
+                        "name": "fact_orders",
+                        "dimensions": [{"field_name": "id", "data_type": "STRING"}],
+                        "measures": [],
+                    }
+                ],
+            },
+        }
+        with patch.object(service, "get_topic") as mock_yaml:
+            result = service.get_topic_native("m1", "orders")
+            mock_yaml.assert_not_called()
+            assert len(result.fields) == 1

@@ -203,9 +203,18 @@ class TestCreateDashboard:
     def test_returns_error_without_model_id(self, _):
         result = json.loads(mcp_server.create_dashboard(
             name="Test",
+            tiles=[{"name": "T", "chart_type": "line", "query": {"table": "t", "fields": ["t.f"]}}],
+        ))
+        assert "error" in result
+        assert "model_id" in result["error"].lower() or "OMNI_SHARED_MODEL_ID" in result["error"]
+
+    def test_returns_error_with_empty_tiles(self):
+        result = json.loads(mcp_server.create_dashboard(
+            name="Test",
             tiles=[],
         ))
         assert "error" in result
+        assert "empty" in result["error"].lower()
 
     @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
     def test_handles_validation_error(self, _):
@@ -2059,6 +2068,147 @@ class TestAddTilesPreservesState:
         assert dash["filterOrder"] == ["f1"]
 
 
+class TestAddTilesEphemeralMerge:
+    """add_tiles_to_dashboard must update the 'ephemeral' field so Omni
+    includes new tiles during import. Without this, tiles are silently dropped.
+    """
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch("omni_dash.mcp.server.get_settings")
+    @patch("omni_dash.mcp.server.DashboardSerializer")
+    def test_ephemeral_includes_new_tiles(self, mock_serializer, mock_settings, _, mock_doc_svc):
+        import copy
+        from omni_dash.api.documents import DashboardResponse, ImportResponse
+
+        mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+        mock_serializer.to_omni_create_payload.return_value = {
+            "name": "__add_tiles_tmp__",
+            "queryPresentations": [
+                {"name": "New Tile", "visConfig": {"visType": "basic", "chartType": "bar"}},
+            ],
+        }
+
+        orig_export = {
+            "document": {"name": "Dashboard", "sharedModelId": "model-abc"},
+            "dashboard": {
+                "ephemeral": "1:origMini1,2:origMini2",
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "Tile A", "miniUuid": "origMini1",
+                                "query": {"queryJson": {"table": "t", "fields": ["t.x"]}},
+                                "visConfig": {"visType": "basic", "chartType": "line"},
+                            }
+                        },
+                        {
+                            "queryPresentation": {
+                                "name": "Tile B", "miniUuid": "origMini2",
+                                "query": {"queryJson": {"table": "t", "fields": ["t.y"]}},
+                                "visConfig": {"visType": "basic", "chartType": "bar"},
+                            }
+                        },
+                    ]
+                },
+                "metadata": {
+                    "layouts": {
+                        "lg": [
+                            {"i": "1", "x": 0, "y": 0, "w": 12, "h": 40},
+                            {"i": "2", "x": 0, "y": 40, "w": 12, "h": 40},
+                        ]
+                    }
+                },
+            },
+            "workbookModel": {"base_model_id": "model-abc"},
+            "exportVersion": "0.1",
+        }
+
+        temp_export = {
+            "document": {"name": "__add_tiles_tmp__", "sharedModelId": "model-abc"},
+            "dashboard": {
+                "ephemeral": "1:newMiniA",
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "New Tile", "miniUuid": "newMiniA",
+                                "query": {"queryJson": {"table": "t", "fields": ["t.a"]}},
+                                "visConfig": {"visType": "basic", "chartType": "bar"},
+                            }
+                        }
+                    ]
+                },
+                "metadata": {
+                    "layouts": {"lg": [{"i": "1", "x": 0, "y": 0, "w": 6, "h": 40}]}
+                },
+            },
+            "workbookModel": {"base_model_id": "model-abc"},
+            "exportVersion": "0.1",
+        }
+
+        skeleton_export = {
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {"queryPresentation": {"name": "New Tile", "visConfig": {"visType": "basic"}}}
+                    ]
+                }
+            },
+            "workbookModel": {"base_model_id": "model-abc"},
+        }
+
+        mock_doc_svc.export_dashboard.side_effect = [
+            copy.deepcopy(orig_export),
+            copy.deepcopy(skeleton_export),
+            copy.deepcopy(temp_export),
+        ]
+        mock_doc_svc.create_dashboard.return_value = DashboardResponse(
+            document_id="skel-1", name="__add_tiles_tmp__"
+        )
+        mock_doc_svc.import_dashboard.side_effect = [
+            ImportResponse(document_id="temp-1", name="__add_tiles_tmp__"),
+            ImportResponse(document_id="merged-1", name="Dashboard"),
+        ]
+        mock_doc_svc.delete_dashboard.return_value = None
+
+        new_tiles = [{
+            "name": "New Tile",
+            "chart_type": "bar",
+            "query": {"table": "t", "fields": ["t.a"]},
+            "vis_config": {},
+            "size": "half",
+        }]
+
+        result = json.loads(mcp_server.add_tiles_to_dashboard(
+            dashboard_id="orig-1", tiles=new_tiles,
+        ))
+        assert result["status"] == "updated"
+        assert result["previous_tile_count"] == 2
+        assert result["new_tile_count"] == 3
+
+        # Verify ephemeral field includes new tile
+        final_import = mock_doc_svc.import_dashboard.call_args_list[-1]
+        imported_data = final_import[0][0]
+        dash = imported_data["dashboard"]
+        ephemeral = dash.get("ephemeral", "")
+
+        # Must contain original entries AND new tile entry
+        assert "1:origMini1" in ephemeral
+        assert "2:origMini2" in ephemeral
+        assert "3:newMiniA" in ephemeral
+
+        # Verify 3 total memberships
+        mems = dash["queryPresentationCollection"]["queryPresentationCollectionMemberships"]
+        assert len(mems) == 3
+
+        # Verify layout has 3 items with correct offset
+        layouts = dash["metadata"]["layouts"]["lg"]
+        assert len(layouts) == 3
+        new_layout = layouts[2]
+        assert new_layout["i"] == "3"
+        assert new_layout["y"] >= 80  # Below existing tiles
+
+
 class TestAutoFieldValidation:
     """Tests that create_dashboard and add_tiles auto-validate field references."""
 
@@ -2937,4 +3087,287 @@ class TestUpdateDashboardFilters:
 
         result = json.loads(mcp_server.update_dashboard_filters(dashboard_id="dash-1"))
         assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# PR #42: Field validation, update_tile, and UX fixes
+# ---------------------------------------------------------------------------
+
+
+class TestFieldValidationBaseView:
+    """_validate_tile_fields should accept base_view-qualified field names."""
+
+    def _mock_model_svc(self, topic_name, base_view, field_names):
+        model_svc = MagicMock()
+
+        def get_topic(model_id, table_name):
+            topic = MagicMock()
+            topic.base_view = base_view
+            topic.fields = [
+                {
+                    "name": f,
+                    "qualified_name": f"{base_view}.{f}",
+                }
+                for f in field_names
+            ]
+            return topic
+
+        model_svc.get_topic_native.side_effect = get_topic
+        return model_svc
+
+    @patch.object(mcp_server, "_get_model_svc")
+    def test_accepts_base_view_qualified_fields(self, mock_get_model_svc):
+        """Fields qualified with base_view should pass validation."""
+        mock_get_model_svc.return_value = self._mock_model_svc(
+            "Google Ads Performance", "google_ads_performance", ["clicks", "impressions"]
+        )
+        tiles = [
+            {
+                "name": "T1",
+                "query": {
+                    "table": "Google Ads Performance",
+                    "fields": [
+                        "google_ads_performance.clicks",
+                        "google_ads_performance.impressions",
+                    ],
+                },
+            }
+        ]
+        errors = mcp_server._validate_tile_fields(tiles, "model-1")
+        assert errors == []
+
+    @patch.object(mcp_server, "_get_model_svc")
+    def test_accepts_topic_name_qualified_fields(self, mock_get_model_svc):
+        """Fields qualified with topic name should also pass."""
+        mock_get_model_svc.return_value = self._mock_model_svc(
+            "orders", "fact_orders", ["order_id", "total"]
+        )
+        tiles = [
+            {
+                "name": "T1",
+                "query": {
+                    "table": "orders",
+                    "fields": ["orders.order_id", "orders.total"],
+                },
+            }
+        ]
+        errors = mcp_server._validate_tile_fields(tiles, "model-1")
+        assert errors == []
+
+    @patch.object(mcp_server, "_get_model_svc")
+    def test_rejects_truly_invalid_fields(self, mock_get_model_svc):
+        """Non-existent fields should still be rejected."""
+        mock_get_model_svc.return_value = self._mock_model_svc(
+            "orders", "fact_orders", ["order_id", "total"]
+        )
+        tiles = [
+            {
+                "name": "T1",
+                "query": {
+                    "table": "orders",
+                    "fields": ["orders.order_id", "orders.nonexistent"],
+                },
+            }
+        ]
+        errors = mcp_server._validate_tile_fields(tiles, "model-1")
+        assert len(errors) == 1
+        assert "nonexistent" in errors[0]
+
+
+class TestUpdateTileSetdefaultFix:
+    """update_tile should not create self-referencing dicts."""
+
+    def test_sql_on_empty_query(self, mock_doc_svc):
+        """Setting SQL on a tile with no queryJson should not create circular ref."""
+        import copy
+        from omni_dash.api.documents import ImportResponse
+
+        # Export with no queryJson key
+        export = copy.deepcopy(_UPDATE_TILE_EXPORT)
+        qp = export["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]
+        qp["query"] = {}  # Empty query — no queryJson
+
+        mock_doc_svc.export_dashboard.return_value = export
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
+            document_id="new-1", name="D"
+        )
+        mock_doc_svc.delete_dashboard.return_value = None
+
+        with patch("omni_dash.mcp.server.get_settings") as mock_s:
+            mock_s.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+            result = json.loads(mcp_server.update_tile(
+                dashboard_id="dash-1",
+                tile_name="Revenue",
+                sql="SELECT 1",
+            ))
+
+        assert result["status"] == "updated"
+        # Verify the import payload can be serialized without RecursionError
+        import_call = mock_doc_svc.import_dashboard.call_args
+        imported_data = import_call[0][0]
+        # This would crash with RecursionError if the circular ref bug existed
+        json.dumps(imported_data)
+        qp_data = imported_data["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]
+        assert qp_data["isSql"] is True
+        assert qp_data["query"]["queryJson"]["userEditedSQL"] == "SELECT 1"
+
+    def test_fields_on_empty_query(self, mock_doc_svc):
+        """Setting fields on a tile with no queryJson should work."""
+        import copy
+        from omni_dash.api.documents import ImportResponse
+
+        export = copy.deepcopy(_UPDATE_TILE_EXPORT)
+        qp = export["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]
+        qp["query"] = {}
+
+        mock_doc_svc.export_dashboard.return_value = export
+        mock_doc_svc.import_dashboard.return_value = ImportResponse(
+            document_id="new-1", name="D"
+        )
+        mock_doc_svc.delete_dashboard.return_value = None
+
+        with patch("omni_dash.mcp.server.get_settings") as mock_s:
+            mock_s.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
+            result = json.loads(mcp_server.update_tile(
+                dashboard_id="dash-1",
+                tile_name="Revenue",
+                fields=["t.rev", "t.cost"],
+            ))
+
+        assert result["status"] == "updated"
+        import_call = mock_doc_svc.import_dashboard.call_args
+        imported_data = import_call[0][0]
+        json.dumps(imported_data)  # No RecursionError
+
+
+class TestGetDashboardTruncation:
+    """get_dashboard should warn when tiles are truncated."""
+
+    def test_shows_note_when_tiles_truncated(self, mock_doc_svc):
+        from omni_dash.api.documents import DashboardResponse
+
+        mock_doc_svc.get_dashboard.return_value = DashboardResponse(
+            document_id="abc",
+            name="Big Dashboard",
+            query_presentations=[{"id": f"qp{i}"} for i in range(15)],
+        )
+
+        result = json.loads(mcp_server.get_dashboard("abc"))
+        assert result["tile_count"] == 15
+        assert len(result["query_presentations"]) == 10
+        assert "note" in result
+        assert "15" in result["note"]
+
+    def test_no_note_when_under_limit(self, mock_doc_svc):
+        from omni_dash.api.documents import DashboardResponse
+
+        mock_doc_svc.get_dashboard.return_value = DashboardResponse(
+            document_id="abc",
+            name="Small Dashboard",
+            query_presentations=[{"id": "qp1"}, {"id": "qp2"}],
+        )
+
+        result = json.loads(mcp_server.get_dashboard("abc"))
+        assert result["tile_count"] == 2
+        assert "note" not in result
+
+
+class TestProfileDataFieldLimit:
+    """profile_data should note when fields are auto-limited."""
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-1")
+    @patch.object(mcp_server, "_get_model_svc")
+    @patch.object(mcp_server, "_get_query_runner")
+    def test_notes_field_truncation(self, mock_qr, mock_model, _):
+        topic = MagicMock()
+        topic.fields = [
+            {"name": f"field_{i}"} for i in range(50)
+        ]
+        mock_model.return_value.get_topic_native.return_value = topic
+
+        runner = MagicMock()
+        query_result = MagicMock()
+        query_result.rows = [{"field_0": "val"}]
+        query_result.row_count = 1
+        runner.run.return_value = query_result
+        mock_qr.return_value = runner
+
+        result = json.loads(mcp_server.profile_data(table="big_table"))
+        assert "note" in result
+        assert "50" in result["note"]
+        assert "20" in result["note"]
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-1")
+    @patch.object(mcp_server, "_get_model_svc")
+    @patch.object(mcp_server, "_get_query_runner")
+    def test_no_note_when_under_limit(self, mock_qr, mock_model, _):
+        topic = MagicMock()
+        topic.fields = [{"name": f"field_{i}"} for i in range(5)]
+        mock_model.return_value.get_topic_native.return_value = topic
+
+        runner = MagicMock()
+        query_result = MagicMock()
+        query_result.rows = [{"field_0": "val"}]
+        query_result.row_count = 1
+        runner.run.return_value = query_result
+        mock_qr.return_value = runner
+
+        result = json.loads(mcp_server.profile_data(table="small_table"))
+        assert "note" not in result
+
+
+class TestEmptyModelIdCheck:
+    """Tools should return clear error when no model_id is available."""
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="")
+    def test_suggest_chart_empty_model(self, _):
+        result = json.loads(mcp_server.suggest_chart(table="t"))
+        assert "error" in result
+        assert "model_id" in result["error"].lower() or "OMNI_SHARED_MODEL_ID" in result["error"]
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="")
+    def test_profile_data_empty_model(self, _):
+        result = json.loads(mcp_server.profile_data(table="t"))
+        assert "error" in result
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="")
+    def test_generate_dashboard_empty_model(self, _):
+        result = json.loads(mcp_server.generate_dashboard(prompt="test"))
+        assert "error" in result
+
+
+class TestSuggestChartFieldMatchingBaseView:
+    """suggest_chart should match fields by qualified_name (base_view.field)."""
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-1")
+    @patch.object(mcp_server, "_get_model_svc")
+    def test_matches_base_view_qualified_fields(self, mock_model, _):
+        topic = MagicMock()
+        topic.fields = [
+            {"name": "clicks", "qualified_name": "google_ads.clicks", "type": "dimension"},
+            {"name": "impressions", "qualified_name": "google_ads.impressions", "type": "dimension"},
+            {"name": "cost", "qualified_name": "google_ads.cost", "type": "measure"},
+        ]
+        mock_model.return_value.get_topic_native.return_value = topic
+
+        with patch("omni_dash.ai.chart_recommender.classify_field") as mock_clf, \
+             patch("omni_dash.ai.chart_recommender.recommend_chart") as mock_rec:
+            mock_clf.side_effect = lambda f: f
+            mock_rec.return_value = MagicMock(
+                chart_type="bar", confidence=0.9,
+                reasoning="test", vis_config={}, alternatives=[],
+            )
+            # Use qualified_name format from get_topic_fields output
+            result = json.loads(mcp_server.suggest_chart(
+                table="Google Ads",
+                fields=["google_ads.clicks", "google_ads.cost"],
+            ))
+
+        assert result.get("fields_analyzed") == 2
 

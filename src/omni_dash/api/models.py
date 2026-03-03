@@ -281,7 +281,7 @@ class ModelService:
                         "sql": measure.get("sql", ""),
                     })
 
-            return TopicDetail(
+            detail = TopicDetail(
                 name=topic_name,
                 label=topic.get("label", ""),
                 description=topic.get("description", ""),
@@ -289,6 +289,20 @@ class ModelService:
                 views=views_info,
                 fields=all_fields,
             )
+
+            # If native endpoint returned success but no fields, fall back
+            # to YAML parsing which may have the fields (some topics like
+            # dim_identities have empty views in the native API but fields
+            # in their .view YAML files).
+            if not all_fields:
+                try:
+                    yaml_detail = self.get_topic(model_id, topic_name)
+                    if yaml_detail.fields:
+                        return yaml_detail
+                except Exception:
+                    pass
+
+            return detail
         except (OmniAPIError, KeyError, TypeError) as e:
             logger.debug(
                 "Native topic endpoint failed for %s, falling back to YAML: %s",
