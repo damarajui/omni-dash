@@ -993,6 +993,14 @@ def add_tiles_to_dashboard(
             )
             patched_memberships.extend(temp_memberships)
 
+            # Re-index queryIdentifierMapKey on ALL memberships (1-indexed).
+            # Temp memberships have keys like "1", which collide with
+            # original memberships. Omni deduplicates by this key, causing
+            # new tiles to be silently dropped on import.
+            for idx, membership in enumerate(patched_memberships, start=1):
+                qp = membership.get("queryPresentation", {})
+                qp["queryIdentifierMapKey"] = str(idx)
+
             # 7. Merge layout items with offset AND update ephemeral field.
             # The `ephemeral` field maps layout indices to tile miniUuids:
             #   "1:ecYPPwXE,2:0fhTwpih,..."
@@ -1027,8 +1035,14 @@ def add_tiles_to_dashboard(
             # Build new ephemeral entries for the appended tiles.
             # Use max existing layout `i` (not membership count) to avoid
             # index collisions with text tiles or other non-query layout items.
+            def _safe_int(v: Any) -> int:
+                try:
+                    return int(v)
+                except (ValueError, TypeError):
+                    return 0
+
             max_existing_i = max(
-                (int(item.get("i", 0)) for item in patched_layout),
+                (_safe_int(item.get("i", 0)) for item in patched_layout),
                 default=0,
             )
             new_eph_parts: list[str] = []

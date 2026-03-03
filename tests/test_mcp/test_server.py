@@ -2201,6 +2201,17 @@ class TestAddTilesEphemeralMerge:
         assert new_layout["i"] == "3"
         assert new_layout["y"] >= 80  # Below existing tiles
 
+        # Verify queryIdentifierMapKey is re-indexed (no duplicates)
+        all_keys = []
+        for m in mems:
+            qp = m.get("queryPresentation", {})
+            key = qp.get("queryIdentifierMapKey")
+            if key:
+                all_keys.append(key)
+        assert all_keys == ["1", "2", "3"], (
+            f"queryIdentifierMapKey should be re-indexed 1,2,3 but got {all_keys}"
+        )
+
 
 class TestAutoFieldValidation:
     """Tests that create_dashboard and add_tiles auto-validate field references."""
