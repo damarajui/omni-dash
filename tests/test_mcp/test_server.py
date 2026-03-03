@@ -305,6 +305,24 @@ class TestGetTopicFields:
         assert result["name"] == "mart_seo"
         assert len(result["fields"]) == 1
 
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    def test_truncates_large_field_lists(self, _, mock_model_svc):
+        from omni_dash.api.models import TopicDetail
+
+        big_fields = [{"name": f"field_{i}", "type": "dimension"} for i in range(300)]
+        mock_model_svc.get_topic_native.return_value = TopicDetail(
+            name="big_topic",
+            label="Big",
+            fields=big_fields,
+            views=[],
+        )
+
+        result = json.loads(mcp_server.get_topic_fields("big_topic"))
+        assert result["field_count"] == 300
+        assert len(result["fields"]) == 200
+        assert result["truncated"] is True
+        assert "200 of 300" in result["note"]
+
 
 # ---------------------------------------------------------------------------
 # query_data

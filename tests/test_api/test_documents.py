@@ -198,3 +198,19 @@ class TestUpdateFilters:
         mock_client.patch.return_value = None
         result = service.update_filters("dash-1", filters={"f1": {"values": []}})
         assert result == {}
+
+    def test_clear_existing_draft(self, service, mock_client):
+        mock_client.patch.return_value = {"filters": {"f1": {"values": ["a"]}}}
+        service.update_filters(
+            "dash-1",
+            filters={"f1": {"values": ["a"]}},
+            clear_existing_draft=True,
+        )
+        body = mock_client.patch.call_args[1]["json"]
+        assert body["clearExistingDraft"] is True
+        assert "f1" in body["filters"]
+
+    def test_clear_draft_alone_raises(self, service, mock_client):
+        """clear_existing_draft alone without filter changes should raise."""
+        with pytest.raises(ValueError, match="Must provide at least one"):
+            service.update_filters("dash-1", clear_existing_draft=True)
