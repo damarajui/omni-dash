@@ -1016,11 +1016,25 @@ def add_tiles_to_dashboard(
             for tm in temp_memberships:
                 if orig_collection_id:
                     tm["queryPresentationCollectionId"] = orig_collection_id
-                # Remove membership-level and QP-level IDs so Omni
-                # generates fresh ones instead of deduplicating.
+                # Remove ALL IDs and hashes so Omni generates fresh ones
+                # instead of deduplicating against existing tiles.
+                # Without this, Omni silently drops tiles whose IDs
+                # collide with existing ones on import.
                 tm.pop("id", None)
                 qp = tm.get("queryPresentation", {})
                 qp.pop("id", None)
+                qp.pop("visConfigId", None)
+                qp.pop("queryId", None)
+                # Strip nested visConfig IDs and hash
+                vis_cfg = qp.get("visConfig", {})
+                if vis_cfg:
+                    vis_cfg.pop("id", None)
+                    vis_cfg.pop("jsonHash", None)
+                # Strip nested query IDs and hash
+                query_obj = qp.get("query", {})
+                if query_obj:
+                    query_obj.pop("id", None)
+                    query_obj.pop("jsonHash", None)
 
             patched_memberships.extend(temp_memberships)
 
@@ -1713,8 +1727,14 @@ def profile_data(
         profiles: dict[str, Any] = {}
         for field_name in qualified:
             col_values = []
+            # Arrow results may use bare column names (e.g. "week_start")
+            # rather than qualified names ("mart_seo.week_start").
+            # Try qualified first, then fall back to bare name.
+            bare_name = field_name.split(".", 1)[-1] if "." in field_name else field_name
             for row in result.rows:
                 val = row.get(field_name)
+                if val is None and field_name != bare_name:
+                    val = row.get(bare_name)
                 col_values.append(val)
 
             non_null = [v for v in col_values if v is not None]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from omni_dash.exceptions import (
@@ -172,6 +173,60 @@ class TestNdjsonResilience:
         with patch.object(client._http, "request", return_value=response):
             result = client.post_ndjson("/api/v1/query/run")
             assert result == []
+
+
+class TestNdjsonRetry:
+    """post_ndjson retries on 5xx errors and connection failures."""
+
+    def test_retries_on_500(self, client):
+        error_response = MagicMock()
+        error_response.status_code = 500
+        error_response.text = "Internal Server Error"
+
+        ok_response = MagicMock()
+        ok_response.status_code = 200
+        ok_response.text = '{"data": 1}\n'
+
+        with patch.object(client._http, "request", side_effect=[error_response, ok_response]):
+            result = client.post_ndjson("/api/v1/query/run")
+            assert result == [{"data": 1}]
+
+    def test_retries_on_502(self, client):
+        error_response = MagicMock()
+        error_response.status_code = 502
+        error_response.text = "Bad Gateway"
+
+        ok_response = MagicMock()
+        ok_response.status_code = 200
+        ok_response.text = '{"data": 2}\n'
+
+        with patch.object(client._http, "request", side_effect=[error_response, ok_response]):
+            result = client.post_ndjson("/api/v1/query/run")
+            assert result == [{"data": 2}]
+
+    def test_retries_on_timeout(self, client):
+        ok_response = MagicMock()
+        ok_response.status_code = 200
+        ok_response.text = '{"data": 3}\n'
+
+        with patch.object(
+            client._http, "request",
+            side_effect=[httpx.TimeoutException("timeout"), ok_response],
+        ):
+            result = client.post_ndjson("/api/v1/query/run")
+            assert result == [{"data": 3}]
+
+    def test_retries_on_connection_error(self, client):
+        ok_response = MagicMock()
+        ok_response.status_code = 200
+        ok_response.text = '{"data": 4}\n'
+
+        with patch.object(
+            client._http, "request",
+            side_effect=[httpx.ConnectError("refused"), ok_response],
+        ):
+            result = client.post_ndjson("/api/v1/query/run")
+            assert result == [{"data": 4}]
 
 
 class TestPing:

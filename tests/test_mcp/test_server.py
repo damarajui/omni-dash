@@ -3618,6 +3618,46 @@ class TestProfileDataPublicAPI:
         assert "my_table.col_a" in call_args.fields
         assert "my_table.col_b" in call_args.fields
 
+    def test_handles_bare_column_names_in_rows(self, mock_model_svc, mock_query_runner):
+        """Arrow results may return bare column names instead of qualified.
+        profile_data should fall back to bare names when qualified lookup fails."""
+        mcp_server._shared_model_id = "m1"
+
+        mock_model_svc.get_topic_native.return_value = MagicMock(
+            fields=[{"name": "col_a"}, {"name": "col_b"}],
+            base_view="my_table",
+        )
+
+        # Rows have BARE column names (as Arrow decoder returns)
+        mock_query_runner.run.return_value = MagicMock(
+            rows=[
+                {"col_a": 10, "col_b": "hello"},
+                {"col_a": 20, "col_b": "world"},
+                {"col_a": None, "col_b": "test"},
+            ],
+            fields=["col_a", "col_b"],
+            row_count=3,
+        )
+
+        with patch.object(mcp_server, "_resolve_table_name", return_value="my_table"):
+            result = json.loads(mcp_server.profile_data("my_table"))
+
+        assert "error" not in result
+        fields = result["fields"]
+
+        # col_a should have found values via bare name fallback
+        col_a = fields["my_table.col_a"]
+        assert col_a["sample_count"] == 3
+        assert col_a["null_count"] == 1
+        assert col_a["distinct_count"] == 2
+        assert col_a["inferred_type"] == "number"
+
+        # col_b should also have found values
+        col_b = fields["my_table.col_b"]
+        assert col_b["sample_count"] == 3
+        assert col_b["null_count"] == 0
+        assert col_b["distinct_count"] == 3
+
 
 class TestQueryDataSortPublicAPI:
     """query_data should use QueryBuilder.sort() for auto-qualification."""
@@ -4104,6 +4144,142 @@ class TestAddTilesMembershipCleaning:
         # queryIdentifierMapKeys re-indexed
         assert memberships[0]["queryPresentation"]["queryIdentifierMapKey"] == "1"
         assert memberships[1]["queryPresentation"]["queryIdentifierMapKey"] == "2"
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch("omni_dash.mcp.server.get_settings")
+    def test_temp_memberships_strip_all_dedup_ids(
+        self, mock_settings, _, mock_doc_svc,
+    ):
+        """Omni deduplicates tiles by visConfigId, queryId, query.id,
+        visConfig.id, and jsonHash. All must be stripped from temp
+        memberships to prevent silent tile loss on import."""
+        from omni_dash.api.documents import ImportResponse
+
+        mock_settings.return_value = MagicMock(omni_base_url="https://test.omniapp.co")
+        svc = mock_doc_svc
+
+        orig_export = {
+            "document": {"name": "Dashboard", "folderId": "f1"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "id": "orig-coll",
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "id": "m1",
+                            "queryPresentationCollectionId": "orig-coll",
+                            "queryPresentation": {
+                                "id": "qp1",
+                                "name": "Existing",
+                                "miniUuid": "AAA11111",
+                                "queryIdentifierMapKey": "1",
+                                "visConfigId": "vc-orig-1",
+                                "queryId": "q-orig-1",
+                                "query": {
+                                    "id": "q-orig-1",
+                                    "jsonHash": "hash-q1",
+                                    "queryJson": {"table": "t", "fields": ["t.a"]},
+                                },
+                                "visConfig": {
+                                    "id": "vc-orig-1",
+                                    "jsonHash": "hash-vc1",
+                                    "visType": "basic",
+                                    "chartType": "line",
+                                },
+                            },
+                        }
+                    ],
+                },
+                "metadata": {"layouts": {"lg": [{"i": "1", "x": 0, "y": 0, "w": 24, "h": 51}]}},
+                "ephemeral": "1:AAA11111",
+            },
+            "exportVersion": "0.1",
+        }
+
+        temp_export = {
+            "document": {"name": "__add_tiles_tmp__"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "id": "temp-coll",
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "id": "tm1",
+                            "queryPresentationCollectionId": "temp-coll",
+                            "queryPresentation": {
+                                "id": "tqp1",
+                                "name": "New Tile",
+                                "miniUuid": "BBB22222",
+                                "queryIdentifierMapKey": "1",
+                                "visConfigId": "vc-temp-1",
+                                "queryId": "q-temp-1",
+                                "query": {
+                                    "id": "q-temp-1",
+                                    "jsonHash": "hash-tq1",
+                                    "queryJson": {"table": "t", "fields": ["t.b"]},
+                                },
+                                "visConfig": {
+                                    "id": "vc-temp-1",
+                                    "jsonHash": "hash-tvc1",
+                                    "visType": "basic",
+                                    "chartType": "bar",
+                                },
+                            },
+                        }
+                    ],
+                },
+                "metadata": {"layouts": {"lg": [{"i": "1", "x": 0, "y": 0, "w": 24, "h": 51}]}},
+                "ephemeral": "1:BBB22222",
+            },
+            "exportVersion": "0.1",
+        }
+
+        svc.export_dashboard.side_effect = [orig_export, temp_export]
+        svc.import_dashboard.return_value = ImportResponse(
+            document_id="new-dash", name="Dashboard",
+        )
+
+        import_calls = []
+        orig_import = svc.import_dashboard
+        def capture_import(*args, **kwargs):
+            import_calls.append(args[0] if args else kwargs.get("export_data"))
+            return orig_import(*args, **kwargs)
+        svc.import_dashboard = capture_import
+
+        with patch.object(mcp_server, "_create_with_vis_configs", return_value=("temp-id", "__add_tiles_tmp__")):
+            result = json.loads(mcp_server.add_tiles_to_dashboard(
+                "orig-id",
+                [{"name": "New Tile", "chart_type": "bar", "query": {"table": "t", "fields": ["t.b"]}}],
+            ))
+
+        assert result["status"] == "updated"
+
+        imported = import_calls[0]
+        memberships = (
+            imported["dashboard"]["queryPresentationCollection"]
+            ["queryPresentationCollectionMemberships"]
+        )
+        assert len(memberships) == 2
+
+        # Original membership should keep its IDs (not touched)
+        orig_qp = memberships[0]["queryPresentation"]
+        assert orig_qp.get("visConfigId") == "vc-orig-1"
+        assert orig_qp.get("queryId") == "q-orig-1"
+        assert orig_qp["query"]["id"] == "q-orig-1"
+        assert orig_qp["visConfig"]["id"] == "vc-orig-1"
+
+        # Temp membership: ALL dedup-causing IDs must be stripped
+        temp_qp = memberships[1]["queryPresentation"]
+        assert "id" not in memberships[1]            # membership ID
+        assert "id" not in temp_qp                   # QP ID
+        assert "visConfigId" not in temp_qp          # visConfig ref
+        assert "queryId" not in temp_qp              # query ref
+        assert "id" not in temp_qp["visConfig"]      # visConfig object ID
+        assert "jsonHash" not in temp_qp["visConfig"]  # visConfig hash
+        assert "id" not in temp_qp["query"]          # query object ID
+        assert "jsonHash" not in temp_qp["query"]    # query hash
+
+        # Data fields should still be present
+        assert temp_qp["query"]["queryJson"]["fields"] == ["t.b"]
+        assert temp_qp["visConfig"]["chartType"] == "bar"
 
 
 # ---------------------------------------------------------------------------
