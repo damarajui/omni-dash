@@ -267,10 +267,10 @@ def _create_via_import_fallback(
         pos = qp.get("position", {})
         layouts.append({
             "i": str(idx),
-            "x": pos.get("x", (idx - 1) % 2 * 12),
-            "y": pos.get("y", (idx - 1) // 2 * 51),
+            "x": pos.get("x", 0),
+            "y": pos.get("y", (idx - 1) * 6),
             "w": pos.get("w", 12),
-            "h": pos.get("h", 51),
+            "h": pos.get("h", 6),
         })
 
     export_payload: dict[str, Any] = {
@@ -409,14 +409,16 @@ def _create_with_vis_configs(
                 existing_vc["fields"] = vc_patch["fields"]
             existing_vc.pop("jsonHash", None)
 
-        # Patch query data (filters, pivots, sorts) into queryJson
-        # Export stores query under query.queryJson, not query directly
+        # Patch query data (filters, pivots, sorts) into queryJson.
+        # Export stores query under query.queryJson, not query directly.
+        # Always apply overrides — Omni's create endpoint may write
+        # placeholder values that differ from the user's intended config.
         if tile_name in query_overrides_by_name:
             q_overrides = query_overrides_by_name[tile_name]
             q_json = qp_data.get("query", {}).get("queryJson", {})
             if q_json:
                 for key in ("filters", "pivots", "sorts"):
-                    if key in q_overrides and not q_json.get(key):
+                    if key in q_overrides:
                         q_json[key] = q_overrides[key]
 
     # Inject dashboard-level filters from original payload into the export.
@@ -438,6 +440,17 @@ def _create_with_vis_configs(
         name=name,
         folder_id=folder_id,
     )
+
+    # Guard: if reimport returned empty ID, preserve skeleton for recovery
+    if not reimport_result.document_id:
+        logger.error(
+            "Reimport returned empty document_id; skeleton %s preserved",
+            skeleton_id,
+        )
+        raise OmniDashError(
+            "Import succeeded but returned no document_id. "
+            f"Skeleton dashboard {skeleton_id} preserved for manual recovery."
+        )
 
     # Delete the skeleton (best-effort)
     try:
@@ -939,108 +952,128 @@ def add_tiles_to_dashboard(
             folder_id=effective_folder,
         )
 
-        # 4. Export temp skeleton (new tiles now in export format)
-        temp_export = doc_svc.export_dashboard(temp_id)
-        temp_dash = temp_export.get("dashboard", {})
-        temp_qpc = temp_dash.get("queryPresentationCollection", {})
-        temp_memberships = temp_qpc.get(
-            "queryPresentationCollectionMemberships", []
-        )
-
-        # 5. Calculate layout offset — position new tiles below existing ones
-        orig_layout = (
-            orig_dash.get("metadata", {}).get("layouts", {}).get("lg", [])
-        )
-        max_y = 0
-        for item in orig_layout:
-            bottom = item.get("y", 0) + item.get("h", 0)
-            if bottom > max_y:
-                max_y = bottom
-
-        # 6. Merge temp export's memberships into original export
-        patched = copy.deepcopy(export_data)
-        patched_dash = patched.get("dashboard", {})
-        patched_qpc = patched_dash.get("queryPresentationCollection", {})
-        patched_memberships = patched_qpc.get(
-            "queryPresentationCollectionMemberships", []
-        )
-        patched_memberships.extend(temp_memberships)
-
-        # 7. Merge layout items with offset AND update ephemeral field.
-        # The `ephemeral` field maps layout indices to tile miniUuids:
-        #   "1:ecYPPwXE,2:0fhTwpih,..."
-        # Without updating it, Omni silently ignores new tiles on import.
-        temp_layout = (
-            temp_dash.get("metadata", {}).get("layouts", {}).get("lg", [])
-        )
-        patched_layout = (
-            patched_dash.get("metadata", {}).get("layouts", {}).get("lg", [])
-        )
-
-        # Get ephemeral entries from temp export for new tiles
-        temp_ephemeral = temp_dash.get("ephemeral", "")
-        temp_eph_parts = [
-            p.strip() for p in temp_ephemeral.split(",") if p.strip()
-        ]
-        # Build mapping of temp layout index -> miniUuid
-        temp_eph_map: dict[str, str] = {}
-        for part in temp_eph_parts:
-            if ":" in part:
-                idx, mini = part.split(":", 1)
-                temp_eph_map[idx] = mini
-
-        # Also get miniUuids directly from temp memberships as fallback
-        temp_mini_uuids = []
-        for tm in temp_memberships:
-            qp = tm.get("queryPresentation", {})
-            mini = qp.get("miniUuid", "")
-            if mini:
-                temp_mini_uuids.append(mini)
-
-        # Build new ephemeral entries for the appended tiles
-        new_eph_parts: list[str] = []
-        base_idx = previous_count
-        for idx_offset, item in enumerate(temp_layout):
-            new_i = str(base_idx + 1)
-            old_i = str(item.get("i", idx_offset + 1))
-            # Get miniUuid from ephemeral map, or from membership list
-            mini = temp_eph_map.get(old_i, "")
-            if not mini and idx_offset < len(temp_mini_uuids):
-                mini = temp_mini_uuids[idx_offset]
-            if mini:
-                new_eph_parts.append(f"{new_i}:{mini}")
-
-            new_item = dict(item)
-            new_item["i"] = new_i
-            new_item["y"] = new_item.get("y", 0) + max_y
-            patched_layout.append(new_item)
-            base_idx += 1
-
-        # Append new ephemeral entries to original
-        orig_ephemeral = patched_dash.get("ephemeral", "")
-        if new_eph_parts:
-            sep = "," if orig_ephemeral else ""
-            patched_dash["ephemeral"] = (
-                orig_ephemeral + sep + ",".join(new_eph_parts)
+        # Wrap remaining steps so temp skeleton is always cleaned up
+        try:
+            # 4. Export temp skeleton (new tiles now in export format)
+            temp_export = doc_svc.export_dashboard(temp_id)
+            temp_dash = temp_export.get("dashboard", {})
+            temp_qpc = temp_dash.get("queryPresentationCollection", {})
+            temp_memberships = temp_qpc.get(
+                "queryPresentationCollectionMemberships", []
             )
 
-        # 8. Reimport merged export
-        reimport_model_id = _resolve_model_id_from_export(patched)
-        reimport_result = doc_svc.import_dashboard(
-            patched,
-            base_model_id=reimport_model_id,
-            name=effective_name,
-            folder_id=effective_folder,
-        )
-        new_id = reimport_result.document_id
-        new_name = reimport_result.name
+            # 5. Calculate layout offset — position new tiles below existing ones
+            orig_layout = (
+                orig_dash.get("metadata", {}).get("layouts", {}).get("lg", [])
+            )
+            max_y = 0
+            for item in orig_layout:
+                bottom = item.get("y", 0) + item.get("h", 0)
+                if bottom > max_y:
+                    max_y = bottom
 
-        # 9. Cleanup: delete original + temp skeleton
-        for del_id in (dashboard_id, temp_id):
+            # 6. Merge temp export's memberships into original export
+            patched = copy.deepcopy(export_data)
+            patched_dash = patched.get("dashboard", {})
+            patched_qpc = patched_dash.get("queryPresentationCollection", {})
+            patched_memberships = patched_qpc.get(
+                "queryPresentationCollectionMemberships", []
+            )
+            patched_memberships.extend(temp_memberships)
+
+            # 7. Merge layout items with offset AND update ephemeral field.
+            # The `ephemeral` field maps layout indices to tile miniUuids:
+            #   "1:ecYPPwXE,2:0fhTwpih,..."
+            # Without updating it, Omni silently ignores new tiles on import.
+            temp_layout = (
+                temp_dash.get("metadata", {}).get("layouts", {}).get("lg", [])
+            )
+            patched_layout = (
+                patched_dash.get("metadata", {}).get("layouts", {}).get("lg", [])
+            )
+
+            # Get ephemeral entries from temp export for new tiles
+            temp_ephemeral = temp_dash.get("ephemeral", "")
+            temp_eph_parts = [
+                p.strip() for p in temp_ephemeral.split(",") if p.strip()
+            ]
+            # Build mapping of temp layout index -> miniUuid
+            temp_eph_map: dict[str, str] = {}
+            for part in temp_eph_parts:
+                if ":" in part:
+                    idx, mini = part.split(":", 1)
+                    temp_eph_map[idx] = mini
+
+            # Also get miniUuids directly from temp memberships as fallback
+            temp_mini_uuids = []
+            for tm in temp_memberships:
+                qp = tm.get("queryPresentation", {})
+                mini = qp.get("miniUuid", "")
+                if mini:
+                    temp_mini_uuids.append(mini)
+
+            # Build new ephemeral entries for the appended tiles.
+            # Use max existing layout `i` (not membership count) to avoid
+            # index collisions with text tiles or other non-query layout items.
+            max_existing_i = max(
+                (int(item.get("i", 0)) for item in patched_layout),
+                default=0,
+            )
+            new_eph_parts: list[str] = []
+            base_idx = max_existing_i
+            for idx_offset, item in enumerate(temp_layout):
+                new_i = str(base_idx + 1)
+                old_i = str(item.get("i", idx_offset + 1))
+                # Get miniUuid from ephemeral map, or from membership list
+                mini = temp_eph_map.get(old_i, "")
+                if not mini and idx_offset < len(temp_mini_uuids):
+                    mini = temp_mini_uuids[idx_offset]
+                if mini:
+                    new_eph_parts.append(f"{new_i}:{mini}")
+
+                new_item = dict(item)
+                new_item["i"] = new_i
+                new_item["y"] = new_item.get("y", 0) + max_y
+                patched_layout.append(new_item)
+                base_idx += 1
+
+            # Append new ephemeral entries to original
+            orig_ephemeral = patched_dash.get("ephemeral", "")
+            if new_eph_parts:
+                sep = "," if orig_ephemeral else ""
+                patched_dash["ephemeral"] = (
+                    orig_ephemeral + sep + ",".join(new_eph_parts)
+                )
+
+            # 8. Reimport merged export
+            reimport_model_id = _resolve_model_id_from_export(patched)
+            reimport_result = doc_svc.import_dashboard(
+                patched,
+                base_model_id=reimport_model_id,
+                name=effective_name,
+                folder_id=effective_folder,
+            )
+            new_id = reimport_result.document_id
+            new_name = reimport_result.name
+
+            # Guard: don't delete original if reimport returned empty ID
+            if not new_id:
+                raise OmniDashError(
+                    "Import succeeded but returned no document_id. "
+                    f"Original dashboard {dashboard_id} preserved."
+                )
+        finally:
+            # Always clean up temp skeleton, even if reimport fails
             try:
-                doc_svc.delete_dashboard(del_id)
+                doc_svc.delete_dashboard(temp_id)
             except Exception as e:
-                logger.warning("Failed to delete %s during add_tiles cleanup: %s", del_id, e)
+                logger.warning("Failed to delete temp %s: %s", temp_id, e)
+
+        # 9. Delete original (only after successful reimport with valid ID)
+        try:
+            doc_svc.delete_dashboard(dashboard_id)
+        except Exception as e:
+            logger.warning("Failed to delete original %s during add_tiles cleanup: %s", dashboard_id, e)
 
         return json.dumps({
             "status": "updated",
@@ -1180,11 +1213,26 @@ def update_tile(
         )
         new_id = reimport_result.document_id
 
+        # Guard: don't delete original if reimport returned empty ID
+        if not new_id:
+            raise OmniDashError(
+                "Import succeeded but returned no document_id. "
+                f"Original dashboard {dashboard_id} preserved."
+            )
+
         # 5. Delete original
         try:
             doc_svc.delete_dashboard(dashboard_id)
         except Exception as e:
             logger.warning("Failed to delete original %s after update_tile: %s", dashboard_id, e)
+            return json.dumps({
+                "status": "partial",
+                "warning": f"Tile updated but original dashboard not deleted: {e}",
+                "old_dashboard_id": dashboard_id,
+                "dashboard_id": new_id,
+                "tile_name": title or tile_name,
+                "url": _build_dashboard_url(new_id),
+            })
 
         return json.dumps({
             "status": "updated",
@@ -1326,15 +1374,13 @@ def query_data(
         builder.fields(fields)
         builder.limit(limit)
         if sorts:
-            # Normalize sort keys to snake_case (Omni API format)
-            normalized = []
             for s in sorts:
-                normalized.append({
-                    "column_name": s.get("column_name") or s.get("columnName", ""),
-                    "sort_descending": s.get("sort_descending", s.get("sortDescending", False)),
-                })
-            builder._sorts = normalized
+                col = s.get("column_name") or s.get("columnName", "")
+                desc = s.get("sort_descending", s.get("sortDescending", False))
+                builder.sort(col, descending=desc)
         if filters:
+            # Pass filters through directly — Omni filter format is opaque
+            # and may use {kind, type, values} or {operator, value}
             builder._filters = filters
 
         spec = builder.build()
@@ -1599,8 +1645,8 @@ def profile_data(
                 # query and extract column names from the result.
                 try:
                     builder = QueryBuilder(table=resolved_table, model_id=mid)
-                    builder._fields = [f"{resolved_table}.*"]
-                    builder._limit = 1
+                    builder.fields([f"{resolved_table}.*"])
+                    builder.limit(1)
                     sample_result = query_runner.run(builder.build())
                     if sample_result.fields:
                         fields = sample_result.fields[:20]
@@ -1619,8 +1665,8 @@ def profile_data(
         qualified = [f if "." in f else f"{resolved_table}.{f}" for f in fields]
 
         builder = QueryBuilder(table=resolved_table, model_id=mid)
-        builder._fields = qualified
-        builder._limit = min(sample_size, 1000)
+        builder.fields(qualified)
+        builder.limit(min(sample_size, 1000))
         result = query_runner.run(builder.build())
 
         profiles: dict[str, Any] = {}
@@ -1714,8 +1760,8 @@ def generate_dashboard(
             from omni_dash.api.queries import QueryBuilder
 
             builder = QueryBuilder(mid, table)
-            builder._fields = fields
-            builder._limit = min(limit, 25)
+            builder.fields(fields)
+            builder.limit(min(limit, 25))
             spec = builder.build()
             result = _get_query_runner().run(spec)
             return result.rows[:limit]

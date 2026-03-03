@@ -198,10 +198,12 @@ class TileVisConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _alias_color(cls, values: Any) -> Any:
-        """Accept ``color`` as an alias for ``color_by``."""
+        """Accept common aliases: ``color`` → ``color_by``, ``markdown`` → ``markdown_template``."""
         if isinstance(values, dict):
             if "color" in values and "color_by" not in values:
                 values["color_by"] = values.pop("color")
+            if "markdown" in values and "markdown_template" not in values:
+                values["markdown_template"] = values.pop("markdown")
         return values
 
     # Core axis & display

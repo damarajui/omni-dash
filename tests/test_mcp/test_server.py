@@ -3451,3 +3451,422 @@ class TestPerKeyCacheTTL:
         # Old key should be expired, fresh key should survive
         assert svc._get_cache("old") is None
         assert svc._get_cache("fresh") == {"v": 2}
+
+
+class TestAddTilesOrphanCleanup:
+    """Temp skeleton must be cleaned up even if reimport fails."""
+
+    def test_temp_deleted_on_reimport_failure(self, mock_doc_svc):
+        """If reimport fails, temp skeleton should still be deleted."""
+        mcp_server._shared_model_id = "m1"
+
+        orig_export = {
+            "document": {"name": "Test", "folderId": "f1", "modelId": "m1"},
+            "dashboard": {
+                "ephemeral": "1:abc123",
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "Existing",
+                                "miniUuid": "abc123",
+                                "query": {"queryJson": {"fields": ["t.a"]}},
+                            }
+                        }
+                    ],
+                },
+                "metadata": {"layouts": {"lg": [{"i": "1", "x": 0, "y": 0, "w": 12, "h": 6}]}},
+            },
+            "workbookModel": {"base_model_id": "m1"},
+        }
+        temp_export = {
+            "document": {"name": "__add_tiles_tmp__", "modelId": "m1"},
+            "dashboard": {
+                "ephemeral": "1:def456",
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "New Tile",
+                                "miniUuid": "def456",
+                                "query": {"queryJson": {"fields": ["t.b"]}},
+                            }
+                        }
+                    ],
+                },
+                "metadata": {"layouts": {"lg": [{"i": "1", "x": 0, "y": 0, "w": 6, "h": 6}]}},
+            },
+        }
+
+        # Mock _create_with_vis_configs to return a temp dashboard ID
+        # and mock export to return temp export when called with that ID
+        mock_doc_svc.export_dashboard.side_effect = [orig_export, temp_export]
+
+        # Reimport in add_tiles (the merge step) FAILS
+        mock_doc_svc.import_dashboard.side_effect = Exception("reimport boom")
+
+        tiles = [{"name": "New Tile", "chart_type": "line", "query": {"table": "t", "fields": ["t.b"]}}]
+
+        with (
+            patch.object(mcp_server, "_validate_tile_fields", return_value=[]),
+            patch.object(mcp_server, "_create_with_vis_configs", return_value=("temp-id", "__add_tiles_tmp__")),
+        ):
+            result = json.loads(mcp_server.add_tiles_to_dashboard("orig-id", tiles))
+
+        assert "error" in result
+
+        # Temp skeleton should be deleted even though reimport failed
+        delete_calls = [
+            c[0][0] for c in mock_doc_svc.delete_dashboard.call_args_list
+        ]
+        assert "temp-id" in delete_calls, (
+            f"Temp skeleton not cleaned up. Delete calls: {delete_calls}"
+        )
+
+    def test_original_not_deleted_on_reimport_failure(self, mock_doc_svc):
+        """If reimport fails, original dashboard should NOT be deleted."""
+        mcp_server._shared_model_id = "m1"
+
+        orig_export = {
+            "document": {"name": "Test", "folderId": "f1", "modelId": "m1"},
+            "dashboard": {
+                "ephemeral": "1:abc123",
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "Existing",
+                                "miniUuid": "abc123",
+                                "query": {"queryJson": {"fields": ["t.a"]}},
+                            }
+                        }
+                    ],
+                },
+                "metadata": {"layouts": {"lg": [{"i": "1", "x": 0, "y": 0, "w": 12, "h": 6}]}},
+            },
+            "workbookModel": {"base_model_id": "m1"},
+        }
+        temp_export = {
+            "document": {"name": "__add_tiles_tmp__", "modelId": "m1"},
+            "dashboard": {
+                "ephemeral": "1:def456",
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "New Tile",
+                                "miniUuid": "def456",
+                                "query": {"queryJson": {"fields": ["t.b"]}},
+                            }
+                        }
+                    ],
+                },
+                "metadata": {"layouts": {"lg": [{"i": "1", "x": 0, "y": 0, "w": 6, "h": 6}]}},
+            },
+        }
+
+        mock_doc_svc.export_dashboard.side_effect = [orig_export, temp_export]
+        mock_doc_svc.import_dashboard.side_effect = Exception("reimport boom")
+
+        tiles = [{"name": "New Tile", "chart_type": "line", "query": {"table": "t", "fields": ["t.b"]}}]
+
+        with (
+            patch.object(mcp_server, "_validate_tile_fields", return_value=[]),
+            patch.object(mcp_server, "_create_with_vis_configs", return_value=("temp-id", "__add_tiles_tmp__")),
+        ):
+            mcp_server.add_tiles_to_dashboard("orig-id", tiles)
+
+        # Original should NOT be in delete calls
+        delete_calls = [
+            c[0][0] for c in mock_doc_svc.delete_dashboard.call_args_list
+        ]
+        assert "orig-id" not in delete_calls, (
+            f"Original dashboard deleted despite failed reimport! Calls: {delete_calls}"
+        )
+
+
+class TestProfileDataPublicAPI:
+    """profile_data should use QueryBuilder public API."""
+
+    def test_uses_public_fields_method(self, mock_model_svc, mock_query_runner):
+        """Verify builder.fields() is called, not builder._fields assignment."""
+        mcp_server._shared_model_id = "m1"
+
+        # Mock topic fields
+        mock_model_svc.get_topic_native.return_value = MagicMock(
+            fields=[{"name": "col_a"}, {"name": "col_b"}],
+            base_view="my_table",
+        )
+
+        # Mock query result
+        mock_query_runner.run.return_value = MagicMock(
+            rows=[{"my_table.col_a": 1, "my_table.col_b": "x"}],
+            fields=["my_table.col_a", "my_table.col_b"],
+            row_count=1,
+        )
+
+        with patch.object(mcp_server, "_resolve_table_name", return_value="my_table"):
+            result = json.loads(mcp_server.profile_data("my_table"))
+
+        assert "error" not in result
+        # Verify fields were passed to the query
+        call_args = mock_query_runner.run.call_args[0][0]
+        assert "my_table.col_a" in call_args.fields
+        assert "my_table.col_b" in call_args.fields
+
+
+class TestQueryDataSortPublicAPI:
+    """query_data should use QueryBuilder.sort() for auto-qualification."""
+
+    def test_sorts_auto_qualified(self, mock_query_runner):
+        """Bare sort column names should be auto-qualified with table name."""
+        mcp_server._shared_model_id = "m1"
+
+        mock_query_runner.run.return_value = MagicMock(
+            rows=[], fields=[], row_count=0, truncated=False,
+        )
+
+        with patch.object(mcp_server, "_resolve_table_name", return_value="my_table"):
+            result = json.loads(mcp_server.query_data(
+                table="my_table",
+                fields=["my_table.revenue"],
+                sorts=[{"column_name": "revenue", "sort_descending": True}],
+            ))
+
+        assert "error" not in result
+        # The sort column should have been auto-qualified
+        call_args = mock_query_runner.run.call_args[0][0]
+        sort_cols = [s["column_name"] for s in call_args.sorts]
+        assert "my_table.revenue" in sort_cols
+
+
+class TestEmptyDocIdGuard:
+    """Reimport returning empty document_id should not delete originals."""
+
+    def test_create_with_vis_configs_raises_on_empty_id(self, mock_doc_svc):
+        """If reimport returns empty doc_id, skeleton should be preserved."""
+        mock_doc_svc.create_dashboard.return_value = MagicMock(document_id="skel-1")
+        mock_doc_svc.export_dashboard.return_value = {
+            "document": {"name": "Test", "modelId": "m1"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "Tile1",
+                                "visConfig": {},
+                                "query": {"queryJson": {}},
+                            }
+                        }
+                    ]
+                },
+                "metadata": {"layouts": {"lg": []}},
+            },
+            "workbookModel": {"base_model_id": "m1"},
+        }
+        # Reimport returns empty document_id
+        mock_doc_svc.import_dashboard.return_value = MagicMock(
+            document_id="", name="Test"
+        )
+
+        payload = {
+            "queryPresentations": [
+                {
+                    "name": "Tile1",
+                    "query": {"table": "t", "fields": ["t.a"]},
+                    "visConfig": {"visType": "basic", "chartType": "line"},
+                }
+            ],
+            "modelId": "m1",
+        }
+
+        with pytest.raises(Exception, match="no document_id"):
+            mcp_server._create_with_vis_configs(
+                payload, name="Test", folder_id=None,
+            )
+
+        # Skeleton should NOT have been deleted
+        delete_calls = [
+            c[0][0] for c in mock_doc_svc.delete_dashboard.call_args_list
+        ]
+        assert "skel-1" not in delete_calls
+
+    def test_add_tiles_preserves_original_on_empty_reimport_id(self, mock_doc_svc):
+        """add_tiles should not delete original if reimport returns empty id."""
+        mcp_server._shared_model_id = "m1"
+
+        orig_export = {
+            "document": {"name": "Test", "folderId": "f1", "modelId": "m1"},
+            "dashboard": {
+                "ephemeral": "1:abc",
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {"queryPresentation": {"name": "Existing", "miniUuid": "abc", "query": {"queryJson": {"fields": ["t.a"]}}}}
+                    ],
+                },
+                "metadata": {"layouts": {"lg": [{"i": "1", "x": 0, "y": 0, "w": 12, "h": 6}]}},
+            },
+            "workbookModel": {"base_model_id": "m1"},
+        }
+        temp_export = {
+            "document": {"name": "tmp", "modelId": "m1"},
+            "dashboard": {
+                "ephemeral": "1:def",
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {"queryPresentation": {"name": "New", "miniUuid": "def", "query": {"queryJson": {"fields": ["t.b"]}}}}
+                    ],
+                },
+                "metadata": {"layouts": {"lg": [{"i": "1", "x": 0, "y": 0, "w": 6, "h": 6}]}},
+            },
+        }
+        mock_doc_svc.export_dashboard.side_effect = [orig_export, temp_export]
+        mock_doc_svc.import_dashboard.return_value = MagicMock(document_id="", name="Test")
+
+        tiles = [{"name": "New", "chart_type": "line", "query": {"table": "t", "fields": ["t.b"]}}]
+
+        with (
+            patch.object(mcp_server, "_validate_tile_fields", return_value=[]),
+            patch.object(mcp_server, "_create_with_vis_configs", return_value=("temp-id", "tmp")),
+        ):
+            result = json.loads(mcp_server.add_tiles_to_dashboard("orig-id", tiles))
+
+        assert "error" in result
+        delete_calls = [c[0][0] for c in mock_doc_svc.delete_dashboard.call_args_list]
+        assert "orig-id" not in delete_calls, "Original should not be deleted on empty reimport ID"
+
+
+class TestImportFallbackLayout:
+    """Import fallback should produce valid full-width stacked layout."""
+
+    def test_tiles_dont_overflow_grid(self, mock_doc_svc):
+        """All tiles should have x=0 and w=12 (full width, stacked vertically)."""
+        payload = {
+            "queryPresentations": [
+                {"name": "Tile1", "query": {"table": "t", "fields": ["t.a"]}},
+                {"name": "Tile2", "query": {"table": "t", "fields": ["t.b"]}},
+                {"name": "Tile3", "query": {"table": "t", "fields": ["t.c"]}},
+            ],
+            "modelId": "m1",
+        }
+
+        mock_doc_svc.import_dashboard.return_value = MagicMock(
+            document_id="new-id", name="Test"
+        )
+
+        mcp_server._create_via_import_fallback(
+            mock_doc_svc, payload, name="Test", folder_id=None,
+        )
+
+        call_args = mock_doc_svc.import_dashboard.call_args[0][0]
+        layouts = call_args["dashboard"]["metadata"]["layouts"]["lg"]
+
+        for layout in layouts:
+            assert layout["x"] == 0, f"Tile at x={layout['x']} overflows grid"
+            assert layout["w"] == 12, f"Tile w={layout['w']} should be full-width"
+            assert layout["x"] + layout["w"] <= 12, "Layout overflows 12-column grid"
+
+
+class TestUpdateTilePartialStatus:
+    """update_tile should report partial status if delete fails."""
+
+    def test_returns_partial_on_delete_failure(self, mock_doc_svc):
+        """Should return status=partial, not status=updated, when delete fails."""
+        mcp_server._shared_model_id = "m1"
+
+        mock_doc_svc.export_dashboard.return_value = {
+            "document": {"name": "Test", "folderId": "f1", "modelId": "m1"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "My Tile",
+                                "query": {"queryJson": {"fields": ["t.a"]}},
+                                "visConfig": {"chartType": "line", "visType": "basic"},
+                            }
+                        }
+                    ]
+                },
+                "metadata": {"layouts": {"lg": []}},
+            },
+            "workbookModel": {"base_model_id": "m1"},
+        }
+        mock_doc_svc.import_dashboard.return_value = MagicMock(
+            document_id="new-id", name="Test"
+        )
+        mock_doc_svc.delete_dashboard.side_effect = Exception("delete boom")
+
+        result = json.loads(mcp_server.update_tile(
+            dashboard_id="old-id",
+            tile_name="My Tile",
+            chart_type="bar",
+        ))
+
+        assert result["status"] == "partial"
+        assert "warning" in result
+        assert result["dashboard_id"] == "new-id"
+        assert result["old_dashboard_id"] == "old-id"
+
+
+class TestFilterOverrideAlwaysApplied:
+    """Tile query overrides should always be applied, not gated on emptiness."""
+
+    def test_filters_override_existing_export_value(self, mock_doc_svc):
+        """User-specified filters should replace Omni's placeholder values."""
+        # Set up a skeleton creation that will return an export with pre-existing filters
+        mock_doc_svc.create_dashboard.return_value = MagicMock(document_id="skel-1")
+        mock_doc_svc.export_dashboard.return_value = {
+            "document": {"name": "Test", "modelId": "m1"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "Tile1",
+                                "query": {
+                                    "queryJson": {
+                                        "fields": ["t.a"],
+                                        "filters": {"t.date": {"kind": "PLACEHOLDER"}},
+                                    }
+                                },
+                                "visConfig": {},
+                            }
+                        }
+                    ]
+                },
+                "metadata": {"layouts": {"lg": []}},
+            },
+            "workbookModel": {"base_model_id": "m1"},
+        }
+        mock_doc_svc.import_dashboard.return_value = MagicMock(
+            document_id="final-id", name="Test"
+        )
+
+        user_filters = {"t.date": {"kind": "TIME", "type": "date", "values": ["90 days ago"]}}
+        payload = {
+            "queryPresentations": [
+                {
+                    "name": "Tile1",
+                    "query": {
+                        "table": "t",
+                        "fields": ["t.a"],
+                        "filters": user_filters,
+                    },
+                    "visConfig": {"visType": "basic", "chartType": "line"},
+                }
+            ],
+            "modelId": "m1",
+        }
+
+        mcp_server._create_with_vis_configs(
+            payload, name="Test", folder_id=None,
+        )
+
+        # Check the reimported payload has user's filters, not the placeholder
+        import_call = mock_doc_svc.import_dashboard.call_args[0][0]
+        qp = import_call["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]
+        actual_filters = qp["query"]["queryJson"]["filters"]
+        assert actual_filters == user_filters
