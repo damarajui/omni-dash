@@ -3287,3 +3287,190 @@ class TestDateFilterNormalizationExtended:
         left, right = _normalize_date_to_days("last 1 day")
         assert left == "1 days ago"
         assert right == "1 days"
+
+
+# ---------------------------------------------------------------------------
+# YAML round-trip: vis config fields preserved
+# ---------------------------------------------------------------------------
+
+
+class TestYamlRoundTripVisConfig:
+    """to_yaml → from_yaml preserves advanced vis config fields."""
+
+    def test_series_config_survives(self):
+        from omni_dash.dashboard.definition import DashboardDefinition, Tile, TileQuery, TileVisConfig
+        from omni_dash.dashboard.serializer import DashboardSerializer
+
+        defn = DashboardDefinition(
+            name="test",
+            tiles=[Tile(
+                name="chart",
+                chart_type="combo",
+                query=TileQuery(table="t", fields=["t.a", "t.b"]),
+                vis_config=TileVisConfig(
+                    series_config=[{"field": "t.b", "mark_type": "line", "y_axis": "y2"}],
+                ),
+            )],
+        )
+        yaml_str = DashboardSerializer.to_yaml(defn)
+        restored = DashboardSerializer.from_yaml(yaml_str)
+        assert len(restored.tiles[0].vis_config.series_config) == 1
+        assert restored.tiles[0].vis_config.series_config[0]["field"] == "t.b"
+
+    def test_reference_lines_survives(self):
+        from omni_dash.dashboard.definition import DashboardDefinition, Tile, TileQuery, TileVisConfig
+        from omni_dash.dashboard.serializer import DashboardSerializer
+
+        defn = DashboardDefinition(
+            name="test",
+            tiles=[Tile(
+                name="chart",
+                chart_type="line",
+                query=TileQuery(table="t", fields=["t.a"]),
+                vis_config=TileVisConfig(
+                    reference_lines=[{"value": 100, "label": "Target", "color": "#FF0000"}],
+                ),
+            )],
+        )
+        yaml_str = DashboardSerializer.to_yaml(defn)
+        restored = DashboardSerializer.from_yaml(yaml_str)
+        assert restored.tiles[0].vis_config.reference_lines[0]["value"] == 100
+
+    def test_kpi_fields_survive(self):
+        from omni_dash.dashboard.definition import DashboardDefinition, Tile, TileQuery, TileVisConfig
+        from omni_dash.dashboard.serializer import DashboardSerializer
+
+        defn = DashboardDefinition(
+            name="test",
+            tiles=[Tile(
+                name="KPI",
+                chart_type="number",
+                query=TileQuery(table="t", fields=["t.revenue"]),
+                vis_config=TileVisConfig(
+                    kpi_field="t.revenue",
+                    kpi_comparison_field="t.prev_revenue",
+                    kpi_comparison_type="number_percent",
+                    kpi_label="Total Revenue",
+                ),
+            )],
+        )
+        yaml_str = DashboardSerializer.to_yaml(defn)
+        restored = DashboardSerializer.from_yaml(yaml_str)
+        assert restored.tiles[0].vis_config.kpi_field == "t.revenue"
+        assert restored.tiles[0].vis_config.kpi_comparison_type == "number_percent"
+        assert restored.tiles[0].vis_config.kpi_label == "Total Revenue"
+
+    def test_markdown_template_survives(self):
+        from omni_dash.dashboard.definition import DashboardDefinition, Tile, TileQuery, TileVisConfig
+        from omni_dash.dashboard.serializer import DashboardSerializer
+
+        defn = DashboardDefinition(
+            name="test",
+            tiles=[Tile(
+                name="Summary",
+                chart_type="text",
+                query=TileQuery(table="t", fields=["t.x"]),
+                vis_config=TileVisConfig(
+                    markdown_template="<h1>{{result.0.t.x.value}}</h1>",
+                ),
+            )],
+        )
+        yaml_str = DashboardSerializer.to_yaml(defn)
+        restored = DashboardSerializer.from_yaml(yaml_str)
+        assert "{{result.0.t.x.value}}" in restored.tiles[0].vis_config.markdown_template
+
+    def test_color_values_survives(self):
+        from omni_dash.dashboard.definition import DashboardDefinition, Tile, TileQuery, TileVisConfig
+        from omni_dash.dashboard.serializer import DashboardSerializer
+
+        defn = DashboardDefinition(
+            name="test",
+            tiles=[Tile(
+                name="chart",
+                chart_type="bar",
+                query=TileQuery(table="t", fields=["t.a", "t.b"]),
+                vis_config=TileVisConfig(
+                    color_values={"Brand": "#FF8515", "Non-Brand": "#BE43C0"},
+                ),
+            )],
+        )
+        yaml_str = DashboardSerializer.to_yaml(defn)
+        restored = DashboardSerializer.from_yaml(yaml_str)
+        assert restored.tiles[0].vis_config.color_values["Brand"] == "#FF8515"
+
+    def test_vegalite_spec_survives(self):
+        from omni_dash.dashboard.definition import DashboardDefinition, Tile, TileQuery, TileVisConfig
+        from omni_dash.dashboard.serializer import DashboardSerializer
+
+        spec = {"mark": "bar", "encoding": {"x": {"field": "a"}}}
+        defn = DashboardDefinition(
+            name="test",
+            tiles=[Tile(
+                name="custom",
+                chart_type="vegalite",
+                query=TileQuery(table="t", fields=["t.a"]),
+                vis_config=TileVisConfig(vegalite_spec=spec),
+            )],
+        )
+        yaml_str = DashboardSerializer.to_yaml(defn)
+        restored = DashboardSerializer.from_yaml(yaml_str)
+        assert restored.tiles[0].vis_config.vegalite_spec["mark"] == "bar"
+
+    def test_column_formats_survives(self):
+        from omni_dash.dashboard.definition import DashboardDefinition, Tile, TileQuery, TileVisConfig
+        from omni_dash.dashboard.serializer import DashboardSerializer
+
+        defn = DashboardDefinition(
+            name="test",
+            tiles=[Tile(
+                name="data",
+                chart_type="table",
+                query=TileQuery(table="t", fields=["t.a", "t.b"]),
+                vis_config=TileVisConfig(
+                    column_formats={"a": {"align": "right", "width": 150}},
+                ),
+            )],
+        )
+        yaml_str = DashboardSerializer.to_yaml(defn)
+        restored = DashboardSerializer.from_yaml(yaml_str)
+        assert restored.tiles[0].vis_config.column_formats["a"]["align"] == "right"
+
+
+class TestYamlRoundTripCalculations:
+    """to_yaml → from_yaml preserves calculated fields."""
+
+    def test_calculations_survive(self):
+        from omni_dash.dashboard.definition import (
+            CalculatedField, DashboardDefinition, Tile, TileQuery,
+        )
+        from omni_dash.dashboard.serializer import DashboardSerializer
+
+        defn = DashboardDefinition(
+            name="test",
+            tiles=[Tile(
+                name="chart",
+                chart_type="line",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.a", "t.b"],
+                    calculations=[
+                        CalculatedField(
+                            calc_name="calc_1",
+                            label="Conversion Rate",
+                            formula="t.b / t.a",
+                            format="PERCENT_1",
+                        ),
+                    ],
+                ),
+            )],
+        )
+        yaml_str = DashboardSerializer.to_yaml(defn)
+        assert "calc_1" in yaml_str
+        assert "Conversion Rate" in yaml_str
+
+        restored = DashboardSerializer.from_yaml(yaml_str)
+        calc = restored.tiles[0].query.calculations[0]
+        assert calc.calc_name == "calc_1"
+        assert calc.label == "Conversion Rate"
+        assert calc.formula == "t.b / t.a"
+        assert calc.format == "PERCENT_1"

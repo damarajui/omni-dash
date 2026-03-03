@@ -3986,3 +3986,242 @@ class TestPayloadNotMutated:
         assert "visConfig" in original_qps[0], (
             "Original payload's visConfig was mutated by _create_with_vis_configs"
         )
+
+
+# ---------------------------------------------------------------------------
+# add_tiles: temp membership IDs are cleaned before merge
+# ---------------------------------------------------------------------------
+
+
+class TestAddTilesMembershipCleaning:
+    """add_tiles_to_dashboard cleans temp membership IDs before merge."""
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
+    @patch("omni_dash.mcp.server.get_settings")
+    def test_temp_memberships_get_collection_id_updated(
+        self, mock_settings, _, mock_doc_svc,
+    ):
+        from omni_dash.api.documents import ImportResponse
+
+        mock_settings.return_value = MagicMock(omni_base_url="https://test.omniapp.co")
+        svc = mock_doc_svc
+
+        # Original export with 1 tile
+        orig_export = {
+            "document": {"name": "Dashboard", "folderId": "f1"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "id": "orig-collection-id",
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "id": "orig-membership-1",
+                            "queryPresentationCollectionId": "orig-collection-id",
+                            "queryPresentation": {
+                                "id": "orig-qp-1",
+                                "name": "Existing",
+                                "miniUuid": "AAA11111",
+                                "queryIdentifierMapKey": "1",
+                                "query": {"queryJson": {"table": "t", "fields": ["t.a"]}},
+                                "visConfig": {"visType": "basic", "chartType": "line"},
+                            },
+                        }
+                    ],
+                },
+                "metadata": {"layouts": {"lg": [{"i": "1", "x": 0, "y": 0, "w": 24, "h": 51}]}},
+                "ephemeral": "1:AAA11111",
+            },
+            "exportVersion": "0.1",
+        }
+
+        # Temp skeleton export with 1 new tile
+        temp_export = {
+            "document": {"name": "__add_tiles_tmp__"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "id": "temp-collection-id",
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "id": "temp-membership-1",
+                            "queryPresentationCollectionId": "temp-collection-id",
+                            "queryPresentation": {
+                                "id": "temp-qp-1",
+                                "name": "New Tile",
+                                "miniUuid": "BBB22222",
+                                "queryIdentifierMapKey": "1",
+                                "query": {"queryJson": {"table": "t", "fields": ["t.b"]}},
+                                "visConfig": {"visType": "basic", "chartType": "bar"},
+                            },
+                        }
+                    ],
+                },
+                "metadata": {"layouts": {"lg": [{"i": "1", "x": 0, "y": 0, "w": 24, "h": 51}]}},
+                "ephemeral": "1:BBB22222",
+            },
+            "exportVersion": "0.1",
+        }
+
+        # Mock: export original, create temp, export temp, import merged
+        svc.export_dashboard.side_effect = [orig_export, temp_export]
+        svc.import_dashboard.return_value = ImportResponse(
+            document_id="new-dash-id", name="Dashboard",
+        )
+
+        # Capture the import payload
+        import_calls = []
+        orig_import = svc.import_dashboard
+        def capture_import(*args, **kwargs):
+            import_calls.append(args[0] if args else kwargs.get("export_data"))
+            return orig_import(*args, **kwargs)
+        svc.import_dashboard = capture_import
+
+        with patch.object(mcp_server, "_create_with_vis_configs", return_value=("temp-id", "__add_tiles_tmp__")):
+            result = json.loads(mcp_server.add_tiles_to_dashboard(
+                "orig-id",
+                [{"name": "New Tile", "chart_type": "bar", "query": {"table": "t", "fields": ["t.b"]}}],
+            ))
+
+        assert result["status"] == "updated"
+        assert result["new_tile_count"] == 2
+
+        # Verify the import payload
+        assert len(import_calls) == 1
+        imported = import_calls[0]
+        memberships = (
+            imported["dashboard"]["queryPresentationCollection"]
+            ["queryPresentationCollectionMemberships"]
+        )
+        assert len(memberships) == 2
+
+        # Original membership keeps its collection ID
+        assert memberships[0]["queryPresentationCollectionId"] == "orig-collection-id"
+
+        # Temp membership should have updated collection ID and no stale IDs
+        assert memberships[1]["queryPresentationCollectionId"] == "orig-collection-id"
+        assert "id" not in memberships[1]  # membership-level ID removed
+        assert "id" not in memberships[1]["queryPresentation"]  # QP-level ID removed
+        assert memberships[1]["queryPresentation"]["miniUuid"] == "BBB22222"
+
+        # queryIdentifierMapKeys re-indexed
+        assert memberships[0]["queryPresentation"]["queryIdentifierMapKey"] == "1"
+        assert memberships[1]["queryPresentation"]["queryIdentifierMapKey"] == "2"
+
+
+# ---------------------------------------------------------------------------
+# _create_with_vis_configs: skeleton cleanup on failure
+# ---------------------------------------------------------------------------
+
+
+class TestSkeletonCleanup:
+    """_create_with_vis_configs cleans up skeleton on export/reimport failure."""
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_skeleton_deleted_on_export_failure(self, mock_get_doc_svc):
+        from omni_dash.api.documents import DashboardResponse
+        from omni_dash.exceptions import OmniDashError
+
+        svc = MagicMock()
+        mock_get_doc_svc.return_value = svc
+        svc.create_dashboard.return_value = DashboardResponse(
+            document_id="skel-123", name="Test",
+        )
+        svc.export_dashboard.side_effect = OmniDashError("Export failed")
+
+        payload = {
+            "name": "Test",
+            "queryPresentations": [
+                {
+                    "name": "T1",
+                    "query": {"table": "t", "fields": ["t.a"]},
+                    "visConfig": {"visType": "basic", "chartType": "line"},
+                }
+            ],
+            "modelId": "m1",
+        }
+
+        with pytest.raises(OmniDashError, match="Export failed"):
+            mcp_server._create_with_vis_configs(payload, name="Test", folder_id=None)
+
+        # Skeleton should have been deleted
+        svc.delete_dashboard.assert_called_with("skel-123")
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_skeleton_deleted_on_reimport_failure(self, mock_get_doc_svc):
+        from omni_dash.api.documents import DashboardResponse
+        from omni_dash.exceptions import OmniDashError
+
+        svc = MagicMock()
+        mock_get_doc_svc.return_value = svc
+        svc.create_dashboard.return_value = DashboardResponse(
+            document_id="skel-456", name="Test",
+        )
+        svc.export_dashboard.return_value = {
+            "document": {"name": "Test"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "T1",
+                                "visConfig": {"visType": "basic", "chartType": "line"},
+                                "query": {"queryJson": {}},
+                            }
+                        }
+                    ]
+                }
+            },
+            "exportVersion": "0.1",
+        }
+        svc.import_dashboard.side_effect = OmniDashError("Import failed")
+
+        payload = {
+            "name": "Test",
+            "queryPresentations": [
+                {
+                    "name": "T1",
+                    "query": {"table": "t", "fields": ["t.a"]},
+                    "visConfig": {"visType": "basic", "chartType": "line"},
+                }
+            ],
+            "modelId": "m1",
+        }
+
+        with pytest.raises(OmniDashError, match="Import failed"):
+            mcp_server._create_with_vis_configs(payload, name="Test", folder_id=None)
+
+        # Skeleton should have been deleted
+        svc.delete_dashboard.assert_called_with("skel-456")
+
+
+# ---------------------------------------------------------------------------
+# _to_omni_filter: date normalization for tile-level filters
+# ---------------------------------------------------------------------------
+
+
+class TestTileFilterDateNormalization:
+    """_to_omni_filter normalizes date values through _normalize_date_to_days."""
+
+    def test_date_range_with_weeks(self):
+        from omni_dash.dashboard.definition import FilterSpec
+        from omni_dash.dashboard.serializer import _to_omni_filter
+
+        f = FilterSpec(field="t.date", operator="date_range", value="12 complete weeks ago")
+        result = _to_omni_filter(f)
+        assert result["left_side"] == "84 days ago"
+        assert result["right_side"] == "84 days"
+
+    def test_past_with_months(self):
+        from omni_dash.dashboard.definition import FilterSpec
+        from omni_dash.dashboard.serializer import _to_omni_filter
+
+        f = FilterSpec(field="t.date", operator="past", value="3 months ago")
+        result = _to_omni_filter(f)
+        assert result["left_side"] == "90 days ago"
+        assert result["right_side"] == "90 days"
+
+    def test_before_with_weeks(self):
+        from omni_dash.dashboard.definition import FilterSpec
+        from omni_dash.dashboard.serializer import _to_omni_filter
+
+        f = FilterSpec(field="t.date", operator="before", value="2 weeks ago")
+        result = _to_omni_filter(f)
+        assert result["right_side"] == "14 days ago"

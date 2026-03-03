@@ -385,8 +385,18 @@ def _create_with_vis_configs(
     if not vis_configs_by_name:
         return skeleton_id, name or "Untitled"
 
-    # Patch vis configs via export→reimport
-    export_data = doc_svc.export_dashboard(skeleton_id)
+    # Patch vis configs via export→reimport.
+    # Wrap in try/finally so skeleton is always cleaned up on failure.
+    try:
+        export_data = doc_svc.export_dashboard(skeleton_id)
+    except Exception:
+        # If export fails, skeleton is leaked — delete it before re-raising
+        try:
+            doc_svc.delete_dashboard(skeleton_id)
+        except Exception as del_err:
+            logger.warning("Failed to delete skeleton %s after export failure: %s", skeleton_id, del_err)
+        raise
+
     patched = copy.deepcopy(export_data)
     dash = patched.get("dashboard", {})
     qpc = dash.get("queryPresentationCollection", {})
@@ -446,12 +456,20 @@ def _create_with_vis_configs(
         ]
 
     reimport_model_id = _resolve_model_id_from_export(patched)
-    reimport_result = doc_svc.import_dashboard(
-        patched,
-        base_model_id=reimport_model_id,
-        name=name,
-        folder_id=folder_id,
-    )
+    try:
+        reimport_result = doc_svc.import_dashboard(
+            patched,
+            base_model_id=reimport_model_id,
+            name=name,
+            folder_id=folder_id,
+        )
+    except Exception:
+        # If reimport fails, clean up skeleton before re-raising
+        try:
+            doc_svc.delete_dashboard(skeleton_id)
+        except Exception as del_err:
+            logger.warning("Failed to delete skeleton %s after reimport failure: %s", skeleton_id, del_err)
+        raise
 
     # Guard: if reimport returned empty ID, preserve skeleton for recovery
     if not reimport_result.document_id:
@@ -991,6 +1009,19 @@ def add_tiles_to_dashboard(
             patched_memberships = patched_qpc.get(
                 "queryPresentationCollectionMemberships", []
             )
+            # Fix temp memberships: update queryPresentationCollectionId
+            # to match the original's collection so Omni accepts them on
+            # import, and remove stale IDs that would cause deduplication.
+            orig_collection_id = patched_qpc.get("id", "")
+            for tm in temp_memberships:
+                if orig_collection_id:
+                    tm["queryPresentationCollectionId"] = orig_collection_id
+                # Remove membership-level and QP-level IDs so Omni
+                # generates fresh ones instead of deduplicating.
+                tm.pop("id", None)
+                qp = tm.get("queryPresentation", {})
+                qp.pop("id", None)
+
             patched_memberships.extend(temp_memberships)
 
             # Re-index queryIdentifierMapKey on ALL memberships (1-indexed).

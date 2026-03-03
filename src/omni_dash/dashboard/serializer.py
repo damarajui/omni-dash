@@ -106,37 +106,42 @@ def _to_omni_filter(f: FilterSpec) -> dict[str, Any]:
     op = f.operator.lower() if f.operator else "is"
     value = f.value
 
-    # Map common operator names to Omni's kind/type system
+    # Map common operator names to Omni's kind/type system.
+    # Always normalize date values through _normalize_date_to_days to avoid
+    # Omni's "past date filter different from UI options" crash.
     if op in ("date_range", "between", "date_between"):
-        val_str = str(value) if value else "12 complete weeks ago"
-        # Extract the interval portion: "12 complete weeks ago" → "12 complete weeks"
-        interval = val_str.replace("ago", "").strip() if "ago" in val_str else val_str
+        val_str = str(value) if value else "90 days ago"
+        left, right = _normalize_date_to_days(val_str)
         return {
             "kind": "TIME_FOR_INTERVAL_DURATION",
             "type": "date",
             "ui_type": "PAST",
             "isFiscal": False,
-            "left_side": val_str,
-            "right_side": interval,
+            "left_side": left,
+            "right_side": right,
             "is_negative": False,
         }
     elif op in ("before", "date_before"):
+        val_str = str(value) if value else "7 days ago"
+        left, _ = _normalize_date_to_days(val_str)
         return {
             "kind": "BEFORE",
             "type": "date",
             "ui_type": "BEFORE",
             "isFiscal": False,
-            "right_side": str(value) if value else "1 weeks ago",
+            "right_side": left,
             "is_negative": False,
         }
     elif op in ("past", "last", "date_past"):
+        val_str = str(value) if value else "90 days ago"
+        left, right = _normalize_date_to_days(val_str)
         return {
             "kind": "TIME_FOR_INTERVAL_DURATION",
             "type": "date",
             "ui_type": "PAST",
             "isFiscal": False,
-            "left_side": str(value) if value else "12 complete weeks ago",
-            "right_side": str(value).replace("ago", "").strip() if value else "12 weeks",
+            "left_side": left,
+            "right_side": right,
             "is_negative": False,
         }
     elif op in ("is", "equals", "="):
@@ -1035,6 +1040,16 @@ class DashboardSerializer:
                 tile_data["query"]["is_sql"] = True
             if tile.query.user_sql:
                 tile_data["query"]["user_sql"] = tile.query.user_sql
+            if tile.query.calculations:
+                tile_data["query"]["calculations"] = [
+                    {
+                        "calc_name": c.calc_name,
+                        **({"label": c.label} if c.label else {}),
+                        **({"formula": c.formula} if c.formula else {}),
+                        **({"format": c.format} if c.format else {}),
+                    }
+                    for c in tile.query.calculations
+                ]
 
             # Vis config (only non-default values)
             vis: dict[str, Any] = {}
@@ -1064,6 +1079,44 @@ class DashboardSerializer:
                 vis["series_colors"] = tile.vis_config.series_colors
             if tile.vis_config.custom:
                 vis["custom"] = tile.vis_config.custom
+            # Series/reference line config
+            if tile.vis_config.series_config:
+                vis["series_config"] = tile.vis_config.series_config
+            if tile.vis_config.reference_lines:
+                vis["reference_lines"] = tile.vis_config.reference_lines
+            if tile.vis_config.color_values:
+                vis["color_values"] = tile.vis_config.color_values
+            # KPI fields
+            if tile.vis_config.kpi_field:
+                vis["kpi_field"] = tile.vis_config.kpi_field
+            if tile.vis_config.kpi_comparison_field:
+                vis["kpi_comparison_field"] = tile.vis_config.kpi_comparison_field
+            if tile.vis_config.kpi_comparison_type:
+                vis["kpi_comparison_type"] = tile.vis_config.kpi_comparison_type
+            if tile.vis_config.kpi_label:
+                vis["kpi_label"] = tile.vis_config.kpi_label
+            # Markdown
+            if tile.vis_config.markdown_template:
+                vis["markdown_template"] = tile.vis_config.markdown_template
+            # Table-specific
+            if tile.vis_config.column_formats:
+                vis["column_formats"] = tile.vis_config.column_formats
+            # Data labels
+            if tile.vis_config.show_data_labels:
+                vis["show_data_labels"] = True
+            if tile.vis_config.data_label_format:
+                vis["data_label_format"] = tile.vis_config.data_label_format
+            # Vega-Lite
+            if tile.vis_config.vegalite_spec:
+                vis["vegalite_spec"] = tile.vis_config.vegalite_spec
+            # Axis formatting
+            if tile.vis_config.x_axis_format:
+                vis["x_axis_format"] = tile.vis_config.x_axis_format
+            if tile.vis_config.y_axis_format:
+                vis["y_axis_format"] = tile.vis_config.y_axis_format
+            # Field metadata
+            if tile.vis_config.field_metadata:
+                vis["field_metadata"] = tile.vis_config.field_metadata
             if vis:
                 tile_data["vis_config"] = vis
 
@@ -1147,6 +1200,21 @@ class DashboardSerializer:
                 axis_label_y=vis_data.get("axis_label_y"),
                 series_colors=vis_data.get("series_colors", {}),
                 custom=vis_data.get("custom", {}),
+                series_config=vis_data.get("series_config", []),
+                reference_lines=vis_data.get("reference_lines", []),
+                color_values=vis_data.get("color_values", {}),
+                kpi_field=vis_data.get("kpi_field"),
+                kpi_comparison_field=vis_data.get("kpi_comparison_field"),
+                kpi_comparison_type=vis_data.get("kpi_comparison_type"),
+                kpi_label=vis_data.get("kpi_label"),
+                markdown_template=vis_data.get("markdown_template"),
+                column_formats=vis_data.get("column_formats", {}),
+                show_data_labels=vis_data.get("show_data_labels", False),
+                data_label_format=vis_data.get("data_label_format"),
+                vegalite_spec=vis_data.get("vegalite_spec"),
+                x_axis_format=vis_data.get("x_axis_format"),
+                y_axis_format=vis_data.get("y_axis_format"),
+                field_metadata=vis_data.get("field_metadata", {}),
             )
 
             pos_data = tile_data.get("position")
@@ -1161,6 +1229,16 @@ class DashboardSerializer:
                 else None
             )
 
+            calculations = [
+                CalculatedField(
+                    calc_name=c.get("calc_name", ""),
+                    label=c.get("label", ""),
+                    formula=c.get("formula", ""),
+                    format=c.get("format"),
+                )
+                for c in query_data.get("calculations", [])
+            ]
+
             tiles.append(
                 Tile(
                     name=tile_data.get("name", ""),
@@ -1174,6 +1252,7 @@ class DashboardSerializer:
                         pivots=query_data.get("pivots", []),
                         is_sql=query_data.get("is_sql", False),
                         user_sql=query_data.get("user_sql"),
+                        calculations=calculations,
                     ),
                     chart_type=tile_data.get("chart_type", "line"),
                     vis_config=vis_config,
