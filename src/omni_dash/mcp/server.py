@@ -1166,18 +1166,27 @@ def get_topic_fields(topic_name: str, model_id: str = "") -> str:
             return json.dumps({"error": "No model_id found. Set OMNI_SHARED_MODEL_ID."})
 
         detail = _get_model_svc().get_topic_native(resolved_model_id, topic_name)
-        return json.dumps(
-            {
-                "name": detail.name,
-                "label": detail.label,
-                "description": detail.description,
-                "base_view": detail.base_view,
-                "views": detail.views,
-                "field_count": len(detail.fields),
-                "fields": detail.fields,
-            },
-            indent=2,
-        )
+        fields = detail.fields
+        total = len(fields)
+        truncated = total > 200
+        if truncated:
+            fields = fields[:200]
+        result: dict[str, Any] = {
+            "name": detail.name,
+            "label": detail.label,
+            "description": detail.description,
+            "base_view": detail.base_view,
+            "views": detail.views,
+            "field_count": total,
+            "fields": fields,
+        }
+        if truncated:
+            result["truncated"] = True
+            result["note"] = (
+                f"Showing first 200 of {total} fields. "
+                "Use query_data to explore specific fields."
+            )
+        return json.dumps(result, indent=2)
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
@@ -1799,6 +1808,7 @@ def update_dashboard_filters(
     dashboard_id: str,
     filters: dict[str, Any] | None = None,
     filter_order: list[str] | None = None,
+    clear_existing_draft: bool = False,
 ) -> str:
     """Update existing filter values on a dashboard.
 
@@ -1810,6 +1820,8 @@ def update_dashboard_filters(
         dashboard_id: The dashboard to update.
         filters: Dict of filter_id -> {kind, type, values, fieldName, ...}.
         filter_order: New ordering of filter IDs.
+        clear_existing_draft: Discard existing draft before applying. Use if
+            you get a 409 draft conflict error.
 
     Returns:
         JSON with updated filter configuration.
@@ -1819,6 +1831,7 @@ def update_dashboard_filters(
             dashboard_id,
             filters=filters,
             filter_order=filter_order,
+            clear_existing_draft=clear_existing_draft,
         )
         return json.dumps(result, indent=2)
     except OmniDashError as e:

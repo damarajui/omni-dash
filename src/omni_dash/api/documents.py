@@ -338,6 +338,7 @@ class DocumentService:
         filters: dict[str, dict[str, Any]] | None = None,
         filter_order: list[str] | None = None,
         controls: list[dict[str, Any]] | None = None,
+        clear_existing_draft: bool = False,
     ) -> dict[str, Any]:
         """Update existing filters on a dashboard via PATCH.
 
@@ -350,11 +351,15 @@ class DocumentService:
             filters: Dict of filter_id -> filter config to update.
             filter_order: New ordering of filter IDs.
             controls: Updated control configurations.
+            clear_existing_draft: If True, discard any existing draft before
+                applying changes. Resolves 409 draft conflict errors.
 
         Returns:
             Updated filter configuration.
         """
         body: dict[str, Any] = {}
+        if clear_existing_draft:
+            body["clearExistingDraft"] = True
         if filters is not None:
             body["filters"] = filters
         if filter_order is not None:
@@ -362,7 +367,7 @@ class DocumentService:
         if controls is not None:
             body["controls"] = controls
 
-        if not body:
+        if not body or (len(body) == 1 and "clearExistingDraft" in body):
             raise ValueError("Must provide at least one of: filters, filter_order, controls")
 
         result = self._client.patch(
