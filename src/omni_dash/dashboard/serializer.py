@@ -57,6 +57,7 @@ _CHART_TYPE_TO_OMNI: dict[str, str] = {
     "column": "column",
     "column_stacked": "columnStacked",
     "column_grouped": "columnGrouped",
+    "column_stacked_percent": "columnStackedPercentage",
     "single_record": "singleRecord",
 }
 
@@ -84,7 +85,7 @@ _OMNI_TO_CHART_TYPE: dict[str, str] = {
     "markdown": "text",
     "column": "column",
     "columnStacked": "column_stacked",
-    "columnStackedPercentage": "stacked_bar_percent",
+    "columnStackedPercentage": "column_stacked_percent",
     "columnGrouped": "column_grouped",
     "sankey": "sankey",
     "singleRecord": "single_record",
@@ -355,7 +356,10 @@ def _to_omni_filter_from_dashboard(dash_filter: DashboardFilter) -> dict[str, An
 # -- Cartesian chart types that use _build_cartesian_spec --
 _CARTESIAN_CHART_TYPES = frozenset({
     "line", "lineColor", "bar", "barStacked", "barGrouped",
-    "barLine", "area", "areaStacked", "point", "heatmap",
+    "barStackedPercentage", "barLine", "area", "areaStacked",
+    "areaStackedPercentage", "point", "heatmap",
+    "column", "columnStacked", "columnGrouped", "columnStackedPercentage",
+    "boxplot",
 })
 
 # Map Omni chart type names to mark types for Vega-Lite spec
@@ -365,11 +369,18 @@ _OMNI_TO_MARK: dict[str, str] = {
     "bar": "bar",
     "barStacked": "bar",
     "barGrouped": "bar",
+    "barStackedPercentage": "bar",
     "barLine": "bar",
     "area": "area",
     "areaStacked": "area",
+    "areaStackedPercentage": "area",
     "point": "point",
     "heatmap": "rect",
+    "column": "bar",
+    "columnStacked": "bar",
+    "columnGrouped": "bar",
+    "columnStackedPercentage": "bar",
+    "boxplot": "bar",
 }
 
 
@@ -1374,11 +1385,23 @@ class DashboardSerializer:
             if isinstance(raw_filters, dict):
                 for field, fdata in raw_filters.items():
                     if isinstance(fdata, dict):
+                        # Omni exports use "kind" (e.g. "EQUALS") and
+                        # "values"/"right_side", not "operator"/"value".
+                        operator = (
+                            fdata.get("kind")
+                            or fdata.get("operator")
+                            or "is"
+                        )
+                        value = (
+                            fdata.get("values")
+                            or fdata.get("right_side")
+                            or fdata.get("value")
+                        )
                         filters.append(
                             FilterSpec(
                                 field=field,
-                                operator=fdata.get("operator", "is"),
-                                value=fdata.get("value"),
+                                operator=operator,
+                                value=value,
                             )
                         )
 

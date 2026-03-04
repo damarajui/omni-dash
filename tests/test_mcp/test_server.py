@@ -3788,7 +3788,7 @@ class TestImportFallbackLayout:
     """Import fallback should produce valid full-width stacked layout."""
 
     def test_tiles_dont_overflow_grid(self, mock_doc_svc):
-        """All tiles should have x=0 and w=12 (full width, stacked vertically)."""
+        """All tiles should have x=0 and w=24 (full width in 24-col grid)."""
         payload = {
             "queryPresentations": [
                 {"name": "Tile1", "query": {"table": "t", "fields": ["t.a"]}},
@@ -3811,8 +3811,8 @@ class TestImportFallbackLayout:
 
         for layout in layouts:
             assert layout["x"] == 0, f"Tile at x={layout['x']} overflows grid"
-            assert layout["w"] == 12, f"Tile w={layout['w']} should be full-width"
-            assert layout["x"] + layout["w"] <= 12, "Layout overflows 12-column grid"
+            assert layout["w"] == 24, f"Tile w={layout['w']} should be full-width (24-col)"
+            assert layout["x"] + layout["w"] <= 24, "Layout overflows 24-column grid"
 
 
 class TestUpdateTilePartialStatus:
@@ -4411,3 +4411,174 @@ class TestTileFilterDateNormalization:
         f = FilterSpec(field="t.date", operator="before", value="2 weeks ago")
         result = _to_omni_filter(f)
         assert result["right_side"] == "14 days ago"
+
+
+class TestEmptyIDGuards:
+    """BUG-1: update_dashboard and move_dashboard must guard against empty IDs."""
+
+    @patch("omni_dash.mcp.server._get_shared_model_id", return_value="m1")
+    @patch("omni_dash.mcp.server._get_doc_svc")
+    def test_update_dashboard_empty_id_preserves_original(self, mock_get_doc, mock_mid):
+        mock_doc = MagicMock()
+        mock_get_doc.return_value = mock_doc
+        mock_doc.export_dashboard.return_value = {
+            "document": {"name": "Old", "modelId": "m1"},
+            "dashboard": {"queryPresentationCollection": {}},
+            "workbookModel": {"id": "wm1"},
+            "exportVersion": "0.1",
+        }
+        mock_doc.import_dashboard.return_value = MagicMock(
+            document_id="", name="Old"
+        )
+
+        result = json.loads(mcp_server.update_dashboard(
+            dashboard_id="orig-123", name="New Name"
+        ))
+        assert "error" in result
+        assert "preserved" in result["error"].lower()
+        mock_doc.delete_dashboard.assert_not_called()
+
+    @patch("omni_dash.mcp.server._get_shared_model_id", return_value="m1")
+    @patch("omni_dash.mcp.server._get_doc_svc")
+    def test_move_dashboard_empty_id_preserves_original(self, mock_get_doc, mock_mid):
+        mock_doc = MagicMock()
+        mock_get_doc.return_value = mock_doc
+        mock_doc.export_dashboard.return_value = {
+            "document": {"name": "D", "modelId": "m1"},
+            "dashboard": {},
+            "workbookModel": {"id": "wm1"},
+            "exportVersion": "0.1",
+        }
+        mock_doc.import_dashboard.return_value = MagicMock(
+            document_id="", name="D"
+        )
+
+        result = json.loads(mcp_server.move_dashboard(
+            dashboard_id="orig-456", target_folder_id="f1"
+        ))
+        assert "error" in result
+        assert "preserved" in result["error"].lower()
+        mock_doc.delete_dashboard.assert_not_called()
+
+
+class TestUpdateDashboardFiltersMetadataOnly:
+    """BUG-3: Metadata-only update_dashboard should inject filters."""
+
+    @patch("omni_dash.mcp.server._get_shared_model_id", return_value="m1")
+    @patch("omni_dash.mcp.server._get_doc_svc")
+    def test_filters_injected_in_metadata_only_path(self, mock_get_doc, mock_mid):
+        mock_doc = MagicMock()
+        mock_get_doc.return_value = mock_doc
+        mock_doc.export_dashboard.return_value = {
+            "document": {"name": "D", "modelId": "m1"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [],
+                },
+            },
+            "workbookModel": {"id": "wm1"},
+            "exportVersion": "0.1",
+        }
+        mock_doc.import_dashboard.return_value = MagicMock(
+            document_id="new-id", name="D"
+        )
+
+        mcp_server.update_dashboard(
+            dashboard_id="orig-789",
+            filters=[{"field": "t.date", "filter_type": "date_range", "default_value": "30 days ago"}],
+        )
+
+        call_args = mock_doc.import_dashboard.call_args[0][0]
+        qpc = call_args["dashboard"]["queryPresentationCollection"]
+        assert "filterConfig" in qpc
+        assert len(qpc["filterConfig"]) == 1
+        assert len(qpc["filterOrder"]) == 1
+
+
+class TestImportFallback24ColGrid:
+    """BUG-6: _create_via_import_fallback layout uses 24-col grid."""
+
+    @patch("omni_dash.mcp.server._get_doc_svc")
+    def test_half_width_tile_gets_12_col(self, mock_get_doc):
+        mock_doc = MagicMock()
+        mock_get_doc.return_value = mock_doc
+        mock_doc.import_dashboard.return_value = MagicMock(
+            document_id="new-id", name="Test"
+        )
+
+        payload = {
+            "queryPresentations": [
+                {
+                    "name": "Half",
+                    "query": {"table": "t", "fields": ["t.a"]},
+                    "position": {"x": 0, "y": 0, "w": 6, "h": 6},
+                },
+            ],
+            "modelId": "m1",
+        }
+
+        mcp_server._create_via_import_fallback(
+            mock_doc, payload, name="Test", folder_id=None,
+        )
+
+        call_args = mock_doc.import_dashboard.call_args[0][0]
+        layout = call_args["dashboard"]["metadata"]["layouts"]["lg"][0]
+        assert layout["w"] == 12, "6-col SDK width should be 12 in 24-col grid"
+        assert layout["x"] == 0
+
+
+class TestDuplicateTileNamesVisConfig:
+    """BUG-7: Duplicate tile names should each get their own vis config."""
+
+    @patch("omni_dash.mcp.server._get_doc_svc")
+    def test_duplicate_names_get_correct_vis_configs(self, mock_get_doc):
+        mock_doc = MagicMock()
+        mock_get_doc.return_value = mock_doc
+
+        mock_doc.create_dashboard.return_value = MagicMock(document_id="sk1")
+        mock_doc.export_dashboard.return_value = {
+            "document": {"name": "Test", "modelId": "m1"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {"queryPresentation": {"name": "Revenue", "visConfig": {}, "query": {"queryJson": {}}}},
+                        {"queryPresentation": {"name": "Revenue", "visConfig": {}, "query": {"queryJson": {}}}},
+                    ],
+                },
+            },
+            "workbookModel": {"id": "wm1"},
+            "exportVersion": "0.1",
+        }
+        mock_doc.import_dashboard.return_value = MagicMock(
+            document_id="new-id", name="Test"
+        )
+
+        payload = {
+            "queryPresentations": [
+                {
+                    "name": "Revenue",
+                    "query": {"table": "t", "fields": ["t.a"]},
+                    "visConfig": {"visType": "omni-kpi", "chartType": "kpi"},
+                },
+                {
+                    "name": "Revenue",
+                    "query": {"table": "t", "fields": ["t.a", "t.b"]},
+                    "visConfig": {"visType": "basic", "chartType": "line", "spec": {"version": 0}},
+                },
+            ],
+            "modelId": "m1",
+        }
+
+        mcp_server._create_with_vis_configs(payload, name="Test", folder_id=None)
+
+        call_args = mock_doc.import_dashboard.call_args[0][0]
+        memberships = call_args["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ]
+        vc0 = memberships[0]["queryPresentation"]["visConfig"]
+        vc1 = memberships[1]["queryPresentation"]["visConfig"]
+
+        assert vc0["visType"] == "omni-kpi"
+        assert vc0["chartType"] == "kpi"
+        assert vc1["visType"] == "basic"
+        assert vc1["chartType"] == "line"

@@ -47,7 +47,7 @@ from omni_dash.api.models import ModelService
 from omni_dash.api.queries import QueryBuilder, QueryRunner
 from omni_dash.config import get_settings
 from omni_dash.dashboard.builder import DashboardBuilder
-from omni_dash.dashboard.definition import DashboardDefinition
+from omni_dash.dashboard.definition import DashboardDefinition, DashboardFilter
 from omni_dash.dashboard.layout import LayoutManager
 from omni_dash.dashboard.serializer import DashboardSerializer
 from omni_dash.exceptions import OmniDashError
@@ -275,11 +275,13 @@ def _create_via_import_fallback(
             }
         })
         pos = qp.get("position", {})
+        # Omni import uses 24-col grid; SDK positions are 12-col.
+        # Scale x and w by 2 to match.
         layouts.append({
             "i": str(idx),
-            "x": pos.get("x", 0),
+            "x": pos.get("x", 0) * 2,
             "y": pos.get("y", (idx - 1) * 6),
-            "w": pos.get("w", 12),
+            "w": pos.get("w", 12) * 2,
             "h": pos.get("h", 6),
         })
 
@@ -345,12 +347,14 @@ def _create_with_vis_configs(
     # Deep-copy queryPresentations to avoid mutating the caller's payload.
     qps = copy.deepcopy(payload.get("queryPresentations", []))
     payload["queryPresentations"] = qps
-    vis_configs_by_name: dict[str, dict] = {}
-    query_overrides_by_name: dict[str, dict] = {}
-    for qp in qps:
+    # Use (index, name) composite keys to handle duplicate tile names.
+    vis_configs_by_key: dict[tuple[int, str], dict] = {}
+    query_overrides_by_key: dict[tuple[int, str], dict] = {}
+    for idx, qp in enumerate(qps):
+        key = (idx, qp["name"])
         vc = qp.pop("visConfig", None)
         if vc and vc.get("visType"):
-            vis_configs_by_name[qp["name"]] = vc
+            vis_configs_by_key[key] = vc
         # Preserve query fields that Omni may drop during export
         q = qp.get("query", {})
         overrides: dict[str, Any] = {}
@@ -361,7 +365,7 @@ def _create_with_vis_configs(
         if q.get("sorts"):
             overrides["sorts"] = q["sorts"]
         if overrides:
-            query_overrides_by_name[qp["name"]] = overrides
+            query_overrides_by_key[key] = overrides
 
     doc_svc = _get_doc_svc()
     try:
@@ -382,7 +386,7 @@ def _create_with_vis_configs(
         else:
             raise
 
-    if not vis_configs_by_name:
+    if not vis_configs_by_key:
         return skeleton_id, name or "Untitled"
 
     # Patch vis configs via export→reimport.
@@ -400,11 +404,14 @@ def _create_with_vis_configs(
     patched = copy.deepcopy(export_data)
     dash = patched.get("dashboard", {})
     qpc = dash.get("queryPresentationCollection", {})
-    for membership in qpc.get("queryPresentationCollectionMemberships", []):
+    for idx, membership in enumerate(
+        qpc.get("queryPresentationCollectionMemberships", [])
+    ):
         qp_data = membership.get("queryPresentation", {})
         tile_name = qp_data.get("name", "")
-        if tile_name in vis_configs_by_name:
-            vc_patch = vis_configs_by_name[tile_name]
+        tile_key = (idx, tile_name)
+        if tile_key in vis_configs_by_key:
+            vc_patch = vis_configs_by_key[tile_key]
             existing_vc = qp_data.setdefault("visConfig", {})
             existing_vc["visType"] = vc_patch.get("visType")
             # chartType can be explicitly null in exports; fall back to
@@ -435,13 +442,13 @@ def _create_with_vis_configs(
         # Export stores query under query.queryJson, not query directly.
         # Always apply overrides — Omni's create endpoint may write
         # placeholder values that differ from the user's intended config.
-        if tile_name in query_overrides_by_name:
-            q_overrides = query_overrides_by_name[tile_name]
+        if tile_key in query_overrides_by_key:
+            q_overrides = query_overrides_by_key[tile_key]
             q_json = qp_data.get("query", {}).get("queryJson", {})
             if q_json:
-                for key in ("filters", "pivots", "sorts"):
-                    if key in q_overrides:
-                        q_json[key] = q_overrides[key]
+                for okey in ("filters", "pivots", "sorts"):
+                    if okey in q_overrides:
+                        q_json[okey] = q_overrides[okey]
 
     # Inject dashboard-level filters from original payload into the export.
     # Omni's create endpoint ignores filterConfig, so we carry it through.
@@ -800,6 +807,13 @@ def move_dashboard(
             folder_id=target_folder_id,
         )
 
+        # Guard: don't delete original if import returned empty ID
+        if not result.document_id:
+            raise OmniDashError(
+                "Import succeeded but returned no document_id. "
+                f"Original dashboard {dashboard_id} preserved."
+            )
+
         try:
             _get_doc_svc().delete_dashboard(dashboard_id)
         except Exception as del_err:
@@ -877,7 +891,28 @@ def update_dashboard(
                 payload, name=effective_name, folder_id=effective_folder,
             )
         else:
-            # Metadata-only update — re-import with modifications
+            # Metadata-only update — re-import with modifications.
+            # Inject any provided filters into the export before reimport.
+            if filters:
+                import hashlib as _hl
+                qpc = export_data.get("dashboard", {}).get(
+                    "queryPresentationCollection", {}
+                )
+                fc = qpc.setdefault("filterConfig", {})
+                fo = qpc.setdefault("filterOrder", [])
+                for f_dict in filters:
+                    df = DashboardFilter(**f_dict)
+                    fid = _hl.md5(df.field.encode()).hexdigest()[:8]
+                    from omni_dash.dashboard.serializer import (
+                        _to_omni_filter_from_dashboard,
+                    )
+                    omni_f = _to_omni_filter_from_dashboard(df)
+                    omni_f["fieldName"] = df.field
+                    omni_f["label"] = df.label or df.field
+                    fc[fid] = omni_f
+                    if fid not in fo:
+                        fo.append(fid)
+
             imp_result = _get_doc_svc().import_dashboard(
                 export_data,
                 base_model_id=resolved_model_id,
@@ -885,6 +920,13 @@ def update_dashboard(
                 folder_id=effective_folder,
             )
             new_id, new_name = imp_result.document_id, imp_result.name
+
+        # Guard: don't delete original if creation returned empty ID
+        if not new_id:
+            raise OmniDashError(
+                "Dashboard creation succeeded but returned no document_id. "
+                f"Original dashboard {dashboard_id} preserved."
+            )
 
         # Delete the old dashboard after successful creation
         try:
