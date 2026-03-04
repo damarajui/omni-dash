@@ -593,10 +593,13 @@ class ModelService:
         try:
             data = json.loads(path.read_text())
             ts = data.get("timestamp", 0)
-            if time.time() - ts < self._cache_ttl:
+            age = time.time() - ts
+            if age < self._cache_ttl:
                 self._cache = data.get("entries", {})
+                # Backdate per-entry timestamps so entries expire at
+                # the correct time, accounting for file age.
                 now = time.monotonic()
-                self._cache_ts_map = {k: now for k in self._cache}
+                self._cache_ts_map = {k: now - age for k in self._cache}
         except (json.JSONDecodeError, KeyError):
             logger.warning("Corrupt cache file, ignoring: %s", path)
 

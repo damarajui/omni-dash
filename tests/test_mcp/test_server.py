@@ -2082,7 +2082,11 @@ class TestAddTilesEphemeralMerge:
         }
 
         orig_export = {
-            "document": {"name": "Dashboard", "sharedModelId": "model-abc"},
+            "document": {
+                "name": "Dashboard", "sharedModelId": "model-abc",
+                "ephemeral": "1:origMini1,2:origMini2",
+                "lastItemIndex": 2,
+            },
             "dashboard": {
                 "ephemeral": "1:origMini1,2:origMini2",
                 "queryPresentationCollection": {
@@ -2201,16 +2205,16 @@ class TestAddTilesEphemeralMerge:
         assert new_layout["i"] == "3"
         assert new_layout["y"] >= 80  # Below existing tiles
 
-        # Verify queryIdentifierMapKey is re-indexed (no duplicates)
-        all_keys = []
-        for m in mems:
-            qp = m.get("queryPresentation", {})
-            key = qp.get("queryIdentifierMapKey")
-            if key:
-                all_keys.append(key)
-        assert all_keys == ["1", "2", "3"], (
-            f"queryIdentifierMapKey should be re-indexed 1,2,3 but got {all_keys}"
-        )
+        # queryIdentifierMapKey removed from temp memberships (new tile)
+        # so Omni assigns fresh keys on import
+        temp_qp = mems[2].get("queryPresentation", {})
+        assert "queryIdentifierMapKey" not in temp_qp
+
+        # Verify document-level ephemeral and lastItemIndex are updated
+        doc = imported_data.get("document", {})
+        doc_eph = doc.get("ephemeral", "")
+        assert "3:newMiniA" in doc_eph, f"document.ephemeral missing new tile: {doc_eph}"
+        assert doc.get("lastItemIndex") == 3
 
 
 class TestAutoFieldValidation:
@@ -4135,15 +4139,18 @@ class TestAddTilesMembershipCleaning:
         # Original membership keeps its collection ID
         assert memberships[0]["queryPresentationCollectionId"] == "orig-collection-id"
 
-        # Temp membership should have updated collection ID and no stale IDs
-        assert memberships[1]["queryPresentationCollectionId"] == "orig-collection-id"
+        # Temp membership: collectionId removed, membership-level ID removed,
+        # QP-level ID regenerated as fresh UUID
+        assert "queryPresentationCollectionId" not in memberships[1]
         assert "id" not in memberships[1]  # membership-level ID removed
-        assert "id" not in memberships[1]["queryPresentation"]  # QP-level ID removed
+        assert memberships[1]["queryPresentation"]["id"] != "temp-qp-1"  # fresh UUID
         assert memberships[1]["queryPresentation"]["miniUuid"] == "BBB22222"
 
-        # queryIdentifierMapKeys re-indexed
+        # queryIdentifierMapKey removed from temp memberships (Omni
+        # assigns new keys on import when absent)
+        assert "queryIdentifierMapKey" not in memberships[1]["queryPresentation"]
+        # Original membership keeps its queryIdentifierMapKey
         assert memberships[0]["queryPresentation"]["queryIdentifierMapKey"] == "1"
-        assert memberships[1]["queryPresentation"]["queryIdentifierMapKey"] == "2"
 
     @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
     @patch("omni_dash.mcp.server.get_settings")
@@ -4266,16 +4273,19 @@ class TestAddTilesMembershipCleaning:
         assert orig_qp["query"]["id"] == "q-orig-1"
         assert orig_qp["visConfig"]["id"] == "vc-orig-1"
 
-        # Temp membership: ALL dedup-causing IDs must be stripped
+        # Temp membership: fresh UUIDs, collectionId set, membership ID removed
         temp_qp = memberships[1]["queryPresentation"]
-        assert "id" not in memberships[1]            # membership ID
-        assert "id" not in temp_qp                   # QP ID
-        assert "visConfigId" not in temp_qp          # visConfig ref
-        assert "queryId" not in temp_qp              # query ref
-        assert "id" not in temp_qp["visConfig"]      # visConfig object ID
-        assert "jsonHash" not in temp_qp["visConfig"]  # visConfig hash
-        assert "id" not in temp_qp["query"]          # query object ID
-        assert "jsonHash" not in temp_qp["query"]    # query hash
+        assert "id" not in memberships[1]            # membership-level ID popped
+        assert "queryPresentationCollectionId" not in memberships[1]  # removed from temp
+        assert temp_qp["id"] != "tqp1"              # QP ID regenerated
+        assert temp_qp["visConfigId"] != "vc-temp-1"  # fresh UUID
+        assert temp_qp["queryId"] != "q-temp-1"      # fresh UUID
+        # visConfig.id matches visConfigId (linked)
+        assert temp_qp["visConfig"]["id"] == temp_qp["visConfigId"]
+        # query.id matches queryId (linked)
+        assert temp_qp["query"]["id"] == temp_qp["queryId"]
+        # queryIdentifierMapKey removed (Omni assigns on import)
+        assert "queryIdentifierMapKey" not in temp_qp
 
         # Data fields should still be present
         assert temp_qp["query"]["queryJson"]["fields"] == ["t.b"]

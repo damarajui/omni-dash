@@ -346,6 +346,34 @@ class TestCache:
     def test_load_nonexistent_no_error(self, service, tmp_path):
         service.load_cache(tmp_path / "nope.json")  # Should not raise
 
+    def test_load_cache_respects_file_age(self, service, tmp_path):
+        """Loaded entries should expire based on file age, not load time."""
+        import json as json_lib
+
+        f = tmp_path / "cache.json"
+        # Write a cache file that is 3500 seconds old (TTL is 3600)
+        data = {
+            "timestamp": time.time() - 3500,
+            "ttl": 3600,
+            "entries": {"aged_key": {"v": 99}},
+        }
+        f.write_text(json_lib.dumps(data))
+
+        service._cache_ttl = 3600
+        service.load_cache(f)
+
+        # Entry should exist (file is within TTL)
+        assert service._get_cache("aged_key") == {"v": 99}
+
+        # But per-entry timestamp should be backdated so it expires soon
+        # (within ~100 seconds, not another full 3600s)
+        ts = service._cache_ts_map["aged_key"]
+        elapsed = time.monotonic() - ts
+        assert elapsed > 3400, (
+            f"Cache entry timestamp should be backdated by ~3500s, "
+            f"but only elapsed {elapsed:.0f}s"
+        )
+
 
 class TestGetTopicNative:
     def test_parses_native_response(self, service, mock_client):
