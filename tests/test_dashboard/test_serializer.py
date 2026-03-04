@@ -3555,3 +3555,129 @@ class TestFromOmniExportLayoutKey:
 
         defn = DashboardSerializer.from_omni_export(export_data)
         assert defn.tiles[0].position is not None
+
+
+class TestExtendedCartesianChartTypes:
+    """BUG-2: Extended chart types must generate cartesian vis configs."""
+
+    @pytest.mark.parametrize("chart_type,omni_type", [
+        ("stacked_bar_percent", "barStackedPercentage"),
+        ("stacked_area_percent", "areaStackedPercentage"),
+        ("column", "column"),
+        ("column_stacked", "columnStacked"),
+        ("column_grouped", "columnGrouped"),
+        ("column_stacked_percent", "columnStackedPercentage"),
+        ("boxplot", "boxplot"),
+    ])
+    def test_extended_type_generates_vis_config(self, chart_type, omni_type):
+        """Extended chart types should produce a visConfig with cartesian spec."""
+        defn = DashboardDefinition(
+            name="test", model_id="m1",
+            tiles=[{
+                "name": "T",
+                "chart_type": chart_type,
+                "query": {"table": "t", "fields": ["t.x", "t.y"]},
+            }],
+        )
+        payload = DashboardSerializer.to_omni_create_payload(defn)
+        qp = payload["queryPresentations"][0]
+        vc = qp.get("visConfig", {})
+        assert vc.get("visType") == "basic", f"{chart_type} should get basic visType"
+        assert vc.get("chartType") == omni_type
+
+
+class TestColumnStackedPercentRoundTrip:
+    """BUG-4: columnStackedPercentage should round-trip correctly."""
+
+    def test_reverse_mapping(self):
+        from omni_dash.dashboard.serializer import _OMNI_TO_CHART_TYPE, _CHART_TYPE_TO_OMNI
+        internal = _OMNI_TO_CHART_TYPE["columnStackedPercentage"]
+        assert internal == "column_stacked_percent"
+        assert _CHART_TYPE_TO_OMNI[internal] == "columnStackedPercentage"
+
+
+class TestFilterDeserializationOmniKeys:
+    """BUG-5: from_omni_export should read Omni's 'kind' and 'values' keys."""
+
+    def test_reads_omni_filter_keys(self):
+        export_data = {
+            "document": {"name": "Test", "modelId": "m1"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "Tile",
+                                "query": {
+                                    "queryJson": {
+                                        "table": "t",
+                                        "fields": ["t.a"],
+                                        "filters": {
+                                            "t.status": {
+                                                "kind": "EQUALS",
+                                                "type": "string",
+                                                "values": ["active", "pending"],
+                                                "is_negative": False,
+                                            }
+                                        },
+                                    }
+                                },
+                                "visConfig": {"chartType": "bar"},
+                            }
+                        },
+                    ],
+                },
+                "metadata": {
+                    "layouts": {
+                        "lg": [{"i": "1", "x": 0, "y": 0, "w": 24, "h": 50}]
+                    }
+                },
+            },
+        }
+
+        defn = DashboardSerializer.from_omni_export(export_data)
+        tile_filters = defn.tiles[0].query.filters
+        assert len(tile_filters) == 1
+        f = tile_filters[0]
+        assert f.operator == "EQUALS"
+        assert f.value == ["active", "pending"]
+
+    def test_reads_right_side_filter(self):
+        export_data = {
+            "document": {"name": "Test", "modelId": "m1"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "Tile",
+                                "query": {
+                                    "queryJson": {
+                                        "table": "t",
+                                        "fields": ["t.a"],
+                                        "filters": {
+                                            "t.name": {
+                                                "kind": "CONTAINS",
+                                                "type": "string",
+                                                "right_side": "test",
+                                            }
+                                        },
+                                    }
+                                },
+                                "visConfig": {"chartType": "bar"},
+                            }
+                        },
+                    ],
+                },
+                "metadata": {
+                    "layouts": {
+                        "lg": [{"i": "1", "x": 0, "y": 0, "w": 24, "h": 50}]
+                    }
+                },
+            },
+        }
+
+        defn = DashboardSerializer.from_omni_export(export_data)
+        f = defn.tiles[0].query.filters[0]
+        assert f.operator == "CONTAINS"
+        assert f.value == "test"

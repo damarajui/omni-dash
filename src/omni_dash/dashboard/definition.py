@@ -43,6 +43,7 @@ class ChartType(str, Enum):
     COLUMN = "column"
     COLUMN_STACKED = "column_stacked"
     COLUMN_GROUPED = "column_grouped"
+    COLUMN_STACKED_PERCENT = "column_stacked_percent"
     SINGLE_RECORD = "single_record"
 
 
@@ -92,6 +93,7 @@ CHART_TYPE_DEFAULTS: dict[str, tuple[int, int]] = {
     "column": (6, 4),
     "column_stacked": (6, 4),
     "column_grouped": (6, 4),
+    "column_stacked_percent": (6, 4),
     "single_record": (6, 4),
 }
 

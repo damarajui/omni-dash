@@ -65,7 +65,7 @@ class TestEnums:
         assert ChartType.LINE.value == "line"
         assert ChartType.TABLE.value == "table"
         assert ChartType.STACKED_BAR.value == "stacked_bar"
-        assert len(ChartType) == 27
+        assert len(ChartType) == 28
 
     def test_tile_size_values(self):
         assert TileSize.FULL.value == "full"
