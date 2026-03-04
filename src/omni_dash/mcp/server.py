@@ -1009,42 +1009,49 @@ def add_tiles_to_dashboard(
             patched_memberships = patched_qpc.get(
                 "queryPresentationCollectionMemberships", []
             )
-            # Fix temp memberships: update queryPresentationCollectionId
-            # to match the original's collection so Omni accepts them on
-            # import, and remove stale IDs that would cause deduplication.
+            # Fix temp memberships so they integrate with the original
+            # dashboard's workbook model and collection.
             orig_collection_id = patched_qpc.get("id", "")
+            # Get the original's workbook model ID — temp tiles reference
+            # the temp skeleton's model ID which doesn't exist in the
+            # reimported context. Omni silently drops tiles whose
+            # modelId doesn't match the workbookModel being imported.
+            orig_wb_model_id = (
+                patched.get("workbookModel", {}).get("id", "")
+                or patched_dash.get("modelId", "")
+            )
+            import uuid as _uuid
             for tm in temp_memberships:
-                if orig_collection_id:
-                    tm["queryPresentationCollectionId"] = orig_collection_id
-                # Remove ALL IDs and hashes so Omni generates fresh ones
-                # instead of deduplicating against existing tiles.
-                # Without this, Omni silently drops tiles whose IDs
-                # collide with existing ones on import.
+                # Remove membership-level fields that aren't in native exports
+                tm.pop("queryPresentationCollectionId", None)
                 tm.pop("id", None)
                 qp = tm.get("queryPresentation", {})
-                qp.pop("id", None)
-                qp.pop("visConfigId", None)
-                qp.pop("queryId", None)
-                # Strip nested visConfig IDs and hash
+                # Regenerate IDs to avoid collision with existing tiles.
+                fresh_vc_id = str(_uuid.uuid4())
+                fresh_q_id = str(_uuid.uuid4())
+                qp["id"] = str(_uuid.uuid4())
+                qp["visConfigId"] = fresh_vc_id
+                qp["queryId"] = fresh_q_id
+                # Remove queryIdentifierMapKey — temp exports may have
+                # values that collide with originals. Omni assigns new
+                # keys on import when the field is absent.
+                qp.pop("queryIdentifierMapKey", None)
+                # Update modelId to match original workbook model
+                if orig_wb_model_id:
+                    qp["modelId"] = orig_wb_model_id
                 vis_cfg = qp.get("visConfig", {})
                 if vis_cfg:
-                    vis_cfg.pop("id", None)
-                    vis_cfg.pop("jsonHash", None)
-                # Strip nested query IDs and hash
+                    vis_cfg["id"] = fresh_vc_id
                 query_obj = qp.get("query", {})
                 if query_obj:
-                    query_obj.pop("id", None)
-                    query_obj.pop("jsonHash", None)
+                    query_obj["id"] = fresh_q_id
+                    if orig_wb_model_id:
+                        query_obj["modelId"] = orig_wb_model_id
+                    query_json = query_obj.get("queryJson", {})
+                    if query_json and orig_wb_model_id:
+                        query_json["modelId"] = orig_wb_model_id
 
             patched_memberships.extend(temp_memberships)
-
-            # Re-index queryIdentifierMapKey on ALL memberships (1-indexed).
-            # Temp memberships have keys like "1", which collide with
-            # original memberships. Omni deduplicates by this key, causing
-            # new tiles to be silently dropped on import.
-            for idx, membership in enumerate(patched_memberships, start=1):
-                qp = membership.get("queryPresentation", {})
-                qp["queryIdentifierMapKey"] = str(idx)
 
             # 7. Merge layout items with offset AND update ephemeral field.
             # The `ephemeral` field maps layout indices to tile miniUuids:
@@ -1115,6 +1122,19 @@ def add_tiles_to_dashboard(
                 patched_dash["ephemeral"] = (
                     orig_ephemeral + sep + ",".join(new_eph_parts)
                 )
+
+            # Also update document-level ephemeral and lastItemIndex.
+            # The document object carries its own copy of the ephemeral
+            # mapping and a tile count — both must be in sync with the
+            # dashboard-level values for Omni to honour all tiles.
+            patched_doc = patched.get("document", {})
+            doc_ephemeral = patched_doc.get("ephemeral", "")
+            if new_eph_parts:
+                sep = "," if doc_ephemeral else ""
+                patched_doc["ephemeral"] = (
+                    doc_ephemeral + sep + ",".join(new_eph_parts)
+                )
+            patched_doc["lastItemIndex"] = len(patched_memberships)
 
             # 8. Reimport merged export
             reimport_model_id = _resolve_model_id_from_export(patched)
