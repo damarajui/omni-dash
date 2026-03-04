@@ -285,6 +285,17 @@ def _create_via_import_fallback(
             "h": pos.get("h", 6),
         })
 
+    import secrets
+
+    # Generate miniUuid for each membership and set the ephemeral field.
+    # Format: "1:ecYPPwXE,2:0fhTwpih" — Omni requires these to map
+    # layout indices to query presentations.
+    mini_uuids: list[str] = []
+    for idx, m in enumerate(memberships, start=1):
+        mini = secrets.token_urlsafe(6)[:8]
+        mini_uuids.append(f"{idx}:{mini}")
+        m.setdefault("queryPresentation", {})["miniUuid"] = mini
+
     export_payload: dict[str, Any] = {
         "exportVersion": "0.1",
         "document": {
@@ -293,7 +304,7 @@ def _create_via_import_fallback(
         },
         "dashboard": {
             "metadataVersion": 2,
-            "ephemeral": ",".join(f"{i}:" for i in range(1, len(memberships) + 1)),
+            "ephemeral": ",".join(mini_uuids),
             "crossfilterEnabled": False,
             "facetFilters": False,
             "queryPresentationCollection": {
@@ -895,6 +906,12 @@ def update_dashboard(
         effective_folder = folder_id or doc.get("folderId")
         resolved_model_id = _resolve_model_id_from_export(export_data, model_id)
 
+        if tiles is not None and not tiles:
+            return json.dumps({
+                "error": "tiles array cannot be empty. "
+                "Use tiles=null (omit the parameter) for metadata-only update.",
+            })
+
         if tiles is not None:
             # Full tile replacement — build new dashboard from spec
             definition = DashboardDefinition(
@@ -911,11 +928,17 @@ def update_dashboard(
                 payload, name=effective_name, folder_id=effective_folder,
             )
         else:
+            import copy
+
+            # Deep-copy to avoid mutating the original export_data
+            # (needed if import fails and caller wants to retry).
+            patched_export = copy.deepcopy(export_data)
+
             # Metadata-only update — re-import with modifications.
             # Inject any provided filters into the export before reimport.
             if filters:
                 import hashlib as _hl
-                qpc = export_data.get("dashboard", {}).get(
+                qpc = patched_export.get("dashboard", {}).get(
                     "queryPresentationCollection", {}
                 )
                 fc = qpc.setdefault("filterConfig", {})
@@ -934,7 +957,7 @@ def update_dashboard(
                         fo.append(fid)
 
             imp_result = _get_doc_svc().import_dashboard(
-                export_data,
+                patched_export,
                 base_model_id=resolved_model_id,
                 name=effective_name,
                 folder_id=effective_folder,
@@ -1353,13 +1376,10 @@ def update_tile(
             # the new chart type. Without this, Omni wipes the entire
             # cartesian spec on reimport due to chartType / mark mismatch.
             mark_type = _OMNI_TO_MARK.get(omni_ct, "line")
-            config = vc.get("config", {})
-            if config:
-                if "mark" in config:
-                    config["mark"]["type"] = mark_type
-                for series_entry in config.get("series", []):
-                    if "mark" in series_entry:
-                        series_entry["mark"]["type"] = mark_type
+            config = vc.setdefault("config", {})
+            config.setdefault("mark", {})["type"] = mark_type
+            for series_entry in config.get("series", []):
+                series_entry.setdefault("mark", {})["type"] = mark_type
             modified = True
 
         if title is not None:
