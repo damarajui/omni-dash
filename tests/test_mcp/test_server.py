@@ -3268,7 +3268,7 @@ class TestGetDashboardTruncation:
 
         result = json.loads(mcp_server.get_dashboard("abc"))
         assert result["tile_count"] == 15
-        assert len(result["query_presentations"]) == 10
+        assert len(result["tiles"]) == 10
         assert "note" in result
         assert "15" in result["note"]
 
@@ -4582,3 +4582,237 @@ class TestDuplicateTileNamesVisConfig:
         assert vc0["chartType"] == "kpi"
         assert vc1["visType"] == "basic"
         assert vc1["chartType"] == "line"
+
+
+# ---------------------------------------------------------------------------
+# update_tile: chart_type updates config.mark and series marks
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateTileChartTypeMarkSync:
+    """update_tile chart_type change must also update config.mark.type
+    and series[].mark.type to prevent Omni from wiping the cartesian spec."""
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_chart_type_updates_mark_and_series(self, mock_doc_svc_fn):
+        """Changing chart_type from line to bar should update mark.type and
+        series[].mark.type in the cartesian config."""
+        mock_svc = MagicMock()
+        mock_doc_svc_fn.return_value = mock_svc
+
+        # Build a realistic export with a line chart
+        export_data = {
+            "document": {"name": "Test", "folderId": "f1", "modelId": "m1"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "Visits",
+                                "visConfig": {
+                                    "visType": "basic",
+                                    "chartType": "line",
+                                    "config": {
+                                        "configType": "cartesian",
+                                        "mark": {"type": "line"},
+                                        "series": [
+                                            {
+                                                "field": {"name": "t.visits"},
+                                                "yAxis": "y",
+                                                "mark": {"type": "line"},
+                                            }
+                                        ],
+                                        "x": {"field": {"name": "t.date"}},
+                                    },
+                                },
+                                "query": {
+                                    "queryJson": {
+                                        "table": "t",
+                                        "fields": ["t.date", "t.visits"],
+                                    }
+                                },
+                            }
+                        }
+                    ]
+                }
+            },
+            "exportVersion": "0.1",
+        }
+        mock_svc.export_dashboard.return_value = export_data
+
+        # Import returns a result
+        import_result = MagicMock()
+        import_result.document_id = "new-id"
+        mock_svc.import_dashboard.return_value = import_result
+
+        result = json.loads(
+            mcp_server.update_tile(
+                dashboard_id="old-id",
+                tile_name="Visits",
+                chart_type="bar",
+            )
+        )
+        assert result["status"] == "updated"
+        assert result["dashboard_id"] == "new-id"
+
+        # Check the patched payload
+        call_args = mock_svc.import_dashboard.call_args[0][0]
+        qp = call_args["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]
+
+        vc = qp["visConfig"]
+        assert vc["chartType"] == "bar"
+        assert vc["visType"] == "basic"
+
+        # config.mark.type should be updated to "bar"
+        config = vc["config"]
+        assert config["mark"]["type"] == "bar"
+
+        # series[0].mark.type should also be "bar"
+        assert config["series"][0]["mark"]["type"] == "bar"
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_chart_type_area_maps_mark_correctly(self, mock_doc_svc_fn):
+        """area chart type should set mark.type to 'area'."""
+        mock_svc = MagicMock()
+        mock_doc_svc_fn.return_value = mock_svc
+
+        export_data = {
+            "document": {"name": "Test", "folderId": "f1", "modelId": "m1"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "T1",
+                                "visConfig": {
+                                    "visType": "basic",
+                                    "chartType": "line",
+                                    "config": {
+                                        "mark": {"type": "line"},
+                                        "series": [
+                                            {"mark": {"type": "line"}, "field": {"name": "t.x"}}
+                                        ],
+                                    },
+                                },
+                                "query": {"queryJson": {"table": "t", "fields": ["t.x"]}},
+                            }
+                        }
+                    ]
+                }
+            },
+            "exportVersion": "0.1",
+        }
+        mock_svc.export_dashboard.return_value = export_data
+
+        import_result = MagicMock()
+        import_result.document_id = "new-2"
+        mock_svc.import_dashboard.return_value = import_result
+
+        mcp_server.update_tile(
+            dashboard_id="old-2", tile_name="T1", chart_type="area"
+        )
+
+        call_args = mock_svc.import_dashboard.call_args[0][0]
+        qp = call_args["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]
+        config = qp["visConfig"]["config"]
+        assert config["mark"]["type"] == "area"
+        assert config["series"][0]["mark"]["type"] == "area"
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_no_config_does_not_crash(self, mock_doc_svc_fn):
+        """If config is empty, chart_type change should still work."""
+        mock_svc = MagicMock()
+        mock_doc_svc_fn.return_value = mock_svc
+
+        export_data = {
+            "document": {"name": "Test", "folderId": "f1", "modelId": "m1"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "T1",
+                                "visConfig": {
+                                    "visType": "basic",
+                                    "chartType": "line",
+                                    "config": {},
+                                },
+                                "query": {"queryJson": {"table": "t", "fields": ["t.x"]}},
+                            }
+                        }
+                    ]
+                }
+            },
+            "exportVersion": "0.1",
+        }
+        mock_svc.export_dashboard.return_value = export_data
+
+        import_result = MagicMock()
+        import_result.document_id = "new-3"
+        mock_svc.import_dashboard.return_value = import_result
+
+        result = json.loads(
+            mcp_server.update_tile(
+                dashboard_id="old-3", tile_name="T1", chart_type="scatter"
+            )
+        )
+        assert result["status"] == "updated"
+
+
+# ---------------------------------------------------------------------------
+# get_dashboard: tiles key
+# ---------------------------------------------------------------------------
+
+
+class TestGetDashboardTilesKey:
+    """get_dashboard should return a 'tiles' key with simplified tile info."""
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_tiles_key_present(self, mock_doc_svc_fn):
+        from omni_dash.api.documents import DashboardResponse
+
+        mock_svc = MagicMock()
+        mock_doc_svc_fn.return_value = mock_svc
+        mock_svc.get_dashboard.return_value = DashboardResponse(
+            document_id="abc",
+            name="Test",
+            query_presentations=[
+                {
+                    "name": "My Tile",
+                    "chartType": "bar",
+                    "query": {
+                        "table": "t",
+                        "fields": ["t.a", "t.b"],
+                    },
+                }
+            ],
+        )
+        result = json.loads(mcp_server.get_dashboard("abc"))
+        assert "tiles" in result
+        assert len(result["tiles"]) == 1
+        tile = result["tiles"][0]
+        assert tile["name"] == "My Tile"
+        assert tile["chart_type"] == "bar"
+        assert tile["fields"] == ["t.a", "t.b"]
+        assert tile["table"] == "t"
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_sql_tile_flag(self, mock_doc_svc_fn):
+        from omni_dash.api.documents import DashboardResponse
+
+        mock_svc = MagicMock()
+        mock_doc_svc_fn.return_value = mock_svc
+        mock_svc.get_dashboard.return_value = DashboardResponse(
+            document_id="abc",
+            name="Test",
+            query_presentations=[
+                {"name": "SQL Tile", "chartType": "line", "isSql": True, "query": {}},
+            ],
+        )
+        result = json.loads(mcp_server.get_dashboard("abc"))
+        tile = result["tiles"][0]
+        assert tile["is_sql"] is True

@@ -545,15 +545,35 @@ def get_dashboard(dashboard_id: str) -> str:
         JSON with dashboard metadata including tiles, layouts.
     """
     try:
+        from omni_dash.dashboard.serializer import _OMNI_TO_CHART_TYPE
+
         dash = _get_doc_svc().get_dashboard(dashboard_id)
         total_tiles = len(dash.query_presentations)
         preview_limit = 10
+
+        # Build simplified tiles list for LLM-friendly access
+        tiles: list[dict[str, Any]] = []
+        for qp in dash.query_presentations[:preview_limit]:
+            omni_ct = qp.get("chartType", "")
+            tile_info: dict[str, Any] = {
+                "name": qp.get("name", ""),
+                "chart_type": _OMNI_TO_CHART_TYPE.get(omni_ct, omni_ct),
+            }
+            query = qp.get("query", {})
+            if query.get("fields"):
+                tile_info["fields"] = query["fields"]
+            if query.get("table"):
+                tile_info["table"] = query["table"]
+            if qp.get("isSql"):
+                tile_info["is_sql"] = True
+            tiles.append(tile_info)
+
         result_data: dict[str, Any] = {
             "document_id": dash.document_id,
             "name": dash.name,
             "model_id": dash.model_id,
             "tile_count": total_tiles,
-            "query_presentations": dash.query_presentations[:preview_limit],
+            "tiles": tiles,
             "created_at": dash.created_at,
             "updated_at": dash.updated_at,
         }
@@ -1310,7 +1330,10 @@ def update_tile(
             modified = True
 
         if chart_type is not None:
-            from omni_dash.dashboard.serializer import _CHART_TYPE_TO_OMNI
+            from omni_dash.dashboard.serializer import (
+                _CHART_TYPE_TO_OMNI,
+                _OMNI_TO_MARK,
+            )
 
             omni_ct = _CHART_TYPE_TO_OMNI.get(chart_type, chart_type)
             vc = target_qp.setdefault("visConfig", {})
@@ -1326,6 +1349,17 @@ def update_tile(
                 vc["visType"] = "vegalite"
             else:
                 vc["visType"] = "basic"
+            # Update config.mark.type and series[].mark.type to match
+            # the new chart type. Without this, Omni wipes the entire
+            # cartesian spec on reimport due to chartType / mark mismatch.
+            mark_type = _OMNI_TO_MARK.get(omni_ct, "line")
+            config = vc.get("config", {})
+            if config:
+                if "mark" in config:
+                    config["mark"]["type"] = mark_type
+                for series_entry in config.get("series", []):
+                    if "mark" in series_entry:
+                        series_entry["mark"]["type"] = mark_type
             modified = True
 
         if title is not None:
