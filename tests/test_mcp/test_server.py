@@ -1401,25 +1401,15 @@ class TestCloneDashboardErrors:
 class TestUpdateDashboardErrors:
     @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
     @patch("omni_dash.mcp.server.get_settings")
-    def test_update_with_empty_tiles_creates_empty_dashboard(self, mock_settings, _, mock_doc_svc):
-        """tiles=[] (empty list, not None) means replace with zero tiles."""
-        from omni_dash.api.documents import DashboardResponse, ImportResponse
-
-        mock_settings.return_value = MagicMock(omni_base_url="https://org.omniapp.co")
-        mock_doc_svc.export_dashboard.return_value = SAMPLE_EXPORT
-        mock_doc_svc.create_dashboard.return_value = DashboardResponse(
-            document_id="skeleton-1", name="Updated"
-        )
-        mock_doc_svc.import_dashboard.return_value = ImportResponse(
-            document_id="updated-1", name="Updated"
-        )
-        mock_doc_svc.delete_dashboard.return_value = None
-
-        # Empty tiles list — should still process without crashing
+    def test_update_with_empty_tiles_returns_error(self, mock_settings, _, mock_doc_svc):
+        """tiles=[] should return an error, not destroy the dashboard."""
         result = json.loads(mcp_server.update_dashboard(
             dashboard_id="orig-1", tiles=[], name="Updated"
         ))
-        assert result["status"] == "updated"
+        assert "error" in result
+        assert "empty" in result["error"].lower()
+        # Original dashboard must NOT be deleted
+        mock_doc_svc.delete_dashboard.assert_not_called()
 
     def test_update_nonexistent_dashboard(self, mock_doc_svc):
         from omni_dash.exceptions import DocumentNotFoundError
@@ -4816,3 +4806,186 @@ class TestGetDashboardTilesKey:
         result = json.loads(mcp_server.get_dashboard("abc"))
         tile = result["tiles"][0]
         assert tile["is_sql"] is True
+
+
+# ---------------------------------------------------------------------------
+# update_tile: chart_type change creates mark when config is empty
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateTileEmptyConfig:
+    """update_tile chart_type change must create config.mark.type even
+    when the existing config is empty (e.g., tiles created without a
+    cartesian spec like KPI tiles being changed to bar)."""
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_creates_mark_when_config_empty(self, mock_doc_svc_fn):
+        mock_svc = MagicMock()
+        mock_doc_svc_fn.return_value = mock_svc
+
+        export_data = {
+            "document": {"name": "Test", "folderId": "f1", "modelId": "m1"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "T1",
+                                "visConfig": {
+                                    "visType": "basic",
+                                    "chartType": "line",
+                                    "config": {},
+                                },
+                                "query": {"queryJson": {"table": "t", "fields": ["t.x"]}},
+                            }
+                        }
+                    ]
+                }
+            },
+            "exportVersion": "0.1",
+        }
+        mock_svc.export_dashboard.return_value = export_data
+        import_result = MagicMock()
+        import_result.document_id = "new-1"
+        mock_svc.import_dashboard.return_value = import_result
+
+        mcp_server.update_tile(
+            dashboard_id="old-1", tile_name="T1", chart_type="bar"
+        )
+
+        call_args = mock_svc.import_dashboard.call_args[0][0]
+        qp = call_args["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]
+        config = qp["visConfig"]["config"]
+        assert config["mark"]["type"] == "bar"
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_creates_mark_when_config_missing(self, mock_doc_svc_fn):
+        mock_svc = MagicMock()
+        mock_doc_svc_fn.return_value = mock_svc
+
+        export_data = {
+            "document": {"name": "Test", "folderId": "f1", "modelId": "m1"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [
+                        {
+                            "queryPresentation": {
+                                "name": "T1",
+                                "visConfig": {
+                                    "visType": "basic",
+                                    "chartType": "line",
+                                },
+                                "query": {"queryJson": {"table": "t", "fields": ["t.x"]}},
+                            }
+                        }
+                    ]
+                }
+            },
+            "exportVersion": "0.1",
+        }
+        mock_svc.export_dashboard.return_value = export_data
+        import_result = MagicMock()
+        import_result.document_id = "new-2"
+        mock_svc.import_dashboard.return_value = import_result
+
+        mcp_server.update_tile(
+            dashboard_id="old-2", tile_name="T1", chart_type="area"
+        )
+
+        call_args = mock_svc.import_dashboard.call_args[0][0]
+        qp = call_args["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]
+        config = qp["visConfig"]["config"]
+        assert config["mark"]["type"] == "area"
+
+
+# ---------------------------------------------------------------------------
+# update_dashboard: metadata-only does not mutate original export
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateDashboardDeepCopy:
+    """Metadata-only update_dashboard must deep-copy export_data
+    before injecting filters."""
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_original_export_not_mutated(self, mock_doc_svc_fn):
+        from omni_dash.api.documents import ImportResponse
+
+        mock_svc = MagicMock()
+        mock_doc_svc_fn.return_value = mock_svc
+
+        original_export = {
+            "document": {"name": "Orig", "folderId": "f1", "modelId": "m1"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [],
+                }
+            },
+            "exportVersion": "0.1",
+        }
+        mock_svc.export_dashboard.return_value = original_export
+        mock_svc.import_dashboard.return_value = ImportResponse(
+            document_id="new-1", name="Renamed"
+        )
+
+        mcp_server.update_dashboard(
+            dashboard_id="orig-1",
+            name="Renamed",
+            filters=[{"field": "t.date", "filter_type": "date_range"}],
+        )
+
+        # Original export_data must NOT have filterConfig injected
+        qpc = original_export["dashboard"]["queryPresentationCollection"]
+        assert "filterConfig" not in qpc, "Original export was mutated!"
+
+
+# ---------------------------------------------------------------------------
+# _create_via_import_fallback: ephemeral has miniUuids
+# ---------------------------------------------------------------------------
+
+
+class TestImportFallbackMiniUuid:
+    """_create_via_import_fallback must generate miniUuid in ephemeral field."""
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_ephemeral_has_mini_uuids(self, mock_doc_svc_fn):
+        from omni_dash.api.documents import ImportResponse
+
+        mock_svc = MagicMock()
+        mock_doc_svc_fn.return_value = mock_svc
+        mock_svc.import_dashboard.return_value = ImportResponse(
+            document_id="fallback-1", name="Fallback"
+        )
+
+        payload = {
+            "name": "Test",
+            "queryPresentations": [
+                {"name": "T1", "query": {"queryJson": {"table": "t", "fields": ["t.a"]}}},
+                {"name": "T2", "query": {"queryJson": {"table": "t", "fields": ["t.b"]}}},
+            ],
+        }
+
+        mcp_server._create_via_import_fallback(
+            mock_svc, payload, name="Test", folder_id="folder-1"
+        )
+
+        call_args = mock_svc.import_dashboard.call_args[0][0]
+        ephemeral = call_args["dashboard"]["ephemeral"]
+        parts = ephemeral.split(",")
+        assert len(parts) == 2
+        for part in parts:
+            idx, mini = part.split(":")
+            assert len(mini) > 0, f"Missing miniUuid for index {idx}"
+
+        # Each membership should also have miniUuid
+        ms = call_args["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ]
+        for m in ms:
+            qp = m.get("queryPresentation", {})
+            assert "miniUuid" in qp
+            assert len(qp["miniUuid"]) > 0
