@@ -874,8 +874,8 @@ class TestAddTilesToDashboard:
     @patch.object(mcp_server, "_get_shared_model_id", return_value="model-123")
     @patch("omni_dash.mcp.server.get_settings")
     @patch("omni_dash.mcp.server.DashboardSerializer")
-    def test_delete_failure_still_succeeds(self, mock_serializer, mock_settings, _, mock_doc_svc):
-        """Delete failures are silently ignored — new dashboard is still created."""
+    def test_delete_failure_returns_partial(self, mock_serializer, mock_settings, _, mock_doc_svc):
+        """Delete failures return partial status — new dashboard is still created."""
         import copy
         from omni_dash.api.documents import DashboardResponse, ImportResponse
 
@@ -925,9 +925,11 @@ class TestAddTilesToDashboard:
             dashboard_id="orig-1", tiles=tiles
         ))
 
-        # Delete failures are best-effort — the new dashboard is still created
-        assert result["status"] == "updated"
+        # Delete failures return partial status with both old and new IDs
+        assert result["status"] == "partial"
         assert result["dashboard_id"] == "new-1"
+        assert result["old_dashboard_id"] == "orig-1"
+        assert "warning" in result
 
 
 # ---------------------------------------------------------------------------
@@ -4989,3 +4991,232 @@ class TestImportFallbackMiniUuid:
             qp = m.get("queryPresentation", {})
             assert "miniUuid" in qp
             assert len(qp["miniUuid"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# PR #54: Error handling, mark sync, chartType fallback, miniUuid, pagination
+# ---------------------------------------------------------------------------
+
+
+class TestToolError:
+    """_tool_error logs with logger.exception and returns Internal error JSON."""
+
+    def test_returns_internal_error_json(self):
+        result = json.loads(mcp_server._tool_error(ValueError("boom"), "test_tool"))
+        assert "Internal error" in result["error"]
+        assert "boom" in result["error"]
+
+    def test_logs_exception(self, caplog):
+        import logging
+        with caplog.at_level(logging.ERROR, logger="omni_dash.mcp.server"):
+            mcp_server._tool_error(RuntimeError("fail"), "my_tool")
+        assert "Unexpected error in my_tool" in caplog.text
+
+
+class TestResolveTableNameDirect:
+    """_resolve_table_name — tested directly, not mocked away."""
+
+    @patch.object(mcp_server, "_get_model_svc")
+    def test_no_spaces_passes_through(self, mock_model_svc_fn):
+        result = mcp_server._resolve_table_name("mart_seo", "model-1")
+        assert result == "mart_seo"
+        mock_model_svc_fn.return_value.get_topic_native.assert_not_called()
+
+    @patch.object(mcp_server, "_get_model_svc")
+    def test_spaces_resolved_to_base_view(self, mock_model_svc_fn):
+        mock_detail = MagicMock(base_view="google_ads")
+        mock_model_svc_fn.return_value.get_topic_native.return_value = mock_detail
+        result = mcp_server._resolve_table_name("Google Ads Performance", "model-1")
+        assert result == "google_ads"
+
+    @patch.object(mcp_server, "_get_model_svc")
+    def test_spaces_fallback_on_lookup_failure(self, mock_model_svc_fn):
+        mock_model_svc_fn.return_value.get_topic_native.side_effect = Exception("not found")
+        result = mcp_server._resolve_table_name("Unknown Topic", "model-1")
+        assert result == "Unknown Topic"
+
+    @patch.object(mcp_server, "_get_model_svc")
+    def test_spaces_fallback_logs_warning(self, mock_model_svc_fn, caplog):
+        import logging
+        mock_model_svc_fn.return_value.get_topic_native.side_effect = Exception("fail")
+        with caplog.at_level(logging.WARNING, logger="omni_dash.mcp.server"):
+            mcp_server._resolve_table_name("Bad Topic", "m-1")
+        assert "Failed to resolve table" in caplog.text
+
+
+class TestMarkSyncSkipsNonCartesian:
+    """update_tile skips mark sync for non-cartesian chart types (pie, kpi, etc.)."""
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-1")
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_pie_skips_mark_sync(self, mock_doc_svc_fn, _):
+        import copy
+        from omni_dash.api.documents import ImportResponse
+
+        mock_svc = MagicMock()
+        mock_doc_svc_fn.return_value = mock_svc
+
+        export = {
+            "document": {"name": "D", "folderId": "f1"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [{
+                        "queryPresentation": {
+                            "name": "Tile1",
+                            "visConfig": {"visType": "basic", "chartType": "bar"},
+                            "query": {"queryJson": {"table": "t", "fields": ["t.a"]}},
+                        }
+                    }]
+                }
+            },
+            "workbookModel": {"base_model_id": "model-1"},
+        }
+        mock_svc.export_dashboard.return_value = copy.deepcopy(export)
+        mock_svc.import_dashboard.return_value = ImportResponse(
+            document_id="new-1", name="D"
+        )
+
+        result = json.loads(mcp_server.update_tile(
+            dashboard_id="d-1", tile_name="Tile1", chart_type="pie",
+        ))
+        assert result["status"] == "updated"
+
+        # Check the import call — visConfig should have chartType=pie but NO mark
+        call_payload = mock_svc.import_dashboard.call_args[0][0]
+        qp = call_payload["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]
+        vc = qp["visConfig"]
+        assert vc["chartType"] == "pie"
+        # Non-cartesian: config.mark should NOT be set
+        config = vc.get("config", {})
+        assert "mark" not in config or config.get("mark", {}).get("type") is None
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-1")
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_bar_sets_mark_sync(self, mock_doc_svc_fn, _):
+        import copy
+        from omni_dash.api.documents import ImportResponse
+
+        mock_svc = MagicMock()
+        mock_doc_svc_fn.return_value = mock_svc
+
+        export = {
+            "document": {"name": "D", "folderId": "f1"},
+            "dashboard": {
+                "queryPresentationCollection": {
+                    "queryPresentationCollectionMemberships": [{
+                        "queryPresentation": {
+                            "name": "Tile1",
+                            "visConfig": {"visType": "basic", "chartType": "line"},
+                            "query": {"queryJson": {"table": "t", "fields": ["t.a"]}},
+                        }
+                    }]
+                }
+            },
+            "workbookModel": {"base_model_id": "model-1"},
+        }
+        mock_svc.export_dashboard.return_value = copy.deepcopy(export)
+        mock_svc.import_dashboard.return_value = ImportResponse(
+            document_id="new-1", name="D"
+        )
+
+        mcp_server.update_tile(
+            dashboard_id="d-1", tile_name="Tile1", chart_type="bar",
+        )
+
+        call_payload = mock_svc.import_dashboard.call_args[0][0]
+        qp = call_payload["dashboard"]["queryPresentationCollection"][
+            "queryPresentationCollectionMemberships"
+        ][0]["queryPresentation"]
+        # Cartesian: mark.type should be "bar"
+        assert qp["visConfig"]["config"]["mark"]["type"] == "bar"
+
+
+class TestGetDashboardChartTypeFallback:
+    """get_dashboard falls back to visConfig.chartType when top-level is empty."""
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    @patch("omni_dash.mcp.server.get_settings")
+    def test_uses_vis_config_chart_type(self, mock_settings, mock_doc_svc_fn):
+        from omni_dash.api.documents import DashboardResponse
+
+        mock_settings.return_value = MagicMock(omni_base_url="https://test.omniapp.co")
+        mock_svc = MagicMock()
+        mock_doc_svc_fn.return_value = mock_svc
+        mock_svc.get_dashboard.return_value = DashboardResponse(
+            document_id="d-1",
+            name="Test",
+            query_presentations=[{
+                "name": "T1",
+                "chartType": "",  # Empty top-level
+                "visConfig": {"chartType": "bar"},
+                "query": {"table": "t", "fields": ["t.a"]},
+            }],
+        )
+
+        result = json.loads(mcp_server.get_dashboard("d-1"))
+        assert result["tiles"][0]["chart_type"] == "bar"
+
+
+class TestMiniUuidAlphanumeric:
+    """miniUuid generation should produce alphanumeric-only tokens."""
+
+    @patch.object(mcp_server, "_get_doc_svc")
+    def test_no_special_chars(self, mock_doc_svc_fn):
+        from omni_dash.api.documents import ImportResponse
+
+        mock_svc = MagicMock()
+        mock_doc_svc_fn.return_value = mock_svc
+        mock_svc.import_dashboard.return_value = ImportResponse(
+            document_id="fb-1", name="Test"
+        )
+
+        payload = {
+            "name": "Test",
+            "queryPresentations": [
+                {"name": "T1", "query": {"queryJson": {"table": "t", "fields": ["t.a"]}}},
+            ],
+        }
+
+        mcp_server._create_via_import_fallback(
+            mock_svc, payload, name="Test", folder_id="f-1"
+        )
+
+        call_args = mock_svc.import_dashboard.call_args[0][0]
+        ephemeral = call_args["dashboard"]["ephemeral"]
+        for part in ephemeral.split(","):
+            _, mini = part.split(":")
+            assert mini.isalnum(), f"miniUuid contains non-alphanumeric chars: {mini}"
+
+
+class TestUpdateDashboardDeleteCatchBroad:
+    """update_dashboard catches all exceptions on delete, not just OmniDashError."""
+
+    @patch.object(mcp_server, "_get_shared_model_id", return_value="model-1")
+    @patch.object(mcp_server, "_get_doc_svc")
+    @patch("omni_dash.mcp.server.get_settings")
+    def test_runtime_error_returns_partial(self, mock_settings, mock_doc_svc_fn, _):
+        from omni_dash.api.documents import ImportResponse
+
+        mock_settings.return_value = MagicMock(omni_base_url="https://test.omniapp.co")
+        mock_svc = MagicMock()
+        mock_doc_svc_fn.return_value = mock_svc
+
+        mock_svc.export_dashboard.return_value = {
+            "document": {"name": "D", "folderId": "f1"},
+            "dashboard": {"queryPresentationCollection": {}},
+            "workbookModel": {"base_model_id": "model-1"},
+        }
+        mock_svc.import_dashboard.return_value = ImportResponse(
+            document_id="new-1", name="D"
+        )
+        # Non-OmniDashError exception on delete
+        mock_svc.delete_dashboard.side_effect = RuntimeError("connection reset")
+
+        result = json.loads(mcp_server.update_dashboard(
+            dashboard_id="old-1", name="Updated",
+        ))
+        assert result["status"] == "partial"
+        assert "new-1" in result["new_dashboard_id"]
+        assert "connection reset" in result["warning"]

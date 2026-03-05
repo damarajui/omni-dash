@@ -34,12 +34,16 @@ import os
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 from mcp.server.fastmcp import FastMCP
 
-# Load .env from the omni-dash project root (handles MCP subprocess CWD issues)
+# Load .env from the omni-dash project root (handles MCP subprocess CWD issues).
+# Uses dotenv_values() instead of load_dotenv() — Python 3.14 crashes with
+# AssertionError on load_dotenv().
 _project_root = Path(__file__).resolve().parents[3]
-load_dotenv(_project_root / ".env", override=False)
+for _k, _v in dotenv_values(_project_root / ".env").items():
+    if _k not in os.environ:  # honour override=False semantics
+        os.environ[_k] = _v
 
 from omni_dash.api.client import OmniClient
 from omni_dash.api.documents import DocumentService
@@ -53,6 +57,26 @@ from omni_dash.dashboard.serializer import DashboardSerializer
 from omni_dash.exceptions import OmniDashError
 
 logger = logging.getLogger(__name__)
+
+# Chart types that do NOT use cartesian mark/series configs.
+# Mark sync should be skipped for these in update_tile.
+_NON_CARTESIAN_TYPES = frozenset({
+    "kpi", "summaryValue", "table", "markdown", "code",
+    "pie", "map", "regionMap", "sankey", "singleRecord",
+})
+
+_MAX_PAGES = 100  # Pagination safety limit
+
+
+def _tool_error(e: Exception, context: str = "") -> str:
+    """Log and format an unexpected error for MCP tool responses.
+
+    Every MCP tool's generic ``except Exception`` block should call this
+    instead of silently converting the error to JSON.
+    """
+    logger.exception("Unexpected error in %s", context or "MCP tool")
+    return json.dumps({"error": f"Internal error: {e}"})
+
 
 mcp = FastMCP(
     "omni-dash",
@@ -152,8 +176,11 @@ def _resolve_table_name(table: str, model_id: str) -> str:
         detail = _get_model_svc().get_topic_native(model_id, table)
         if detail.base_view:
             return detail.base_view
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(
+            "Failed to resolve table '%s' to base_view (model=%s): %s",
+            table, model_id, e,
+        )
     return table
 
 
@@ -218,8 +245,8 @@ def _validate_tile_fields(
                     # Also accept table reference via base_view name
                     available[detail.base_view] = qualified
                 available[tbl] = qualified
-            except Exception:
-                pass  # Table not found — will surface as field errors
+            except Exception as e:
+                logger.warning("Field validation: topic lookup failed for '%s': %s", tbl, e)
 
         for t in tiles:
             tile_name = t.get("name", "Untitled")
@@ -235,8 +262,8 @@ def _validate_tile_fields(
                         f"in topic '{tbl}'. Check get_topic_fields for "
                         f"valid field names."
                     )
-    except Exception:
-        pass  # Don't block creation if validation itself fails
+    except Exception as e:
+        logger.warning("Field validation failed (proceeding with creation): %s", e)
     return errors
 
 
@@ -292,7 +319,7 @@ def _create_via_import_fallback(
     # layout indices to query presentations.
     mini_uuids: list[str] = []
     for idx, m in enumerate(memberships, start=1):
-        mini = secrets.token_urlsafe(6)[:8]
+        mini = secrets.token_hex(4)  # 8 alphanumeric chars, matches Omni format
         mini_uuids.append(f"{idx}:{mini}")
         m.setdefault("queryPresentation", {})["miniUuid"] = mini
 
@@ -542,7 +569,7 @@ def list_dashboards(folder_id: str | None = None) -> str:
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _tool_error(e, "list_dashboards")
 
 
 @mcp.tool()
@@ -565,7 +592,7 @@ def get_dashboard(dashboard_id: str) -> str:
         # Build simplified tiles list for LLM-friendly access
         tiles: list[dict[str, Any]] = []
         for qp in dash.query_presentations[:preview_limit]:
-            omni_ct = qp.get("chartType", "")
+            omni_ct = qp.get("chartType") or qp.get("visConfig", {}).get("chartType", "")
             tile_info: dict[str, Any] = {
                 "name": qp.get("name", ""),
                 "chart_type": _OMNI_TO_CHART_TYPE.get(omni_ct, omni_ct),
@@ -597,7 +624,7 @@ def get_dashboard(dashboard_id: str) -> str:
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _tool_error(e, "get_dashboard")
 
 
 @mcp.tool()
@@ -684,7 +711,7 @@ def create_dashboard(
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": f"Validation error: {e}"})
+        return _tool_error(e, "create_dashboard")
 
 
 @mcp.tool()
@@ -703,7 +730,7 @@ def delete_dashboard(dashboard_id: str) -> str:
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _tool_error(e, "delete_dashboard")
 
 
 @mcp.tool()
@@ -722,7 +749,7 @@ def export_dashboard(dashboard_id: str) -> str:
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _tool_error(e, "export_dashboard")
 
 
 @mcp.tool()
@@ -763,7 +790,7 @@ def import_dashboard(
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": f"Import error: {e}"})
+        return _tool_error(e, "import_dashboard")
 
 
 @mcp.tool()
@@ -804,7 +831,7 @@ def clone_dashboard(
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _tool_error(e, "clone_dashboard")
 
 
 @mcp.tool()
@@ -866,7 +893,7 @@ def move_dashboard(
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _tool_error(e, "move_dashboard")
 
 
 @mcp.tool()
@@ -974,7 +1001,8 @@ def update_dashboard(
         # Delete the old dashboard after successful creation
         try:
             _get_doc_svc().delete_dashboard(dashboard_id)
-        except OmniDashError as del_err:
+        except Exception as del_err:
+            logger.warning("Failed to delete original %s after update: %s", dashboard_id, del_err)
             return json.dumps({
                 "status": "partial",
                 "warning": f"New dashboard created but original not deleted: {del_err}",
@@ -994,7 +1022,7 @@ def update_dashboard(
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": f"Validation error: {e}"})
+        return _tool_error(e, "update_dashboard")
 
 
 @mcp.tool()
@@ -1250,6 +1278,17 @@ def add_tiles_to_dashboard(
             doc_svc.delete_dashboard(dashboard_id)
         except Exception as e:
             logger.warning("Failed to delete original %s during add_tiles cleanup: %s", dashboard_id, e)
+            return json.dumps({
+                "status": "partial",
+                "warning": f"Tiles added but original dashboard not deleted: {e}",
+                "old_dashboard_id": dashboard_id,
+                "dashboard_id": new_id,
+                "name": new_name,
+                "previous_tile_count": previous_count,
+                "new_tile_count": previous_count + len(tiles),
+                "tiles_added": len(tiles),
+                "url": _build_dashboard_url(new_id),
+            })
 
         return json.dumps({
             "status": "updated",
@@ -1263,7 +1302,7 @@ def add_tiles_to_dashboard(
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": f"Validation error: {e}"})
+        return _tool_error(e, "add_tiles_to_dashboard")
 
 
 @mcp.tool()
@@ -1375,11 +1414,14 @@ def update_tile(
             # Update config.mark.type and series[].mark.type to match
             # the new chart type. Without this, Omni wipes the entire
             # cartesian spec on reimport due to chartType / mark mismatch.
-            mark_type = _OMNI_TO_MARK.get(omni_ct, "line")
-            config = vc.setdefault("config", {})
-            config.setdefault("mark", {})["type"] = mark_type
-            for series_entry in config.get("series", []):
-                series_entry.setdefault("mark", {})["type"] = mark_type
+            # Skip for non-cartesian types (pie, kpi, table, etc.) which
+            # don't use mark/series configs.
+            if omni_ct not in _NON_CARTESIAN_TYPES:
+                mark_type = _OMNI_TO_MARK.get(omni_ct, "line")
+                config = vc.setdefault("config", {})
+                config.setdefault("mark", {})["type"] = mark_type
+                for series_entry in config.get("series", []):
+                    series_entry.setdefault("mark", {})["type"] = mark_type
             modified = True
 
         if title is not None:
@@ -1430,7 +1472,7 @@ def update_tile(
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": f"Unexpected error: {e}"})
+        return _tool_error(e, "update_tile")
 
 
 @mcp.tool()
@@ -1467,7 +1509,7 @@ def list_topics(model_id: str = "") -> str:
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _tool_error(e, "list_topics")
 
 
 @mcp.tool()
@@ -1514,7 +1556,7 @@ def get_topic_fields(topic_name: str, model_id: str = "") -> str:
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _tool_error(e, "get_topic_fields")
 
 
 @mcp.tool()
@@ -1587,7 +1629,7 @@ def query_data(
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _tool_error(e, "query_data")
 
 
 @mcp.tool()
@@ -1613,7 +1655,7 @@ def list_folders() -> str:
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _tool_error(e, "list_folders")
 
 
 # ---------------------------------------------------------------------------
@@ -1677,7 +1719,7 @@ def suggest_chart(
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _tool_error(e, "suggest_chart")
 
 
 @mcp.tool()
@@ -1767,8 +1809,8 @@ def validate_dashboard(
                     } | {
                         f"{tbl}.{f.get('name', '')}" for f in detail.fields
                     }
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("validate_dashboard: topic lookup failed for '%s': %s", tbl, e)
 
         result = validate_definition(definition, available_fields)
 
@@ -1783,7 +1825,7 @@ def validate_dashboard(
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _tool_error(e, "validate_dashboard")
 
 
 @mcp.tool()
@@ -1898,7 +1940,7 @@ def profile_data(
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _tool_error(e, "profile_data")
 
 
 @mcp.tool()
@@ -1989,7 +2031,7 @@ def generate_dashboard(
             indent=2,
         )
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return _tool_error(e, "generate_dashboard")
 
 
 # ---------------------------------------------------------------------------
@@ -2036,7 +2078,7 @@ def ai_generate_query(
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": f"AI query generation failed: {e}"})
+        return _tool_error(e, "ai_generate_query")
 
 
 @mcp.tool()
@@ -2064,7 +2106,7 @@ def ai_pick_topic(
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": f"Topic selection failed: {e}"})
+        return _tool_error(e, "ai_pick_topic")
 
 
 @mcp.tool()
@@ -2105,7 +2147,7 @@ def ai_analyze(
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": f"AI analysis failed: {e}"})
+        return _tool_error(e, "ai_analyze")
 
 
 # ---------------------------------------------------------------------------
@@ -2132,7 +2174,7 @@ def get_dashboard_filters(dashboard_id: str) -> str:
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": f"Failed to get filters: {e}"})
+        return _tool_error(e, "get_dashboard_filters")
 
 
 @mcp.tool()
@@ -2169,4 +2211,4 @@ def update_dashboard_filters(
     except OmniDashError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
-        return json.dumps({"error": f"Failed to update filters: {e}"})
+        return _tool_error(e, "update_dashboard_filters")
