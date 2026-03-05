@@ -171,7 +171,7 @@ class DocumentService:
             params["folderId"] = folder_id
 
         all_docs: list[DocumentSummary] = []
-        while True:
+        for _page in range(100):  # Pagination safety limit
             result = self._client.get("/api/v1/documents", params=params)
             if not result:
                 break
@@ -289,7 +289,7 @@ class DocumentService:
         """
         params: dict[str, str] = {"pageSize": "100"}
         all_folders: list[dict[str, Any]] = []
-        while True:
+        for _page in range(100):  # Pagination safety limit
             result = self._client.get("/api/v1/folders", params=params)
             if not result:
                 break
@@ -336,6 +336,10 @@ class DocumentService:
         """
         result = self._client.get(f"/api/v1/dashboards/{dashboard_id}/filters")
         if not isinstance(result, dict):
+            logger.warning(
+                "Unexpected response type from filters API for %s: %s",
+                dashboard_id, type(result).__name__,
+            )
             return {"filters": {}, "filterOrder": [], "controls": []}
         return result
 
@@ -381,4 +385,10 @@ class DocumentService:
         result = self._client.patch(
             f"/api/v1/dashboards/{dashboard_id}/filters", json=body
         )
-        return result if isinstance(result, dict) else {}
+        if not isinstance(result, dict):
+            logger.warning(
+                "Unexpected response type from update_filters for %s: %s",
+                dashboard_id, type(result).__name__,
+            )
+            return {}
+        return result

@@ -81,7 +81,7 @@ class ModelService:
         """
         params: dict[str, str] = {"pageSize": "100"}
         all_models: list[OmniModel] = []
-        while True:
+        for _page in range(100):  # Pagination safety limit
             result = self._client.get("/api/v1/models", params=params)
             if not result:
                 break
@@ -189,7 +189,8 @@ class ModelService:
         try:
             parsed = yaml.safe_load(content)
             return parsed if isinstance(parsed, dict) else {}
-        except yaml.YAMLError:
+        except yaml.YAMLError as e:
+            logger.warning("Failed to parse YAML content: %s", e)
             return {}
 
     def list_topics(self, model_id: str) -> list[TopicSummary]:
@@ -300,8 +301,12 @@ class ModelService:
                     yaml_detail = self.get_topic(model_id, topic_name)
                     if yaml_detail.fields:
                         return yaml_detail
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(
+                        "YAML fallback for topic '%s' failed: %s. "
+                        "Returning native result with 0 fields.",
+                        topic_name, e,
+                    )
 
             return detail
         except (OmniAPIError, KeyError, TypeError) as e:
