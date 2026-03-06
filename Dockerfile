@@ -26,9 +26,9 @@ RUN uv pip install --system -e ".[mcp,ai,slack]"
 RUN mkdir -p output evals && chown dash:dash output evals
 
 # Configure MCP server for Claude Code (so it can use Omni tools)
-RUN mkdir -p /home/dash/.claude && \
-    echo '{"mcpServers":{"omni-dash":{"command":"python","args":["-m","omni_dash.mcp"],"cwd":"/app"}}}' > /home/dash/.claude/mcp.json && \
-    chown -R dash:dash /home/dash/.claude
+# Claude Code reads MCP config from ~/.mcp.json (global) or .mcp.json (project)
+RUN echo '{"mcpServers":{"omni-dash":{"command":"python","args":["-m","omni_dash.mcp"],"cwd":"/app"}}}' > /home/dash/.mcp.json && \
+    chown dash:dash /home/dash/.mcp.json
 
 # Switch to non-root user
 USER dash
