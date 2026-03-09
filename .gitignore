@@ -12,6 +12,7 @@ venv/
 
 # Environment / secrets
 .env
+coolify.env
 *.key
 ~/.omni/
 

@@ -68,6 +68,32 @@ _NON_CARTESIAN_TYPES = frozenset({
 _MAX_PAGES = 100  # Pagination safety limit
 
 
+def _sanitize_export_filters(export_data: dict[str, Any]) -> None:
+    """Ensure no filter in the export has ``values: null``.
+
+    Omni's Java backend crashes with an ``IllegalJsonParameter`` error
+    when a StringFilter's ``values`` field is null.  Walk all tile
+    query filters and replace ``null`` with ``[]``.
+    """
+    dash = export_data.get("dashboard", {})
+    qpc = dash.get("queryPresentationCollection", {})
+    for membership in qpc.get("queryPresentationCollectionMemberships", []):
+        qp = membership.get("queryPresentation", {})
+        q = qp.get("query", {})
+        q_json = q.get("queryJson", {})
+        filters = q_json.get("filters")
+        if isinstance(filters, dict):
+            for _field, fdata in filters.items():
+                if isinstance(fdata, dict) and "values" in fdata and fdata["values"] is None:
+                    fdata["values"] = []
+    # Also sanitize top-level filterConfig (dashboard-level filters)
+    fc = qpc.get("filterConfig", {})
+    if isinstance(fc, dict):
+        for _fid, fdata in fc.items():
+            if isinstance(fdata, dict) and "values" in fdata and fdata["values"] is None:
+                fdata["values"] = []
+
+
 def _tool_error(e: Exception, context: str = "") -> str:
     """Log and format an unexpected error for MCP tool responses.
 
@@ -354,6 +380,7 @@ def _create_via_import_fallback(
     if folder_id:
         export_payload["document"]["folderId"] = folder_id
 
+    _sanitize_export_filters(export_payload)
     result = doc_svc.import_dashboard(
         export_payload,
         base_model_id=model_id,
@@ -501,6 +528,7 @@ def _create_with_vis_configs(
         ]
 
     reimport_model_id = _resolve_model_id_from_export(patched)
+    _sanitize_export_filters(patched)
     try:
         reimport_result = doc_svc.import_dashboard(
             patched,
@@ -775,6 +803,7 @@ def import_dashboard(
         if not resolved_model_id:
             return json.dumps({"error": "Could not resolve model_id from export data."})
 
+        _sanitize_export_filters(export_data)
         result = _get_doc_svc().import_dashboard(
             export_data,
             base_model_id=resolved_model_id,
@@ -815,6 +844,7 @@ def clone_dashboard(
         export_data = _get_doc_svc().export_dashboard(dashboard_id)
         resolved_model_id = _resolve_model_id_from_export(export_data, model_id)
 
+        _sanitize_export_filters(export_data)
         result = _get_doc_svc().import_dashboard(
             export_data,
             base_model_id=resolved_model_id,
@@ -858,6 +888,7 @@ def move_dashboard(
         original_name = export_data.get("document", {}).get("name", "")
         resolved_model_id = _resolve_model_id_from_export(export_data, model_id)
 
+        _sanitize_export_filters(export_data)
         result = _get_doc_svc().import_dashboard(
             export_data,
             base_model_id=resolved_model_id,
@@ -983,6 +1014,7 @@ def update_dashboard(
                     if fid not in fo:
                         fo.append(fid)
 
+            _sanitize_export_filters(patched_export)
             imp_result = _get_doc_svc().import_dashboard(
                 patched_export,
                 base_model_id=resolved_model_id,
@@ -1251,6 +1283,7 @@ def add_tiles_to_dashboard(
 
             # 8. Reimport merged export
             reimport_model_id = _resolve_model_id_from_export(patched)
+            _sanitize_export_filters(patched)
             reimport_result = doc_svc.import_dashboard(
                 patched,
                 base_model_id=reimport_model_id,
@@ -1434,6 +1467,7 @@ def update_tile(
 
         # 4. Reimport modified export
         reimport_model_id = _resolve_model_id_from_export(patched)
+        _sanitize_export_filters(patched)
         reimport_result = doc_svc.import_dashboard(
             patched,
             base_model_id=reimport_model_id,
