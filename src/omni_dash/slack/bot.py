@@ -45,13 +45,13 @@ class StatusAnimator:
         self.client = client
         self.channel = channel
         self.ts = ts
-        self.running = False
+        self._stop_event = threading.Event()
         self.thread: threading.Thread | None = None
         self.dot_count = 1
 
     def _animate(self) -> None:
         messages_used: list[str] = []
-        while self.running:
+        while not self._stop_event.is_set():
             available = [m for m in STATUS_MESSAGES if m not in messages_used[-5:]]
             if not available:
                 available = STATUS_MESSAGES
@@ -63,17 +63,17 @@ class StatusAnimator:
                 self.client.chat_update(
                     channel=self.channel, ts=self.ts, text=f"_{message}{dots}_"
                 )
-            except Exception:
-                pass
-            time.sleep(2.0)
+            except Exception as e:
+                logger.debug("Status animation update failed: %s", e)
+            self._stop_event.wait(2.0)
 
     def start(self) -> None:
-        self.running = True
+        self._stop_event.clear()
         self.thread = threading.Thread(target=self._animate, daemon=True)
         self.thread.start()
 
     def stop(self) -> None:
-        self.running = False
+        self._stop_event.set()
         if self.thread:
             self.thread.join(timeout=1.0)
 
@@ -174,6 +174,13 @@ class DashBot:
             thinking_ts = thinking_msg["ts"]
         except Exception as e:
             logger.error("Could not post thinking message: %s", e)
+            try:
+                say(
+                    text="_Sorry, I couldn't process your request right now._",
+                    thread_ts=thread_ts,
+                )
+            except Exception:
+                logger.error("Fallback say() also failed for channel=%s", channel)
             return
 
         animator = StatusAnimator(client, channel, thinking_ts)
@@ -194,8 +201,7 @@ class DashBot:
             streamer = SlackStreamer(client, channel, thinking_ts)
 
             def _on_tool_call(name: str, _input: dict) -> None:
-                # Re-start the status animation during tool execution
-                pass
+                logger.info("Executing tool: %s", name)
 
             # Run agentic loop
             messages, final_text = self.agent.run(
@@ -205,8 +211,8 @@ class DashBot:
                 on_tool_call=_on_tool_call,
             )
 
-            # Save updated conversation
-            self.store.put(thread_key, messages)
+            # Final flush of streamed text
+            streamer.finish()
 
             # Format for Slack
             response = format_for_slack(final_text) if final_text else (
@@ -217,8 +223,16 @@ class DashBot:
         except Exception as e:
             logger.exception("Error processing message: %s", e)
             response = f"_Error processing request: {e}_"
+            messages = []  # Don't save broken conversation
         finally:
             animator.stop()
+
+        # Save conversation separately — don't let DB failure destroy response
+        if messages:
+            try:
+                self.store.put(f"{channel}:{thread_ts}", messages)
+            except Exception as e:
+                logger.error("Failed to persist conversation: %s", e)
 
         # Update thinking message with final response
         try:
@@ -233,11 +247,15 @@ class DashBot:
 
 def main() -> None:
     """Entry point.  Starts Socket Mode handler."""
-    from dotenv import load_dotenv
+    from dotenv import dotenv_values
     from slack_bolt import App
     from slack_bolt.adapter.socket_mode import SocketModeHandler
 
-    load_dotenv()
+    # Use dotenv_values instead of load_dotenv (crashes on Python 3.14)
+    for k, v in dotenv_values(".env").items():
+        if v is not None and k not in os.environ:
+            os.environ[k] = v
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",

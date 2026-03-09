@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class SlackStreamer:
@@ -49,8 +52,9 @@ class SlackStreamer:
                 text=text,
             )
             self._last_flush = time.time()
-        except Exception:
-            pass  # Best-effort — don't crash the agent loop
+        except Exception as e:
+            # Best-effort — don't crash the agent loop
+            logger.debug("Streaming flush failed: %s", e)
 
     def finish(self) -> str:
         """Final flush.  Returns the full accumulated text."""

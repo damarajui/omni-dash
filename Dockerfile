@@ -21,4 +21,4 @@ RUN mkdir -p /app/data output evals && chown -R dash:dash /app/data output evals
 USER dash
 
 # Run the Slack bot
-CMD ["python", "-m", "omni_dash.slack.bot"]
+CMD ["python", "-m", "omni_dash.slack"]

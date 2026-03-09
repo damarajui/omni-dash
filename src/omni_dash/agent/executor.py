@@ -21,6 +21,10 @@ class ToolExecutor:
     def __init__(self, registry: ToolRegistry) -> None:
         self._registry = registry
 
+    def get_tool_definitions(self) -> list[dict[str, Any]]:
+        """Return Anthropic-format tool definitions."""
+        return self._registry.get_definitions()
+
     def execute(self, tool_name: str, tool_input: dict[str, Any]) -> tuple[str, bool]:
         """Execute a tool and return ``(result_json, is_error)``.
 
@@ -37,7 +41,7 @@ class ToolExecutor:
             is_error = False
             try:
                 parsed = json.loads(result)
-                if isinstance(parsed, dict) and "error" in parsed and len(parsed) <= 3:
+                if isinstance(parsed, dict) and "error" in parsed:
                     is_error = True
             except (json.JSONDecodeError, TypeError):
                 pass

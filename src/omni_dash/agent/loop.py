@@ -77,7 +77,7 @@ class AgentLoop:
                 max_tokens=4096,
                 system=system,
                 messages=messages,
-                tools=self._executor._registry.get_definitions(),
+                tools=self._executor.get_tool_definitions(),
             ) as stream:
                 current_tool: dict[str, Any] | None = None
 
@@ -156,5 +156,17 @@ class AgentLoop:
             # Update final_text in case this was also a partial text response
             if combined_text:
                 final_text = combined_text
+        else:
+            # Loop exhausted without Claude stopping naturally
+            logger.warning(
+                "Agent loop hit max_turns=%d. Last tools: %s",
+                self._max_turns,
+                [tb["name"] for tb in tool_use_blocks] if tool_use_blocks else "none",
+            )
+            if not final_text:
+                final_text = (
+                    "I ran out of processing steps before completing your request. "
+                    "Please try breaking your question into smaller parts."
+                )
 
         return messages, final_text

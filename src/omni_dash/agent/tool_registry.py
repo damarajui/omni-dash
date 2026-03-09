@@ -9,9 +9,12 @@ time.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -448,12 +451,27 @@ class ToolRegistry:
 
     @staticmethod
     def _save_learning(learning: str) -> str:
-        """Wrapper around github_utils.add_learning that returns JSON."""
+        """Persist a learning to LEARNINGS.md via GitHub API.
+
+        Imports ``add_learning`` dynamically — works whether ``scripts/``
+        is on ``sys.path`` (local dev) or not (Docker).
+        """
         import json
+        import sys
+        from pathlib import Path
 
-        from scripts.github_utils import add_learning
+        # Ensure scripts/ is importable (Docker may not have it on sys.path)
+        scripts_dir = str(Path(__file__).resolve().parents[3] / "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
 
-        success = add_learning(learning)
-        if success:
-            return json.dumps({"status": "ok", "message": f"Learning saved: {learning}"})
-        return json.dumps({"error": "Failed to save learning — check GITHUB_TOKEN"})
+        try:
+            from github_utils import add_learning
+
+            success = add_learning(learning)
+            if success:
+                return json.dumps({"status": "ok", "message": f"Learning saved: {learning}"})
+            return json.dumps({"error": "Failed to save learning — check GITHUB_TOKEN"})
+        except ImportError:
+            logger.warning("github_utils not available — cannot save learning")
+            return json.dumps({"error": "Learning persistence not available in this environment"})

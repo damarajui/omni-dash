@@ -49,39 +49,49 @@ class ConversationStore:
             conn.close()
 
     def get(self, thread_key: str) -> list[dict[str, Any]] | None:
-        """Load messages for a thread, or ``None`` if not found."""
+        """Load messages for a thread, or ``None`` if not found or corrupt."""
         with self._lock:
-            conn = sqlite3.connect(self._db_path, check_same_thread=False)
             try:
-                row = conn.execute(
-                    "SELECT messages FROM conversations WHERE thread_key = ?",
-                    (thread_key,),
-                ).fetchone()
-                if row is None:
-                    return None
-                return json.loads(row[0])
-            finally:
-                conn.close()
+                conn = sqlite3.connect(self._db_path, check_same_thread=False)
+                try:
+                    row = conn.execute(
+                        "SELECT messages FROM conversations WHERE thread_key = ?",
+                        (thread_key,),
+                    ).fetchone()
+                    if row is None:
+                        return None
+                    return json.loads(row[0])
+                finally:
+                    conn.close()
+            except json.JSONDecodeError:
+                logger.error("Corrupted conversation data for %s, starting fresh", thread_key)
+                return None
+            except sqlite3.Error as e:
+                logger.error("Failed to load conversation %s: %s", thread_key, e)
+                return None
 
     def put(self, thread_key: str, messages: list[dict[str, Any]]) -> None:
-        """Save messages for a thread (upsert)."""
+        """Save messages for a thread (upsert).  Logs on failure."""
         data = json.dumps(messages, default=str)
         with self._lock:
-            conn = sqlite3.connect(self._db_path, check_same_thread=False)
             try:
-                conn.execute(
-                    """
-                    INSERT INTO conversations (thread_key, messages, updated_at)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(thread_key) DO UPDATE SET
-                        messages = excluded.messages,
-                        updated_at = excluded.updated_at
-                    """,
-                    (thread_key, data, time.time()),
-                )
-                conn.commit()
-            finally:
-                conn.close()
+                conn = sqlite3.connect(self._db_path, check_same_thread=False)
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO conversations (thread_key, messages, updated_at)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(thread_key) DO UPDATE SET
+                            messages = excluded.messages,
+                            updated_at = excluded.updated_at
+                        """,
+                        (thread_key, data, time.time()),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+            except sqlite3.Error as e:
+                logger.error("Failed to save conversation %s: %s", thread_key, e)
 
     def cleanup(self, max_age_days: int = 7) -> int:
         """Delete conversations older than *max_age_days*.  Returns count deleted."""

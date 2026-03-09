@@ -112,16 +112,24 @@ def test_save_learning_tool_registered():
 
 def test_save_learning_returns_json(monkeypatch):
     """save_learning callable returns valid JSON."""
+    import json
+    import sys
+    from pathlib import Path
+
     from omni_dash.agent.tool_registry import ToolRegistry
+
+    # Ensure scripts/ is importable (same as production code)
+    scripts_dir = str(Path(__file__).resolve().parents[2] / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
 
     reg = ToolRegistry()
     tool = reg.get("save_learning")
 
     # Mock add_learning to avoid hitting GitHub
-    import scripts.github_utils as gu
+    import github_utils as gu
     monkeypatch.setattr(gu, "add_learning", lambda _: True)
 
-    import json
     result = tool.callable(learning="test rule")
     parsed = json.loads(result)
     assert parsed["status"] == "ok"
@@ -129,15 +137,22 @@ def test_save_learning_returns_json(monkeypatch):
 
 def test_save_learning_returns_error_on_failure(monkeypatch):
     """save_learning returns error JSON when add_learning fails."""
+    import json
+    import sys
+    from pathlib import Path
+
     from omni_dash.agent.tool_registry import ToolRegistry
+
+    scripts_dir = str(Path(__file__).resolve().parents[2] / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
 
     reg = ToolRegistry()
     tool = reg.get("save_learning")
 
-    import scripts.github_utils as gu
+    import github_utils as gu
     monkeypatch.setattr(gu, "add_learning", lambda _: False)
 
-    import json
     result = tool.callable(learning="test rule")
     parsed = json.loads(result)
     assert "error" in parsed
