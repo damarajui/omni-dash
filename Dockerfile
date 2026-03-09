@@ -1,37 +1,24 @@
 FROM python:3.12-slim
 
-# Install Node.js (required for Claude Code) and git
-RUN apt-get update && apt-get install -y \
-    curl \
-    git \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Claude Code globally
-RUN npm install -g @anthropic-ai/claude-code
+# Install git (needed for some pip installs)
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
 # Install uv for Python package management
 RUN pip install uv
 
-# Create non-root user (Claude Code refuses --dangerously-skip-permissions as root)
+# Create non-root user
 RUN useradd -m -s /bin/bash dash
 WORKDIR /app
 
-# Copy project files and install
+# Copy project files and install (no MCP/Node.js needed — direct SDK)
 COPY --chown=dash:dash . .
-RUN uv pip install --system -e ".[mcp,ai,slack]"
+RUN uv pip install --system -e ".[ai,slack]"
 
-# Create output and evals directories
-RUN mkdir -p output evals && chown dash:dash output evals
-
-# Configure MCP server for Claude Code (so it can use Omni tools)
-# Claude Code reads MCP config from ~/.mcp.json (global) or .mcp.json (project)
-RUN echo '{"mcpServers":{"omni-dash":{"command":"python","args":["-m","omni_dash.mcp"],"cwd":"/app"}}}' > /home/dash/.mcp.json && \
-    chown dash:dash /home/dash/.mcp.json
+# Create data directory for SQLite conversations + evals
+RUN mkdir -p /app/data output evals && chown -R dash:dash /app/data output evals
 
 # Switch to non-root user
 USER dash
 
 # Run the Slack bot
-CMD ["python", "-m", "scripts.slack_bot"]
+CMD ["python", "-m", "omni_dash.slack"]

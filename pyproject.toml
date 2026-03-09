@@ -34,11 +34,13 @@ mcp = [
 ]
 slack = [
     "slack-bolt>=1.18.0",
+    "anthropic>=0.42",
 ]
 
 [project.scripts]
 omni-dash = "omni_dash.cli.app:main"
 omni-dash-mcp = "omni_dash.mcp.server:mcp.run"
+omni-dash-bot = "omni_dash.slack.bot:main"
 
 [build-system]
 requires = ["uv_build>=0.9.17,<0.10.0"]
