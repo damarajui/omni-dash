@@ -1859,18 +1859,14 @@ def test_is_not_null_filter_has_empty_values_array():
     payload = DashboardSerializer.to_omni_create_payload(definition)
     f = payload["queryPresentations"][0]["query"]["filters"]["t.status"]
 
-    assert f["kind"] == "IS_NULL"
-    assert f["is_negative"] is True
-    assert f["values"] == []
-    assert f["values"] is not None
+    # is_not_null now uses ON_OR_AFTER with epoch start (Omni rejects IS_NULL kind)
+    assert f["kind"] == "ON_OR_AFTER"
+    assert f["type"] == "date"
+    assert f["left_side"] == "1970-01-01 00:00:00"
 
 
-def test_is_null_filter_has_empty_values_array():
-    """is_null filter must include values=[] to avoid crashing Omni's Java backend.
-
-    Same root cause as is_not_null: Omni's StringFilter requires a non-nullable
-    `values` array even for null-check operators.
-    """
+def test_is_null_filter_uses_before_epoch():
+    """is_null filter uses BEFORE epoch workaround (Omni rejects IS_NULL kind)."""
     from omni_dash.dashboard.definition import FilterSpec as FS, Tile, TileQuery
 
     definition = DashboardDefinition(
@@ -1893,10 +1889,10 @@ def test_is_null_filter_has_empty_values_array():
     payload = DashboardSerializer.to_omni_create_payload(definition)
     f = payload["queryPresentations"][0]["query"]["filters"]["t.status"]
 
-    assert f["kind"] == "IS_NULL"
-    assert f["is_negative"] is False
-    assert f["values"] == []
-    assert f["values"] is not None
+    # is_null now uses BEFORE epoch workaround (Omni rejects IS_NULL kind)
+    assert f["kind"] == "BEFORE"
+    assert f["type"] == "date"
+    assert f["right_side"] == "1970-01-01 00:00:00"
 
 
 # ===========================================================================
@@ -2309,11 +2305,10 @@ def test_is_not_null_with_explicit_empty_values():
     )
     payload = DashboardSerializer.to_omni_create_payload(definition)
     f = payload["queryPresentations"][0]["query"]["filters"]["t.email"]
-    assert f["kind"] == "IS_NULL"
-    assert f["is_negative"] is True
-    assert f["values"] == []
-    # Must be an empty list, not None — Omni's Java backend crashes on null
-    assert isinstance(f["values"], list)
+    # is_not_null now uses ON_OR_AFTER epoch workaround (Omni rejects IS_NULL kind)
+    assert f["kind"] == "ON_OR_AFTER"
+    assert f["type"] == "date"
+    assert f["left_side"] == "1970-01-01 00:00:00"
 
 
 def test_date_range_last_12_weeks_normalized():
@@ -2428,7 +2423,7 @@ def test_composite_filter_with_three_conditions():
     kinds = [f["kind"] for f in composite["filters"]]
     assert kinds[0] == "TIME_FOR_INTERVAL_DURATION"
     assert kinds[1] == "BEFORE"
-    assert kinds[2] == "IS_NULL"
+    assert kinds[2] == "ON_OR_AFTER"  # is_not_null uses ON_OR_AFTER epoch workaround
 
 
 # ===========================================================================
@@ -3681,3 +3676,91 @@ class TestFilterDeserializationOmniKeys:
         f = defn.tiles[0].query.filters[0]
         assert f.operator == "CONTAINS"
         assert f.value == "test"
+
+
+# ===========================================================================
+# Filter: ON_OR_AFTER / BEFORE (>=, <=) operators
+# ===========================================================================
+
+
+def test_gte_filter_uses_on_or_after():
+    """The >= operator should produce an ON_OR_AFTER date filter."""
+    from omni_dash.dashboard.definition import FilterSpec as FS, Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="GTE Filter",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Filtered",
+                chart_type="bar",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.date", "t.count"],
+                    filters=[
+                        FS(field="t.date", operator=">=", value="2026-01-01"),
+                    ],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    f = payload["queryPresentations"][0]["query"]["filters"]["t.date"]
+    assert f["kind"] == "ON_OR_AFTER"
+    assert f["type"] == "date"
+    assert f["left_side"] == "2026-01-01"
+
+
+def test_lte_filter_uses_before():
+    """The <= operator should produce a BEFORE date filter."""
+    from omni_dash.dashboard.definition import FilterSpec as FS, Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="LTE Filter",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Filtered",
+                chart_type="bar",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.date", "t.count"],
+                    filters=[
+                        FS(field="t.date", operator="<=", value="2026-12-31"),
+                    ],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    f = payload["queryPresentations"][0]["query"]["filters"]["t.date"]
+    assert f["kind"] == "BEFORE"
+    assert f["type"] == "date"
+    assert f["right_side"] == "2026-12-31"
+
+
+def test_on_or_after_alias():
+    """The 'on_or_after' operator alias should also work."""
+    from omni_dash.dashboard.definition import FilterSpec as FS, Tile, TileQuery
+
+    definition = DashboardDefinition(
+        name="On Or After",
+        model_id="m-1",
+        tiles=[
+            Tile(
+                name="Filtered",
+                chart_type="line",
+                query=TileQuery(
+                    table="t",
+                    fields=["t.date", "t.value"],
+                    filters=[
+                        FS(field="t.date", operator="on_or_after", value="2026-03-01"),
+                    ],
+                ),
+            ),
+        ],
+    )
+    payload = DashboardSerializer.to_omni_create_payload(definition)
+    f = payload["queryPresentations"][0]["query"]["filters"]["t.date"]
+    assert f["kind"] == "ON_OR_AFTER"
+    assert f["left_side"] == "2026-03-01"

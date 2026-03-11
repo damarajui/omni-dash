@@ -200,7 +200,8 @@ Rules:
 
 - *Dashboard filter UI*: The API can create filter configs but the visible filter bar in Omni must be wired manually in the Omni editor
 - *Vega-Lite drill-down*: Custom Vega-Lite charts don't support click-to-filter in Omni
-- *`is_not_null` tile filters*: Omni's Java backend crashes if `values` is null — use dashboard-level `multi_select` with explicit values instead
+- *`is_not_null` tile filters*: Omni's Java backend rejects `IS_NULL` as a StringFilterKind. The SDK converts `is_not_null` to `ON_OR_AFTER 1970-01-01` and `is_null` to `BEFORE 1970-01-01` as workarounds. For string fields, prefer dashboard-level `multi_select` filters
+- *Date `>=` filters*: Use operator `>=` or `on_or_after` (maps to Omni's `ON_OR_AFTER` kind). Use `<=` or `on_or_before` for before-or-on
 - *Joined fields*: Some fields from joins (e.g., `email` from `dim_identities`) cause 405 errors via API — use primary table fields
 - *Date filters*: Omni only accepts `"N days ago"` format — the SDK auto-normalizes freeform dates
 
