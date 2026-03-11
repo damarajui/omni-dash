@@ -1530,7 +1530,7 @@ def list_topics(model_id: str = "") -> str:
         if not resolved_model_id:
             return json.dumps({"error": "No model_id found. Set OMNI_SHARED_MODEL_ID."})
 
-        topics = _get_model_svc().list_topics(resolved_model_id)
+        topics = _get_model_svc().list_topics(resolved_model_id, include_views=True)
         return json.dumps(
             [
                 {

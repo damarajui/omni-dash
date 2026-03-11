@@ -193,27 +193,68 @@ class ModelService:
             logger.warning("Failed to parse YAML content: %s", e)
             return {}
 
-    def list_topics(self, model_id: str) -> list[TopicSummary]:
-        """List all topics in a model by parsing .topic files from model YAML."""
+    def list_topics(
+        self, model_id: str, *, include_views: bool = False
+    ) -> list[TopicSummary]:
+        """List all topics in a model by parsing .topic files from model YAML.
+
+        Args:
+            model_id: The model to introspect.
+            include_views: If True, also include .view files that don't have
+                a corresponding .topic file. This surfaces Snowflake views
+                (like ``ai_assistant_activated_users``) that are queryable
+                but not registered as Omni topics.
+        """
         model_yaml = self._fetch_model_yaml(model_id)
         files = model_yaml.get("files", {})
 
         topics: list[TopicSummary] = []
-        for filename, content in files.items():
+        topic_base_views: set[str] = set()
+
+        for filename, file_content in files.items():
             if not filename.endswith(".topic"):
                 continue
 
             topic_name = filename.removesuffix(".topic")
-            parsed = self._parse_yaml_content(content)
+            parsed = self._parse_yaml_content(file_content)
+            base_view = parsed.get("base_view", "")
 
             topics.append(
                 TopicSummary(
                     name=topic_name,
                     label=parsed.get("label", ""),
                     description=parsed.get("description", ""),
-                    base_view=parsed.get("base_view", ""),
+                    base_view=base_view,
                 )
             )
+            if base_view:
+                topic_base_views.add(base_view)
+
+        if include_views:
+            view_names = model_yaml.get("viewNames", {})
+            _skip_prefixes = ("stg_", "int_", "base_", "tmp_", "snapshot_")
+
+            for file_path, view_name in view_names.items():
+                if view_name in topic_base_views:
+                    continue
+
+                if view_name.lower().startswith(_skip_prefixes):
+                    continue
+
+                file_content = files.get(file_path, "")
+                parsed = self._parse_yaml_content(file_content) if file_content else {}
+
+                if parsed.get("hidden"):
+                    continue
+
+                topics.append(
+                    TopicSummary(
+                        name=view_name,
+                        label=parsed.get("label", ""),
+                        description=parsed.get("description", ""),
+                        base_view=view_name,
+                    )
+                )
 
         return sorted(topics, key=lambda t: t.name)
 

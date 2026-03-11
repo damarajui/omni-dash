@@ -542,3 +542,81 @@ class TestGetTopicNative:
             result = service.get_topic_native("m1", "orders")
             mock_yaml.assert_not_called()
             assert len(result.fields) == 1
+
+
+class TestListTopicsIncludeViews:
+    """Tests for include_views=True in list_topics."""
+
+    def test_includes_views_without_topics(self, service, mock_client):
+        mock_client.get.return_value = {
+            "files": {
+                "my_topic.topic": "base_view: my_view\nlabel: My Topic\n",
+                "PUBLIC/my_view.view": "label: My View\n",
+                "PUBLIC/ai_assistant_activated_users.view": "label: AI Users\n",
+            },
+            "viewNames": {
+                "PUBLIC/my_view.view": "my_view",
+                "PUBLIC/ai_assistant_activated_users.view": "ai_assistant_activated_users",
+            },
+            "version": 1,
+        }
+        result = service.list_topics("m1", include_views=True)
+        names = [t.name for t in result]
+        assert "my_topic" in names
+        assert "ai_assistant_activated_users" in names
+        # my_view should NOT appear as a separate entry — it's already covered by my_topic
+        assert "my_view" not in names
+
+    def test_excludes_staging_views(self, service, mock_client):
+        mock_client.get.return_value = {
+            "files": {
+                "PUBLIC/stg_users.view": "label: Staging Users\n",
+                "PUBLIC/int_orders.view": "label: Intermediate Orders\n",
+                "PUBLIC/mart_revenue.view": "label: Revenue\n",
+            },
+            "viewNames": {
+                "PUBLIC/stg_users.view": "stg_users",
+                "PUBLIC/int_orders.view": "int_orders",
+                "PUBLIC/mart_revenue.view": "mart_revenue",
+            },
+            "version": 1,
+        }
+        result = service.list_topics("m1", include_views=True)
+        names = [t.name for t in result]
+        assert "stg_users" not in names
+        assert "int_orders" not in names
+        assert "mart_revenue" in names
+
+    def test_excludes_hidden_views(self, service, mock_client):
+        mock_client.get.return_value = {
+            "files": {
+                "PUBLIC/hidden_view.view": "label: Hidden\nhidden: true\n",
+                "PUBLIC/visible_view.view": "label: Visible\n",
+            },
+            "viewNames": {
+                "PUBLIC/hidden_view.view": "hidden_view",
+                "PUBLIC/visible_view.view": "visible_view",
+            },
+            "version": 1,
+        }
+        result = service.list_topics("m1", include_views=True)
+        names = [t.name for t in result]
+        assert "hidden_view" not in names
+        assert "visible_view" in names
+
+    def test_default_excludes_views(self, service, mock_client):
+        """Without include_views, only topics are returned."""
+        mock_client.get.return_value = {
+            "files": {
+                "my_topic.topic": "base_view: my_view\n",
+                "PUBLIC/extra_view.view": "label: Extra\n",
+            },
+            "viewNames": {
+                "PUBLIC/extra_view.view": "extra_view",
+            },
+            "version": 1,
+        }
+        result = service.list_topics("m1")
+        names = [t.name for t in result]
+        assert "my_topic" in names
+        assert "extra_view" not in names

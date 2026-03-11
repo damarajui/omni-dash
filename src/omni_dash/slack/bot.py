@@ -144,14 +144,64 @@ class DashBot:
             os.environ.get("DASH_CLAUDE_MODEL", "claude-sonnet-4-5-20250929"),
         )
 
+    # Anthropic recommends images <= 1568px on the long side
+    _MAX_IMAGE_DIM = 1568
+    _MAX_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MB
+
+    @staticmethod
+    def _resize_image(data: bytes, mimetype: str) -> tuple[bytes, str]:
+        """Resize image if it exceeds Anthropic's recommended dimensions.
+
+        Returns (image_bytes, media_type).  Falls back to original if
+        Pillow is not installed or the image is already small enough.
+        """
+        try:
+            from io import BytesIO
+            from PIL import Image
+
+            img = Image.open(BytesIO(data))
+            w, h = img.size
+            long_side = max(w, h)
+            if long_side <= DashBot._MAX_IMAGE_DIM and len(data) <= DashBot._MAX_IMAGE_BYTES:
+                return data, mimetype
+
+            # Scale down to fit within _MAX_IMAGE_DIM
+            if long_side > DashBot._MAX_IMAGE_DIM:
+                scale = DashBot._MAX_IMAGE_DIM / long_side
+                new_w = int(w * scale)
+                new_h = int(h * scale)
+                img = img.resize((new_w, new_h), Image.LANCZOS)
+                logger.info("Resized image from %dx%d to %dx%d", w, h, new_w, new_h)
+
+            # Convert to JPEG for smaller size (unless PNG transparency needed)
+            buf = BytesIO()
+            if img.mode in ("RGBA", "LA", "P"):
+                img.save(buf, format="PNG", optimize=True)
+                out_type = "image/png"
+            else:
+                img = img.convert("RGB")
+                img.save(buf, format="JPEG", quality=85)
+                out_type = "image/jpeg"
+
+            result = buf.getvalue()
+            logger.info("Image compressed: %d -> %d bytes", len(data), len(result))
+            return result, out_type
+        except ImportError:
+            logger.warning("Pillow not installed — cannot resize images")
+            return data, mimetype
+        except Exception as e:
+            logger.warning("Image resize failed: %s", e)
+            return data, mimetype
+
     @staticmethod
     def _extract_content(
         event: dict[str, Any], client: Any, text: str
     ) -> list[dict[str, Any]] | str:
         """Build a Claude content block from Slack event.
 
-        If the event includes file attachments (images), download them and
-        return a multi-part content list.  Otherwise return plain text.
+        If the event includes file attachments (images), download them,
+        resize if needed, and return a multi-part content list.
+        Otherwise return plain text.
         """
         files = event.get("files", [])
         image_parts: list[dict[str, Any]] = []
@@ -174,6 +224,15 @@ class DashBot:
                 with urllib.request.urlopen(req, timeout=15) as resp:
                     data = resp.read()
 
+                logger.info("Downloaded image: %s (%d bytes)", f.get("name", "?"), len(data))
+
+                # Resize if needed for Anthropic API limits
+                data, mimetype = DashBot._resize_image(data, mimetype)
+
+                if len(data) > DashBot._MAX_IMAGE_BYTES:
+                    logger.warning("Image %s still too large after resize (%d bytes), skipping", f.get("name", "?"), len(data))
+                    continue
+
                 image_parts.append({
                     "type": "image",
                     "source": {
@@ -182,7 +241,6 @@ class DashBot:
                         "data": base64.b64encode(data).decode(),
                     },
                 })
-                logger.info("Downloaded image: %s (%d bytes)", f.get("name", "?"), len(data))
             except Exception as e:
                 logger.warning("Failed to download image %s: %s", f.get("name", "?"), e)
 
