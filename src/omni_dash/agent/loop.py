@@ -66,18 +66,25 @@ class AgentLoop:
         """
         final_text = ""
 
+        tool_defs = self._executor.get_tool_definitions()
+        logger.info(
+            "Agent loop starting: model=%s, tools=%d, messages=%d",
+            self._model, len(tool_defs), len(messages),
+        )
+
         for _turn in range(self._max_turns):
             # Stream the response
             text_parts: list[str] = []
             tool_use_blocks: list[dict[str, Any]] = []
             full_content: list[dict[str, Any]] = []
 
+            logger.info("Turn %d: calling messages.stream()", _turn + 1)
             with self._client.messages.stream(
                 model=self._model,
                 max_tokens=4096,
                 system=system,
                 messages=messages,
-                tools=self._executor.get_tool_definitions(),
+                tools=tool_defs,
             ) as stream:
                 current_tool: dict[str, Any] | None = None
 
@@ -128,6 +135,10 @@ class AgentLoop:
             if not tool_use_blocks:
                 final_text = combined_text
                 messages.append({"role": "assistant", "content": full_content})
+                logger.info(
+                    "Turn %d: text-only response (len=%d), loop done.",
+                    _turn + 1, len(combined_text),
+                )
                 break
 
             # Execute tool calls
@@ -139,8 +150,15 @@ class AgentLoop:
                 if on_tool_call:
                     on_tool_call(tool_name, tool_input)
 
-                logger.info("Tool call: %s", tool_name)
+                logger.info("Tool call: %s(%s)", tool_name, list(tool_input.keys()))
                 result_str, is_error = self._executor.execute(tool_name, tool_input)
+                logger.info(
+                    "Tool result: %s -> %s (is_error=%s, len=%d)",
+                    tool_name,
+                    result_str[:120].replace(chr(10), " "),
+                    is_error,
+                    len(result_str),
+                )
 
                 tool_results.append({
                     "type": "tool_result",

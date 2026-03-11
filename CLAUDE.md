@@ -206,14 +206,16 @@ Rules:
 
 ---
 
-## Running Queries Manually
+## Tool Usage (IMPORTANT)
 
-```bash
-# The MCP tools handle this, but for reference:
-uv run python -m omni_dash.mcp  # Start MCP server
-uv run omni-dash list --dashboards  # CLI: list dashboards
-uv run omni-dash generate "Show me SEO trends"  # CLI: NL generation
-```
+You have 25 tools available to you. ALWAYS use them — never say you "can't access" data or need "CLI permissions". If a tool returns an error, report the specific error.
+
+- To find tables: call `list_topics`
+- To see columns: call `get_topic_fields`
+- To query data: call `query_data`
+- To build dashboards: call `create_dashboard`
+
+Do NOT reference CLI commands, MCP servers, or shell access. You interact with Omni exclusively through your tool functions.
 
 ---
 
