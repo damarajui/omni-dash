@@ -12,7 +12,7 @@ WORKDIR /app
 
 # Copy project files and install (no MCP/Node.js needed — direct SDK)
 COPY --chown=dash:dash . .
-RUN uv pip install --system -e ".[ai,slack]"
+RUN uv pip install --system -e ".[ai,slack,mcp]"
 
 # Create data directory for SQLite conversations + evals
 RUN mkdir -p /app/data output evals && chown -R dash:dash /app/data output evals
