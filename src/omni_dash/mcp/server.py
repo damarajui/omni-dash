@@ -129,6 +129,9 @@ _shared_model_id: str = ""  # Cached model ID to avoid repeated API calls
 def _get_client() -> OmniClient:
     global _client
     if _client is None:
+        logger.info("Initializing OmniClient (OMNI_API_KEY=%s, OMNI_BASE_URL=%s)",
+                    'set' if os.environ.get('OMNI_API_KEY') else 'MISSING',
+                    os.environ.get('OMNI_BASE_URL', 'MISSING')[:30])
         _client = OmniClient()
     return _client
 

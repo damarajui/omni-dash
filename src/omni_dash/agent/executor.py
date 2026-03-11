@@ -31,21 +31,47 @@ class ToolExecutor:
         The MCP tool functions already return JSON strings with built-in
         error handling, so we just call them and catch unexpected blowups.
         """
+        import time as _time
+
         tool = self._registry.get(tool_name)
         if tool is None:
+            logger.error("Unknown tool requested: %s", tool_name)
             return json.dumps({"error": f"Unknown tool: {tool_name}"}), True
 
+        t0 = _time.monotonic()
         try:
             result = tool.callable(**tool_input)
+            elapsed = _time.monotonic() - t0
+
             # Check if the result itself reports an error
             is_error = False
+            error_detail = ""
             try:
                 parsed = json.loads(result)
                 if isinstance(parsed, dict) and "error" in parsed:
                     is_error = True
+                    error_detail = str(parsed["error"])[:200]
             except (json.JSONDecodeError, TypeError):
                 pass
+
+            if is_error:
+                logger.warning(
+                    "Tool %s returned error in %.1fs: %s",
+                    tool_name, elapsed, error_detail,
+                )
+            else:
+                logger.info("Tool %s succeeded in %.1fs (result=%d bytes)", tool_name, elapsed, len(result))
+
             return result, is_error
+        except TypeError as e:
+            # Common: wrong kwargs passed to tool function
+            elapsed = _time.monotonic() - t0
+            logger.exception(
+                "Tool %s signature mismatch in %.1fs (input keys: %s): %s",
+                tool_name, elapsed, list(tool_input.keys()), e,
+            )
+            return json.dumps({"error": f"Tool parameter error: {e}"}), True
         except Exception as e:
-            logger.exception("Tool %s raised: %s", tool_name, e)
+            elapsed = _time.monotonic() - t0
+            logger.exception("Tool %s raised in %.1fs: %s", tool_name, elapsed, e)
             return json.dumps({"error": f"Tool execution failed: {e}"}), True

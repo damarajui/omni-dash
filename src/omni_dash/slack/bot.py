@@ -195,6 +195,40 @@ class DashBot:
 
         return text
 
+    def _health_check(self) -> str:
+        """Run a quick health check on all critical systems."""
+        import json
+
+        results: list[str] = []
+
+        # 1. Check env vars
+        for var in ["OMNI_API_KEY", "OMNI_BASE_URL", "ANTHROPIC_API_KEY"]:
+            val = os.environ.get(var, "")
+            status = "OK" if val else "MISSING"
+            results.append(f"Env {var}: {status}")
+
+        # 2. Check tool count
+        results.append(f"Tools registered: {self.registry.tool_count}")
+
+        # 3. Try calling list_topics (lightweight smoke test)
+        try:
+            result, is_error = self.executor.execute("list_topics", {})
+            parsed = json.loads(result)
+            if is_error:
+                results.append(f"list_topics: ERROR — {parsed.get('error', 'unknown')}")
+            elif isinstance(parsed, list):
+                results.append(f"list_topics: OK ({len(parsed)} topics)")
+            else:
+                results.append(f"list_topics: unexpected format")
+        except Exception as e:
+            results.append(f"list_topics: EXCEPTION — {e}")
+
+        # 4. Model info
+        model = os.environ.get("DASH_CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
+        results.append(f"Model: {model}")
+
+        return "\n".join(results)
+
     def handle_message(
         self,
         event: dict[str, Any],
@@ -216,6 +250,15 @@ class DashBot:
             text = re.sub(r"<@[A-Z0-9]+>\s*", "", text).strip()
 
         logger.info("[%s] %s (files=%d)", "DM" if is_dm else "MENTION", text[:80], len(event.get("files", [])))
+
+        # Health check shortcut
+        if text.strip().lower() in ("health", "health check", "status", "/health"):
+            health = self._health_check()
+            try:
+                say(text=f"```\n{health}\n```", thread_ts=event.get("thread_ts") or event.get("ts"))
+            except Exception as e:
+                logger.error("Health check reply failed: %s", e)
+            return
 
         # Post "thinking" message
         try:
