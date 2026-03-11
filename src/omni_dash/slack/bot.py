@@ -269,10 +269,22 @@ def main() -> None:
         bot.handle_message(event, say, client, is_dm=False)
 
     @app.event("message")
-    def handle_dm(event: dict, say: Any, client: Any) -> None:
-        if event.get("bot_id") or event.get("channel_type") != "im":
+    def handle_message(event: dict, say: Any, client: Any) -> None:
+        # Ignore bot messages (including our own)
+        if event.get("bot_id") or event.get("subtype"):
             return
-        bot.handle_message(event, say, client, is_dm=True)
+
+        # DMs — always respond
+        if event.get("channel_type") == "im":
+            bot.handle_message(event, say, client, is_dm=True)
+            return
+
+        # Thread replies — respond if Dash is already in the thread
+        thread_ts = event.get("thread_ts")
+        if thread_ts:
+            thread_key = f"{event['channel']}:{thread_ts}"
+            if bot.store.get(thread_key) is not None:
+                bot.handle_message(event, say, client, is_dm=False)
 
     print("Starting Dash (conversational agent)...", flush=True)
     print(f"Tools registered: {bot.registry.tool_count}", flush=True)
