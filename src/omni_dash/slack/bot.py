@@ -144,6 +144,57 @@ class DashBot:
             os.environ.get("DASH_CLAUDE_MODEL", "claude-sonnet-4-5-20250929"),
         )
 
+    @staticmethod
+    def _extract_content(
+        event: dict[str, Any], client: Any, text: str
+    ) -> list[dict[str, Any]] | str:
+        """Build a Claude content block from Slack event.
+
+        If the event includes file attachments (images), download them and
+        return a multi-part content list.  Otherwise return plain text.
+        """
+        files = event.get("files", [])
+        image_parts: list[dict[str, Any]] = []
+
+        for f in files:
+            mimetype = f.get("mimetype", "")
+            if not mimetype.startswith("image/"):
+                continue
+
+            url = f.get("url_private")
+            if not url:
+                continue
+
+            try:
+                import base64
+                import urllib.request
+
+                token = client.token if hasattr(client, "token") else os.environ.get("SLACK_BOT_TOKEN", "")
+                req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    data = resp.read()
+
+                image_parts.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": mimetype,
+                        "data": base64.b64encode(data).decode(),
+                    },
+                })
+                logger.info("Downloaded image: %s (%d bytes)", f.get("name", "?"), len(data))
+            except Exception as e:
+                logger.warning("Failed to download image %s: %s", f.get("name", "?"), e)
+
+        if image_parts:
+            content: list[dict[str, Any]] = []
+            if text:
+                content.append({"type": "text", "text": text})
+            content.extend(image_parts)
+            return content
+
+        return text
+
     def handle_message(
         self,
         event: dict[str, Any],
@@ -164,7 +215,7 @@ class DashBot:
         if not is_dm:
             text = re.sub(r"<@[A-Z0-9]+>\s*", "", text).strip()
 
-        logger.info("[%s] %s", "DM" if is_dm else "MENTION", text[:80])
+        logger.info("[%s] %s (files=%d)", "DM" if is_dm else "MENTION", text[:80], len(event.get("files", [])))
 
         # Post "thinking" message
         try:
@@ -191,8 +242,9 @@ class DashBot:
             thread_key = f"{channel}:{thread_ts}"
             messages = self.store.get(thread_key) or []
 
-            # Append user message
-            messages.append({"role": "user", "content": text})
+            # Append user message (with images if present)
+            user_content = self._extract_content(event, client, text)
+            messages.append({"role": "user", "content": user_content})
 
             # Trim to budget
             messages = ConversationStore.trim_to_budget(messages)
@@ -245,6 +297,34 @@ class DashBot:
                 logger.error("Fallback also failed: %s", e2)
 
 
+def _validate_env() -> list[str]:
+    """Validate required environment variables and return warnings."""
+    warnings: list[str] = []
+    required = {
+        "SLACK_BOT_TOKEN": "Slack bot OAuth token",
+        "SLACK_APP_TOKEN": "Slack app-level token for Socket Mode",
+        "ANTHROPIC_API_KEY": "Anthropic API key for Claude",
+        "OMNI_API_KEY": "Omni API key or PAT",
+        "OMNI_BASE_URL": "Omni org base URL (e.g. https://lindy.omniapp.co)",
+    }
+    for var, desc in required.items():
+        val = os.environ.get(var, "")
+        if not val:
+            warnings.append(f"MISSING: {var} — {desc}")
+        else:
+            # Log presence (masked) for debugging
+            masked = val[:4] + "..." + val[-4:] if len(val) > 12 else "***"
+            logger.info("Env check: %s = %s", var, masked)
+
+    optional = ["OMNI_SHARED_MODEL_ID", "DASH_CLAUDE_MODEL", "DASH_DB_PATH"]
+    for var in optional:
+        val = os.environ.get(var)
+        if val:
+            logger.info("Env check: %s = %s", var, val)
+
+    return warnings
+
+
 def main() -> None:
     """Entry point.  Starts Socket Mode handler."""
     from dotenv import dotenv_values
@@ -260,6 +340,14 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
+
+    # Validate environment before starting
+    env_warnings = _validate_env()
+    if env_warnings:
+        for w in env_warnings:
+            logger.error("Startup: %s", w)
+        if not os.environ.get("SLACK_BOT_TOKEN") or not os.environ.get("SLACK_APP_TOKEN"):
+            raise SystemExit("Cannot start: SLACK_BOT_TOKEN and SLACK_APP_TOKEN are required")
 
     bot = DashBot()
     app = App(token=os.environ["SLACK_BOT_TOKEN"])
