@@ -98,3 +98,60 @@ def test_extract_content_non_image_files():
     }
     result = DashBot._extract_content(event, None, "here is a CSV")
     assert result == "here is a CSV"
+
+
+def test_resize_image_small_image_passthrough():
+    """Small images should pass through unchanged."""
+    from omni_dash.slack.bot import DashBot
+
+    # Create a small 100x100 PNG
+    from io import BytesIO
+    from PIL import Image
+
+    img = Image.new("RGB", (100, 100), color="red")
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    data = buf.getvalue()
+
+    result_data, result_type = DashBot._resize_image(data, "image/png")
+    assert result_data == data
+    assert result_type == "image/png"
+
+
+def test_resize_image_large_image_downsized():
+    """Large images should be resized to fit within max dimensions."""
+    from omni_dash.slack.bot import DashBot
+
+    from io import BytesIO
+    from PIL import Image
+
+    # Create a 4000x3000 image (larger than 1568 limit)
+    img = Image.new("RGB", (4000, 3000), color="blue")
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    data = buf.getvalue()
+
+    result_data, result_type = DashBot._resize_image(data, "image/png")
+
+    # Verify it was resized
+    result_img = Image.open(BytesIO(result_data))
+    assert max(result_img.size) <= DashBot._MAX_IMAGE_DIM
+    assert result_type in ("image/png", "image/jpeg")
+
+
+def test_resize_image_rgba_stays_png():
+    """RGBA images should stay PNG to preserve transparency."""
+    from omni_dash.slack.bot import DashBot
+
+    from io import BytesIO
+    from PIL import Image
+
+    img = Image.new("RGBA", (3000, 2000), color=(255, 0, 0, 128))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    data = buf.getvalue()
+
+    result_data, result_type = DashBot._resize_image(data, "image/png")
+    assert result_type == "image/png"
+    result_img = Image.open(BytesIO(result_data))
+    assert max(result_img.size) <= DashBot._MAX_IMAGE_DIM
