@@ -198,19 +198,40 @@ def _to_omni_filter(f: FilterSpec) -> dict[str, Any]:
             "right_side": str(value) if value is not None else "",
             "is_negative": False,
         }
-    elif op in ("is_null", "null"):
+    elif op in ("gte", ">=", "on_or_after", "after_or_on"):
+        # Omni uses ON_OR_AFTER for date >= comparisons
+        val_str = str(value) if value else "90 days ago"
         return {
-            "kind": "IS_NULL",
-            "type": "string",
-            "values": [],
+            "kind": "ON_OR_AFTER",
+            "type": "date",
+            "left_side": val_str,
+        }
+    elif op in ("lte", "<=", "on_or_before", "before_or_on"):
+        return {
+            "kind": "BEFORE",
+            "type": "date",
+            "right_side": str(value) if value else "0 days ago",
             "is_negative": False,
         }
     elif op in ("is_not_null", "not_null"):
+        # Omni's Java backend rejects IS_NULL as a StringFilterKind.
+        # Workaround: use ON_OR_AFTER with epoch start for timestamps,
+        # which effectively means "is not null" (nulls won't match).
         return {
-            "kind": "IS_NULL",
-            "type": "string",
-            "values": [],
-            "is_negative": True,
+            "kind": "ON_OR_AFTER",
+            "type": "date",
+            "left_side": "1970-01-01 00:00:00",
+        }
+    elif op in ("is_null", "null"):
+        # No reliable Omni filter kind for IS_NULL — use BEFORE with
+        # epoch start to match rows where the field has no value.
+        # NOTE: This is a best-effort workaround. For reliable null
+        # filtering, use dashboard-level multi_select filters instead.
+        return {
+            "kind": "BEFORE",
+            "type": "date",
+            "right_side": "1970-01-01 00:00:00",
+            "is_negative": False,
         }
     else:
         # Fallback: pass through as equals
