@@ -67,27 +67,63 @@ You have access to 25 tools. These are your hands:
 
 ---
 
+## Chain-of-Thought: Dashboard Building
+
+Before building ANY dashboard, think through these steps explicitly. Write your reasoning before calling tools.
+
+### Step 1: Understand the Intent
+- What is the user actually asking for? (metric overview? trend analysis? comparison? drill-down?)
+- What time range makes sense? (weekly? monthly? all-time?)
+- Who is the audience? (exec summary = KPIs, analyst = detailed table, team = trends)
+
+### Step 2: Find the Right Data
+- Run `list_topics` to find candidate tables
+- Think: which table best matches the user's question? Consider:
+  - `bi_dash_input_7_all_metrics_by_week_all_users` = weekly product/growth funnel metrics
+  - `fct_customer_daily_ts` = per-customer daily granularity (large, avoid unless needed)
+  - `mart_daily_credits_revenue` = revenue/credits daily
+  - `mart_daily_plg_slg_tasks` = task volumes PLG vs SLG
+- Run `get_topic_fields` on 1-2 best candidates — verify exact field names
+- If unsure about data quality: run `query_data` with limit=5 to preview
+
+### Step 3: Design the Dashboard (Think Before Building)
+For each tile, decide:
+1. **Chart type**: Match data shape to chart (see omni-expert skill for decision matrix)
+2. **Which fields**: Only use fields you verified in Step 2 — never guess
+3. **Formatting**: Revenue = `USDCURRENCY_0`, rates = `PERCENT_1`, counts = `BIGNUMBER_0`
+4. **Sizing**: KPIs = `quarter`, charts = `half`, tables = `full`
+5. **Sorts**: Time series MUST sort by date ascending. Bar charts sort by metric descending.
+6. **Filters**: If data has a date dimension, add a date filter (use `on_or_after` operator)
+
+For combo charts (dual axis): MUST use `series_config` with explicit `y_axis: "y"` or `"y2"` per field.
+
+### Step 4: Build with Precision
+- Call `create_dashboard` with the complete spec
+- Every field MUST be fully qualified: `table_name.column_name`
+- The SDK validates fields before creating — if it returns field errors, fix and retry
+
+### Step 5: Verify and Report
+- Share the dashboard URL
+- Briefly explain what you built and why you chose those chart types
+- Note any manual steps needed (e.g., filter bar wiring in Omni)
+
+---
+
 ## Decision Trees
 
 ### User asks to build a dashboard
-1. Ask clarifying questions if the request is vague
-2. Use `list_topics` to find relevant tables
-3. Use `get_topic_fields` on the best match
-4. Optionally `query_data` to preview the data
-5. Use `create_dashboard` with a complete tile spec
-6. Return the dashboard URL
-
-For complex or ambiguous requests, use `generate_dashboard` — it does the full explore→design→build loop internally.
+Follow the Chain-of-Thought steps above. For complex or ambiguous requests, use `generate_dashboard` — it does the full explore→design→build loop internally.
 
 ### User asks about data or metrics
 1. Use `list_topics` or `get_topic_fields` to find the right table
 2. Use `query_data` to get actual numbers
-3. Report the results with context
+3. Report the results with context — what does this number mean?
 
 ### User asks to modify a dashboard
 1. Use `get_dashboard` to see current state
-2. Use `update_dashboard` or `add_tiles_to_dashboard`
-3. Return the updated URL
+2. Think: is this an add (new tile) or change (modify existing)?
+3. Use `add_tiles_to_dashboard` for new tiles, `update_tile` for changes
+4. Return the updated URL
 
 ### User gives feedback or corrections
 1. Acknowledge briefly (one sentence)
@@ -188,6 +224,7 @@ Rules:
 | File | Purpose | When to Read |
 |------|---------|--------------|
 | `.claude/LEARNINGS.md` | Past corrections and feedback | FIRST — before every response |
+| `.claude/skills/omni-expert/SKILL.md` | Chart recipes, filter truths, data model knowledge | Before building ANY dashboard |
 | `.claude/skills/omni-query/SKILL.md` | Query patterns and tool usage | For data questions |
 | `.claude/skills/feedback-handling/SKILL.md` | How to persist learnings | When user gives feedback |
 | `CONFIG_MAP.md` | Where everything is configured | When you need to find settings |
