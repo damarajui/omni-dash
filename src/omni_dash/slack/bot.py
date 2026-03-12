@@ -385,16 +385,19 @@ class DashBot:
         except Exception as e:
             logger.exception("Error processing message: %s", e)
             response = f"_Error processing request: {e}_"
-            messages = []  # Don't save broken conversation
+            # Keep the user message so the thread is registered for replies.
+            # On error, preserve at least the user message so thread tracking
+            # works — otherwise thread replies without @mention are ignored.
+            if not messages:
+                messages = [{"role": "user", "content": user_content}]
         finally:
             animator.stop()
 
-        # Save conversation separately — don't let DB failure destroy response
-        if messages:
-            try:
-                self.store.put(f"{channel}:{thread_ts}", messages)
-            except Exception as e:
-                logger.error("Failed to persist conversation: %s", e)
+        # Save conversation — even on error, so thread replies work
+        try:
+            self.store.put(f"{channel}:{thread_ts}", messages)
+        except Exception as e:
+            logger.error("Failed to persist conversation: %s", e)
 
         # Update thinking message with final response
         try:

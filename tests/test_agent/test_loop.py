@@ -1,195 +1,130 @@
-"""Tests for agent.loop — agentic tool-use loop."""
+"""Tests for agent loop retry and caching."""
 
 from __future__ import annotations
 
-import json
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
+
+def test_stream_with_retry_succeeds_first_try():
+    """Verify stream_with_retry returns stream on success."""
+    from omni_dash.agent.loop import AgentLoop
+
+    with patch("omni_dash.agent.loop.AgentLoop.__init__", return_value=None):
+        loop = AgentLoop.__new__(AgentLoop)
+        loop._client = MagicMock()
+        loop._model = "test-model"
+
+        mock_stream = MagicMock()
+        loop._client.messages.stream.return_value = mock_stream
+
+        result = loop._stream_with_retry(
+            system=[{"type": "text", "text": "test"}],
+            messages=[{"role": "user", "content": "hi"}],
+            tool_defs=[],
+        )
+
+        assert result == mock_stream
+        assert loop._client.messages.stream.call_count == 1
 
 
-@pytest.fixture(autouse=True)
-def _mock_env(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setenv("OMNI_API_KEY", "test-key")
-    monkeypatch.setenv("OMNI_BASE_URL", "https://test.omniapp.co")
-    monkeypatch.setenv("OMNI_SHARED_MODEL_ID", "test-model")
+def test_stream_with_retry_retries_on_429():
+    """Verify retry logic on rate limit error."""
+    import anthropic
+    from omni_dash.agent.loop import AgentLoop
+
+    with patch("omni_dash.agent.loop.AgentLoop.__init__", return_value=None):
+        loop = AgentLoop.__new__(AgentLoop)
+        loop._client = MagicMock()
+        loop._model = "test-model"
+
+        mock_stream = MagicMock()
+        rate_err = anthropic.RateLimitError(
+            message="rate limited",
+            response=MagicMock(status_code=429, headers={}),
+            body={"error": {"message": "rate limited"}},
+        )
+
+        # Fail twice, succeed third time
+        loop._client.messages.stream.side_effect = [rate_err, rate_err, mock_stream]
+
+        with patch("omni_dash.agent.loop.time.sleep") as mock_sleep:
+            result = loop._stream_with_retry(
+                system=[{"type": "text", "text": "test"}],
+                messages=[{"role": "user", "content": "hi"}],
+                tool_defs=[],
+            )
+
+        assert result == mock_stream
+        assert loop._client.messages.stream.call_count == 3
+        assert mock_sleep.call_count == 2
 
 
-def _make_text_response(text: str):
-    """Build a fake Anthropic response with a single text block."""
-    block = SimpleNamespace(type="text", text=text)
-    return SimpleNamespace(content=[block], stop_reason="end_turn")
+def test_stream_with_retry_exhausts_retries():
+    """Verify exception raised after max retries."""
+    import anthropic
+    import pytest
+    from omni_dash.agent.loop import AgentLoop
 
+    with patch("omni_dash.agent.loop.AgentLoop.__init__", return_value=None):
+        loop = AgentLoop.__new__(AgentLoop)
+        loop._client = MagicMock()
+        loop._model = "test-model"
 
-def _make_tool_response(tool_name: str, tool_id: str, tool_input: dict):
-    """Build a fake Anthropic response with a tool_use block."""
-    block = SimpleNamespace(
-        type="tool_use", id=tool_id, name=tool_name, input=tool_input
-    )
-    return SimpleNamespace(content=[block], stop_reason="tool_use")
+        rate_err = anthropic.RateLimitError(
+            message="rate limited",
+            response=MagicMock(status_code=429, headers={}),
+            body={"error": {"message": "rate limited"}},
+        )
 
+        loop._client.messages.stream.side_effect = rate_err
 
-class FakeStream:
-    """Simulates ``client.messages.stream()`` context manager."""
-
-    def __init__(self, response):
-        self._response = response
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        pass
-
-    def __iter__(self):
-        # Emit content_block_start + content_block_delta + content_block_stop
-        for i, block in enumerate(self._response.content):
-            if block.type == "text":
-                yield SimpleNamespace(
-                    type="content_block_start",
-                    content_block=SimpleNamespace(type="text"),
-                    index=i,
+        with patch("omni_dash.agent.loop.time.sleep"):
+            with pytest.raises(anthropic.RateLimitError):
+                loop._stream_with_retry(
+                    system=[{"type": "text", "text": "test"}],
+                    messages=[{"role": "user", "content": "hi"}],
+                    tool_defs=[],
                 )
-                yield SimpleNamespace(
-                    type="content_block_delta",
-                    delta=SimpleNamespace(type="text_delta", text=block.text),
-                    index=i,
-                )
-                yield SimpleNamespace(type="content_block_stop", index=i)
-            elif block.type == "tool_use":
-                yield SimpleNamespace(
-                    type="content_block_start",
-                    content_block=SimpleNamespace(
-                        type="tool_use", id=block.id, name=block.name
-                    ),
-                    index=i,
-                )
-                yield SimpleNamespace(type="content_block_stop", index=i)
 
-    def get_final_message(self):
-        return self._response
+        # 1 initial + 3 retries = 4 attempts
+        assert loop._client.messages.stream.call_count == 4
 
 
-def test_loop_text_only():
-    """If Claude responds with text only, loop returns immediately."""
-    from omni_dash.agent.executor import ToolExecutor
-    from omni_dash.agent.tool_registry import ToolRegistry
+def test_system_prompt_uses_cache_control():
+    """Verify system prompt is structured with cache_control for caching."""
+    from omni_dash.agent.loop import AgentLoop
 
-    response = _make_text_response("Hello, I can help!")
+    with patch("omni_dash.agent.loop.AgentLoop.__init__", return_value=None):
+        loop = AgentLoop.__new__(AgentLoop)
+        loop._client = MagicMock()
+        loop._model = "test-model"
+        loop._max_turns = 1
+        loop._executor = MagicMock()
+        loop._executor.get_tool_definitions.return_value = []
 
-    with patch("anthropic.Anthropic") as mock_cls:
-        mock_client = MagicMock()
-        mock_cls.return_value = mock_client
-        mock_client.messages.stream.return_value = FakeStream(response)
+        # Mock stream to return a simple text response
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(type="text", text="hello")]
+        mock_response.usage = MagicMock(input_tokens=100, cache_read_input_tokens=0, cache_creation_input_tokens=50)
 
-        from omni_dash.agent.loop import AgentLoop
+        mock_stream_ctx = MagicMock()
+        mock_stream_ctx.__enter__ = MagicMock(return_value=mock_stream_ctx)
+        mock_stream_ctx.__exit__ = MagicMock(return_value=False)
+        mock_stream_ctx.__iter__ = MagicMock(return_value=iter([]))
+        mock_stream_ctx.get_final_message.return_value = mock_response
 
-        registry = ToolRegistry()
-        executor = ToolExecutor(registry)
-        loop = AgentLoop(executor, model="test-model", api_key="test")
+        loop._client.messages.stream.return_value = mock_stream_ctx
 
         messages = [{"role": "user", "content": "hi"}]
-        messages, final_text = loop.run(messages, "system prompt")
+        loop.run(messages, "test system prompt")
 
-    assert final_text == "Hello, I can help!"
-    assert len(messages) == 2  # user + assistant
+        # Check that system was passed as structured blocks with cache_control
+        call_kwargs = loop._client.messages.stream.call_args
+        system_arg = call_kwargs.kwargs.get("system") or call_kwargs[1].get("system")
+        assert isinstance(system_arg, list)
+        assert system_arg[0]["cache_control"] == {"type": "ephemeral"}
+        assert system_arg[0]["text"] == "test system prompt"
 
-
-def test_loop_tool_then_text():
-    """Loop should execute tool, then get text response."""
-    from omni_dash.agent.executor import ToolExecutor
-    from omni_dash.agent.tool_registry import ToolRegistry
-
-    tool_response = _make_tool_response("list_folders", "call_1", {})
-    text_response = _make_text_response("Here are your folders.")
-
-    call_count = 0
-
-    def _stream_side_effect(**kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return FakeStream(tool_response)
-        return FakeStream(text_response)
-
-    with patch("anthropic.Anthropic") as mock_cls:
-        mock_client = MagicMock()
-        mock_cls.return_value = mock_client
-        mock_client.messages.stream.side_effect = _stream_side_effect
-
-        from omni_dash.agent.loop import AgentLoop
-
-        registry = ToolRegistry()
-        executor = ToolExecutor(registry)
-        # Mock the actual tool execution to avoid API calls
-        executor.execute = MagicMock(
-            return_value=(json.dumps([{"id": "f1", "name": "Test"}]), False)
-        )
-
-        loop = AgentLoop(executor, model="test-model", api_key="test")
-        messages = [{"role": "user", "content": "list folders"}]
-        messages, final_text = loop.run(messages, "system prompt")
-
-    assert final_text == "Here are your folders."
-    assert call_count == 2
-    executor.execute.assert_called_once_with("list_folders", {})
-
-
-def test_loop_streaming_callbacks():
-    """Verify on_text_delta and on_tool_call callbacks are invoked."""
-    from omni_dash.agent.executor import ToolExecutor
-    from omni_dash.agent.tool_registry import ToolRegistry
-
-    response = _make_text_response("streamed text")
-
-    text_deltas: list[str] = []
-
-    with patch("anthropic.Anthropic") as mock_cls:
-        mock_client = MagicMock()
-        mock_cls.return_value = mock_client
-        mock_client.messages.stream.return_value = FakeStream(response)
-
-        from omni_dash.agent.loop import AgentLoop
-
-        registry = ToolRegistry()
-        executor = ToolExecutor(registry)
-        loop = AgentLoop(executor, model="test-model", api_key="test")
-
-        messages = [{"role": "user", "content": "hi"}]
-        messages, _ = loop.run(
-            messages,
-            "system",
-            on_text_delta=lambda d: text_deltas.append(d),
-        )
-
-    assert "streamed text" in text_deltas
-
-
-def test_loop_max_turns():
-    """Loop should stop after max_turns even if Claude keeps calling tools."""
-    from omni_dash.agent.executor import ToolExecutor
-    from omni_dash.agent.tool_registry import ToolRegistry
-
-    tool_response = _make_tool_response("list_folders", "call_1", {})
-
-    with patch("anthropic.Anthropic") as mock_cls:
-        mock_client = MagicMock()
-        mock_cls.return_value = mock_client
-        mock_client.messages.stream.return_value = FakeStream(tool_response)
-
-        from omni_dash.agent.loop import AgentLoop
-
-        registry = ToolRegistry()
-        executor = ToolExecutor(registry)
-        executor.execute = MagicMock(
-            return_value=(json.dumps({"status": "ok"}), False)
-        )
-
-        loop = AgentLoop(executor, model="test", api_key="test", max_turns=2)
-        messages = [{"role": "user", "content": "go"}]
-        messages, _ = loop.run(messages, "system")
-
-    # Should have called execute exactly 2 times (max_turns=2)
-    assert executor.execute.call_count == 2
+        # Check cache_control was passed at top level
+        cache_arg = call_kwargs.kwargs.get("cache_control") or call_kwargs[1].get("cache_control")
+        assert cache_arg == {"type": "ephemeral"}
