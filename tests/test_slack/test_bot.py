@@ -45,6 +45,22 @@ def test_build_system_prompt_has_tool_usage():
     assert "Tool Usage" in prompt
 
 
+def test_build_system_prompt_has_omni_expert():
+    from omni_dash.slack.bot import _build_system_prompt
+
+    prompt = _build_system_prompt()
+    assert "Omni Visualization Expert" in prompt
+
+
+def test_build_system_prompt_has_chart_recipes():
+    from omni_dash.slack.bot import _build_system_prompt
+
+    prompt = _build_system_prompt()
+    assert "Chart Type Recipes" in prompt
+    assert "combo" in prompt.lower()
+    assert "series_config" in prompt
+
+
 def test_validate_env_missing(monkeypatch):
     from omni_dash.slack.bot import _validate_env
 

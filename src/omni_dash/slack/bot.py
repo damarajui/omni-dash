@@ -87,19 +87,28 @@ def format_for_slack(response: str) -> str:
 
 
 def _build_system_prompt() -> str:
-    """Build the system prompt from CLAUDE.md + Slack-specific rules."""
+    """Build the system prompt from CLAUDE.md + skills + Slack-specific rules."""
     prompt_parts: list[str] = []
 
+    project_root = Path(__file__).resolve().parents[3]
+
     # Read CLAUDE.md from project root
-    claude_md = Path(__file__).resolve().parents[3] / "CLAUDE.md"
+    claude_md = project_root / "CLAUDE.md"
     if claude_md.exists():
         prompt_parts.append(claude_md.read_text())
 
     # Read learnings if they exist
-    learnings = Path(__file__).resolve().parents[3] / ".claude" / "LEARNINGS.md"
+    learnings = project_root / ".claude" / "LEARNINGS.md"
     if learnings.exists():
         prompt_parts.append(
             "\n\n# Past Corrections (HIGHEST PRIORITY)\n\n" + learnings.read_text()
+        )
+
+    # Load Omni expert knowledge base
+    omni_expert = project_root / ".claude" / "skills" / "omni-expert" / "SKILL.md"
+    if omni_expert.exists():
+        prompt_parts.append(
+            "\n\n# Omni Visualization Expert Knowledge\n\n" + omni_expert.read_text()
         )
 
     # Append Slack-specific rules
