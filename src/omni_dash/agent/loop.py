@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -16,6 +17,10 @@ from omni_dash.agent.executor import ToolExecutor
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = os.environ.get("DASH_CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
+
+# Retry config for rate limit errors (429)
+_MAX_RETRIES = 3
+_BASE_DELAY = 5.0  # seconds
 
 
 class AgentLoop:
@@ -44,6 +49,41 @@ class AgentLoop:
         self._model = model
         self._max_turns = max_turns
 
+    def _stream_with_retry(
+        self,
+        *,
+        system: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
+        tool_defs: list[dict[str, Any]],
+    ):
+        """Call messages.stream() with retry + exponential backoff on 429."""
+        import anthropic
+
+        last_err = None
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                return self._client.messages.stream(
+                    model=self._model,
+                    max_tokens=4096,
+                    system=system,
+                    messages=messages,
+                    tools=tool_defs,
+                    cache_control={"type": "ephemeral"},
+                )
+            except anthropic.RateLimitError as e:
+                last_err = e
+                if attempt < _MAX_RETRIES:
+                    delay = _BASE_DELAY * (2 ** attempt)
+                    logger.warning(
+                        "Rate limited (429), retry %d/%d in %.0fs: %s",
+                        attempt + 1, _MAX_RETRIES, delay, e,
+                    )
+                    time.sleep(delay)
+                else:
+                    logger.error("Rate limit retries exhausted after %d attempts", _MAX_RETRIES + 1)
+                    raise
+        raise last_err  # unreachable but satisfies type checker
+
     def run(
         self,
         messages: list[dict[str, Any]],
@@ -61,12 +101,23 @@ class AgentLoop:
             on_tool_call: Called with ``(tool_name, tool_input)`` before execution.
 
         Returns:
-            ``(updated_messages, final_text)`` — the final assistant text
+            ``(updated_messages, final_text)`` -- the final assistant text
             response (or empty string if the last turn was a tool call).
         """
         final_text = ""
 
         tool_defs = self._executor.get_tool_definitions()
+
+        # Structure system prompt for caching -- cache_control on the
+        # last block tells Anthropic to cache everything up to that point.
+        system_blocks = [
+            {
+                "type": "text",
+                "text": system,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
         logger.info(
             "Agent loop starting: model=%s, tools=%d, messages=%d",
             self._model, len(tool_defs), len(messages),
@@ -79,12 +130,10 @@ class AgentLoop:
             full_content: list[dict[str, Any]] = []
 
             logger.info("Turn %d: calling messages.stream()", _turn + 1)
-            with self._client.messages.stream(
-                model=self._model,
-                max_tokens=4096,
-                system=system,
+            with self._stream_with_retry(
+                system=system_blocks,
                 messages=messages,
-                tools=tool_defs,
+                tool_defs=tool_defs,
             ) as stream:
                 current_tool: dict[str, Any] | None = None
 
@@ -114,6 +163,16 @@ class AgentLoop:
 
                 # Get the final assembled message
                 response = stream.get_final_message()
+
+            # Log cache usage if available
+            usage = response.usage
+            cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+            cache_create = getattr(usage, "cache_creation_input_tokens", 0) or 0
+            if cache_read or cache_create:
+                logger.info(
+                    "Turn %d cache: read=%d, created=%d, input=%d",
+                    _turn + 1, cache_read, cache_create, usage.input_tokens,
+                )
 
             # Build full_content from the response
             for block in response.content:
