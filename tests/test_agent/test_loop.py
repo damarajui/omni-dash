@@ -18,6 +18,7 @@ def test_stream_with_retry_succeeds_first_try():
         loop._client.messages.stream.return_value = mock_stream
 
         result = loop._stream_with_retry(
+            model="test-model",
             system=[{"type": "text", "text": "test"}],
             messages=[{"role": "user", "content": "hi"}],
             tool_defs=[],
@@ -49,6 +50,7 @@ def test_stream_with_retry_retries_on_429():
 
         with patch("omni_dash.agent.loop.time.sleep") as mock_sleep:
             result = loop._stream_with_retry(
+                model="test-model",
                 system=[{"type": "text", "text": "test"}],
                 messages=[{"role": "user", "content": "hi"}],
                 tool_defs=[],
@@ -81,6 +83,7 @@ def test_stream_with_retry_exhausts_retries():
         with patch("omni_dash.agent.loop.time.sleep"):
             with pytest.raises(anthropic.RateLimitError):
                 loop._stream_with_retry(
+                    model="test-model",
                     system=[{"type": "text", "text": "test"}],
                     messages=[{"role": "user", "content": "hi"}],
                     tool_defs=[],
@@ -128,3 +131,66 @@ def test_system_prompt_uses_cache_control():
         # Check cache_control was passed at top level
         cache_arg = call_kwargs.kwargs.get("cache_control") or call_kwargs[1].get("cache_control")
         assert cache_arg == {"type": "ephemeral"}
+
+
+def test_run_uses_model_override():
+    """Verify model override parameter is passed to _stream_with_retry."""
+    from omni_dash.agent.loop import AgentLoop
+
+    with patch("omni_dash.agent.loop.AgentLoop.__init__", return_value=None):
+        loop = AgentLoop.__new__(AgentLoop)
+        loop._client = MagicMock()
+        loop._model = "default-model"
+        loop._max_turns = 1
+        loop._executor = MagicMock()
+        loop._executor.get_tool_definitions.return_value = []
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(type="text", text="done")]
+        mock_response.usage = MagicMock(input_tokens=50, cache_read_input_tokens=0, cache_creation_input_tokens=0)
+
+        mock_stream_ctx = MagicMock()
+        mock_stream_ctx.__enter__ = MagicMock(return_value=mock_stream_ctx)
+        mock_stream_ctx.__exit__ = MagicMock(return_value=False)
+        mock_stream_ctx.__iter__ = MagicMock(return_value=iter([]))
+        mock_stream_ctx.get_final_message.return_value = mock_response
+
+        loop._client.messages.stream.return_value = mock_stream_ctx
+
+        messages = [{"role": "user", "content": "hi"}]
+        loop.run(messages, "system", model="override-model")
+
+        # Check model was passed correctly
+        call_kwargs = loop._client.messages.stream.call_args
+        assert call_kwargs.kwargs["model"] == "override-model"
+
+
+def test_run_uses_default_model_when_no_override():
+    """Verify default model is used when no override is specified."""
+    from omni_dash.agent.loop import AgentLoop
+
+    with patch("omni_dash.agent.loop.AgentLoop.__init__", return_value=None):
+        loop = AgentLoop.__new__(AgentLoop)
+        loop._client = MagicMock()
+        loop._model = "default-model"
+        loop._max_turns = 1
+        loop._executor = MagicMock()
+        loop._executor.get_tool_definitions.return_value = []
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(type="text", text="done")]
+        mock_response.usage = MagicMock(input_tokens=50, cache_read_input_tokens=0, cache_creation_input_tokens=0)
+
+        mock_stream_ctx = MagicMock()
+        mock_stream_ctx.__enter__ = MagicMock(return_value=mock_stream_ctx)
+        mock_stream_ctx.__exit__ = MagicMock(return_value=False)
+        mock_stream_ctx.__iter__ = MagicMock(return_value=iter([]))
+        mock_stream_ctx.get_final_message.return_value = mock_response
+
+        loop._client.messages.stream.return_value = mock_stream_ctx
+
+        messages = [{"role": "user", "content": "hi"}]
+        loop.run(messages, "system")
+
+        call_kwargs = loop._client.messages.stream.call_args
+        assert call_kwargs.kwargs["model"] == "default-model"

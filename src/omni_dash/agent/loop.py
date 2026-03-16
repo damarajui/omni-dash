@@ -28,7 +28,7 @@ class AgentLoop:
 
     Args:
         executor: Dispatches tool calls.
-        model: Claude model to use.
+        model: Claude model to use (default, can be overridden per-run).
         max_turns: Safety limit on agentic turns.
         api_key: Anthropic API key (falls back to ``ANTHROPIC_API_KEY``).
     """
@@ -52,6 +52,7 @@ class AgentLoop:
     def _stream_with_retry(
         self,
         *,
+        model: str,
         system: list[dict[str, Any]],
         messages: list[dict[str, Any]],
         tool_defs: list[dict[str, Any]],
@@ -63,7 +64,7 @@ class AgentLoop:
         for attempt in range(_MAX_RETRIES + 1):
             try:
                 return self._client.messages.stream(
-                    model=self._model,
+                    model=model,
                     max_tokens=4096,
                     system=system,
                     messages=messages,
@@ -89,6 +90,7 @@ class AgentLoop:
         messages: list[dict[str, Any]],
         system: str,
         *,
+        model: str | None = None,
         on_text_delta: Callable[[str], None] | None = None,
         on_tool_call: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> tuple[list[dict[str, Any]], str]:
@@ -97,6 +99,8 @@ class AgentLoop:
         Args:
             messages: Anthropic-format message list (mutated in place).
             system: System prompt.
+            model: Override model for this run (e.g. from router).
+                Falls back to the instance default if not provided.
             on_text_delta: Called with each text chunk during streaming.
             on_tool_call: Called with ``(tool_name, tool_input)`` before execution.
 
@@ -105,6 +109,7 @@ class AgentLoop:
             response (or empty string if the last turn was a tool call).
         """
         final_text = ""
+        effective_model = model or self._model
 
         tool_defs = self._executor.get_tool_definitions()
 
@@ -120,7 +125,7 @@ class AgentLoop:
 
         logger.info(
             "Agent loop starting: model=%s, tools=%d, messages=%d",
-            self._model, len(tool_defs), len(messages),
+            effective_model, len(tool_defs), len(messages),
         )
 
         for _turn in range(self._max_turns):
@@ -131,6 +136,7 @@ class AgentLoop:
 
             logger.info("Turn %d: calling messages.stream()", _turn + 1)
             with self._stream_with_retry(
+                model=effective_model,
                 system=system_blocks,
                 messages=messages,
                 tool_defs=tool_defs,
