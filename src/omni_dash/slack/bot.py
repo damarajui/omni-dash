@@ -135,6 +135,7 @@ class DashBot:
     def __init__(self) -> None:
         from omni_dash.agent.executor import ToolExecutor
         from omni_dash.agent.loop import AgentLoop
+        from omni_dash.agent.router import get_model_for_message
         from omni_dash.agent.tool_registry import ToolRegistry
         from omni_dash.slack.conversation_store import ConversationStore
 
@@ -142,15 +143,12 @@ class DashBot:
         self.store = ConversationStore(db_path=db_path)
         self.registry = ToolRegistry()
         self.executor = ToolExecutor(self.registry)
-        self.agent = AgentLoop(
-            self.executor,
-            model=os.environ.get("DASH_CLAUDE_MODEL", "claude-sonnet-4-5-20250929"),
-        )
+        self.agent = AgentLoop(self.executor)
         self.system_prompt = _build_system_prompt()
+        self._get_model = get_model_for_message
         logger.info(
-            "DashBot initialized: %d tools, model=%s",
+            "DashBot initialized: %d tools, adaptive routing enabled",
             self.registry.tool_count,
-            os.environ.get("DASH_CLAUDE_MODEL", "claude-sonnet-4-5-20250929"),
         )
 
     # Anthropic recommends images <= 1568px on the long side
@@ -266,6 +264,8 @@ class DashBot:
         """Run a quick health check on all critical systems."""
         import json
 
+        from omni_dash.agent.router import ModelTier
+
         results: list[str] = []
 
         # 1. Check env vars
@@ -290,9 +290,13 @@ class DashBot:
         except Exception as e:
             results.append(f"list_topics: EXCEPTION — {e}")
 
-        # 4. Model info
-        model = os.environ.get("DASH_CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
-        results.append(f"Model: {model}")
+        # 4. Model routing info
+        results.append(f"Routing: Haiku={ModelTier.HAIKU.value}, Sonnet={ModelTier.SONNET.value}")
+        override = os.environ.get("DASH_CLAUDE_MODEL")
+        if override:
+            results.append(f"Model override: {override} (routing bypassed)")
+        else:
+            results.append("Model routing: adaptive (Haiku for simple, Sonnet for complex)")
 
         return "\n".join(results)
 
@@ -305,7 +309,7 @@ class DashBot:
         is_dm: bool = False,
     ) -> None:
         """Handle a Slack message (mention or DM)."""
-        from omni_dash.slack.conversation_store import ConversationStore
+        from omni_dash.agent.context import prepare_messages_for_api
         from omni_dash.slack.streaming import SlackStreamer
 
         channel = event["channel"]
@@ -347,6 +351,10 @@ class DashBot:
         animator = StatusAnimator(client, channel, thinking_ts)
         animator.start()
 
+        # Route to appropriate model based on message intent
+        routed_model = self._get_model(text)
+        logger.info("Model for this request: %s", routed_model)
+
         try:
             # Load or create conversation
             thread_key = f"{channel}:{thread_ts}"
@@ -356,8 +364,8 @@ class DashBot:
             user_content = self._extract_content(event, client, text)
             messages.append({"role": "user", "content": user_content})
 
-            # Trim to budget
-            messages = ConversationStore.trim_to_budget(messages)
+            # Compress old tool results + trim to budget
+            messages = prepare_messages_for_api(messages)
 
             # Set up streaming
             streamer = SlackStreamer(client, channel, thinking_ts)
@@ -365,10 +373,11 @@ class DashBot:
             def _on_tool_call(name: str, _input: dict) -> None:
                 logger.info("Executing tool: %s", name)
 
-            # Run agentic loop
+            # Run agentic loop with routed model
             messages, final_text = self.agent.run(
                 messages,
                 self.system_prompt,
+                model=routed_model,
                 on_text_delta=streamer.on_text_delta,
                 on_tool_call=_on_tool_call,
             )
@@ -487,7 +496,7 @@ def main() -> None:
             if bot.store.get(thread_key) is not None:
                 bot.handle_message(event, say, client, is_dm=False)
 
-    print("Starting Dash (conversational agent)...", flush=True)
+    print("Starting Dash (conversational agent, adaptive routing)...", flush=True)
     print(f"Tools registered: {bot.registry.tool_count}", flush=True)
     handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     handler.start()
