@@ -86,8 +86,13 @@ def format_for_slack(response: str) -> str:
     return response
 
 
-def _build_system_prompt() -> str:
-    """Build the system prompt from CLAUDE.md + skills + Slack-specific rules."""
+def _build_system_prompt(user_message: str = "") -> str:
+    """Build the system prompt from CLAUDE.md + dbt catalog + skills + Slack rules.
+
+    Args:
+        user_message: The current user message, used to search learnings
+            for relevant context injection.
+    """
     prompt_parts: list[str] = []
 
     project_root = Path(__file__).resolve().parents[3]
@@ -97,12 +102,36 @@ def _build_system_prompt() -> str:
     if claude_md.exists():
         prompt_parts.append(claude_md.read_text())
 
+    # Inject dbt catalog context block — gives Claude the "map" of available models
+    try:
+        from omni_dash.dbt.catalog import get_catalog
+
+        catalog = get_catalog()
+        if catalog.available:
+            context_block = catalog.to_context_block()
+            if context_block:
+                prompt_parts.append(f"\n\n{context_block}")
+    except Exception as e:
+        logger.warning("Could not load dbt catalog for system prompt: %s", e)
+
     # Read learnings if they exist
-    learnings = project_root / ".claude" / "LEARNINGS.md"
-    if learnings.exists():
+    learnings_file = project_root / ".claude" / "LEARNINGS.md"
+    if learnings_file.exists():
         prompt_parts.append(
-            "\n\n# Past Corrections (HIGHEST PRIORITY)\n\n" + learnings.read_text()
+            "\n\n# Past Corrections (HIGHEST PRIORITY)\n\n" + learnings_file.read_text()
         )
+
+    # Inject per-request learnings from the JSONL store
+    try:
+        from omni_dash.agent.learnings import get_learnings_store
+
+        store = get_learnings_store()
+        if user_message:
+            learnings_block = store.to_context_block(query=user_message)
+            if learnings_block:
+                prompt_parts.append(f"\n\n{learnings_block}")
+    except Exception as e:
+        logger.debug("Learnings store not available: %s", e)
 
     # Load Omni expert knowledge base
     omni_expert = project_root / ".claude" / "skills" / "omni-expert" / "SKILL.md"
@@ -135,7 +164,7 @@ class DashBot:
     def __init__(self) -> None:
         from omni_dash.agent.executor import ToolExecutor
         from omni_dash.agent.loop import AgentLoop
-        from omni_dash.agent.router import get_model_for_message
+        from omni_dash.agent.router import get_max_turns_for_message, get_model_for_message
         from omni_dash.agent.tool_registry import ToolRegistry
         from omni_dash.slack.conversation_store import ConversationStore
 
@@ -144,8 +173,10 @@ class DashBot:
         self.registry = ToolRegistry()
         self.executor = ToolExecutor(self.registry)
         self.agent = AgentLoop(self.executor)
-        self.system_prompt = _build_system_prompt()
+        # Base system prompt (without per-request learnings)
+        self._base_system_prompt = _build_system_prompt()
         self._get_model = get_model_for_message
+        self._get_max_turns = get_max_turns_for_message
         logger.info(
             "DashBot initialized: %d tools, adaptive routing enabled",
             self.registry.tool_count,
@@ -351,9 +382,10 @@ class DashBot:
         animator = StatusAnimator(client, channel, thinking_ts)
         animator.start()
 
-        # Route to appropriate model based on message intent
+        # Route to appropriate model + max turns based on message intent
         routed_model = self._get_model(text)
-        logger.info("Model for this request: %s", routed_model)
+        routed_max_turns = self._get_max_turns(text)
+        logger.info("Model for this request: %s (max_turns=%d)", routed_model, routed_max_turns)
 
         try:
             # Load or create conversation
@@ -373,11 +405,15 @@ class DashBot:
             def _on_tool_call(name: str, _input: dict) -> None:
                 logger.info("Executing tool: %s", name)
 
-            # Run agentic loop with routed model
+            # Build per-request system prompt (injects relevant learnings)
+            system_prompt = _build_system_prompt(user_message=text)
+
+            # Run agentic loop with routed model + max turns
             messages, final_text = self.agent.run(
                 messages,
-                self.system_prompt,
+                system_prompt,
                 model=routed_model,
+                max_turns=routed_max_turns,
                 on_text_delta=streamer.on_text_delta,
                 on_tool_call=_on_tool_call,
             )

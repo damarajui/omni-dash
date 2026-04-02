@@ -57,6 +57,22 @@ class OmniDashSettings(BaseSettings):
         str, Field(default="", description="Anthropic API key for AI dashboard generation", repr=False)
     ] = ""
 
+    # Shared folder for Dash-created dashboards
+    omni_shared_folder_id: Annotated[
+        str,
+        Field(
+            default="",
+            description="Omni folder ID where Dash creates dashboards. "
+            "All team members should have access to this folder.",
+        ),
+    ] = ""
+
+    # dbt manifest for agent research
+    dbt_manifest_path: Annotated[
+        str,
+        Field(default="", description="Path to dbt manifest.json for agent data discovery"),
+    ] = ""
+
     # Cache
     omni_dash_cache_ttl: Annotated[
         int, Field(default=3600, description="Cache TTL in seconds")

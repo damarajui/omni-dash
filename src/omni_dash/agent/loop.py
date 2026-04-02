@@ -91,6 +91,7 @@ class AgentLoop:
         system: str,
         *,
         model: str | None = None,
+        max_turns: int | None = None,
         on_text_delta: Callable[[str], None] | None = None,
         on_tool_call: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> tuple[list[dict[str, Any]], str]:
@@ -101,6 +102,8 @@ class AgentLoop:
             system: System prompt.
             model: Override model for this run (e.g. from router).
                 Falls back to the instance default if not provided.
+            max_turns: Override max turns for this run. Falls back to
+                the instance default (15) if not provided.
             on_text_delta: Called with each text chunk during streaming.
             on_tool_call: Called with ``(tool_name, tool_input)`` before execution.
 
@@ -123,12 +126,14 @@ class AgentLoop:
             }
         ]
 
+        effective_max_turns = max_turns or self._max_turns
+
         logger.info(
-            "Agent loop starting: model=%s, tools=%d, messages=%d",
-            effective_model, len(tool_defs), len(messages),
+            "Agent loop starting: model=%s, tools=%d, messages=%d, max_turns=%d",
+            effective_model, len(tool_defs), len(messages), effective_max_turns,
         )
 
-        for _turn in range(self._max_turns):
+        for _turn in range(effective_max_turns):
             # Stream the response
             text_parts: list[str] = []
             tool_use_blocks: list[dict[str, Any]] = []
@@ -243,7 +248,7 @@ class AgentLoop:
             # Loop exhausted without Claude stopping naturally
             logger.warning(
                 "Agent loop hit max_turns=%d. Last tools: %s",
-                self._max_turns,
+                effective_max_turns,
                 [tb["name"] for tb in tool_use_blocks] if tool_use_blocks else "none",
             )
             if not final_text:
