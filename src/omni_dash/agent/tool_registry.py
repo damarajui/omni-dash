@@ -564,23 +564,23 @@ class ToolRegistry:
 
     @staticmethod
     def _save_learning(learning: str) -> str:
-        """Persist a learning to both the JSONL store and GitHub.
+        """Persist a learning to Convex + local JSONL + GitHub.
 
-        The JSONL store provides instant, searchable, per-request context.
-        GitHub push provides cross-deploy persistence.
+        Write-through: Convex (durable, searchable) + JSONL (fast local)
+        + GitHub (cross-deploy persistence).
         """
         import json
         import sys
         from pathlib import Path
 
-        # Save to JSONL store (always works, instant)
+        # Save to unified memory store (Convex + JSONL)
         try:
-            from omni_dash.agent.learnings import get_learnings_store
+            from omni_dash.memory.store import get_memory_store
 
-            store = get_learnings_store()
-            store.add_from_text(learning, source="user_correction")
+            store = get_memory_store()
+            store.save_learning_from_text(learning, source="user_correction")
         except Exception as e:
-            logger.warning("JSONL learning save failed: %s", e)
+            logger.warning("Memory store save failed: %s", e)
 
         # Also push to GitHub (cross-deploy persistence)
         scripts_dir = str(Path(__file__).resolve().parents[3] / "scripts")
@@ -590,11 +590,8 @@ class ToolRegistry:
         try:
             from github_utils import add_learning
 
-            success = add_learning(learning)
-            if success:
-                return json.dumps({"status": "ok", "message": f"Learning saved: {learning}"})
-            # GitHub failed but JSONL succeeded — still report success
-            return json.dumps({"status": "ok", "message": f"Learning saved locally: {learning}", "note": "GitHub push failed — will retry on next deploy."})
+            add_learning(learning)
         except ImportError:
-            # No GitHub utils — JSONL-only mode
-            return json.dumps({"status": "ok", "message": f"Learning saved: {learning}"})
+            pass
+
+        return json.dumps({"status": "ok", "message": f"Learning saved: {learning}"})

@@ -121,17 +121,16 @@ def _build_system_prompt(user_message: str = "") -> str:
             "\n\n# Past Corrections (HIGHEST PRIORITY)\n\n" + learnings_file.read_text()
         )
 
-    # Inject per-request learnings from the JSONL store
+    # Inject per-request learnings from the memory store (Convex + JSONL fallback)
     try:
-        from omni_dash.agent.learnings import get_learnings_store
+        from omni_dash.memory.store import get_memory_store
 
-        store = get_learnings_store()
-        if user_message:
-            learnings_block = store.to_context_block(query=user_message)
-            if learnings_block:
-                prompt_parts.append(f"\n\n{learnings_block}")
+        memory = get_memory_store()
+        learnings_block = memory.learnings_context_block(query=user_message)
+        if learnings_block:
+            prompt_parts.append(f"\n\n{learnings_block}")
     except Exception as e:
-        logger.debug("Learnings store not available: %s", e)
+        logger.debug("Memory store not available: %s", e)
 
     # Load Omni expert knowledge base
     omni_expert = project_root / ".claude" / "skills" / "omni-expert" / "SKILL.md"

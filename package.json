@@ -1,0 +1,19 @@
+{
+  "name": "omni-dash",
+  "version": "1.0.0",
+  "description": "Programmatic [Omni BI](https://omni.co) dashboard builder with deep [dbt](https://www.getdbt.com/) integration.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "convex": "^1.34.1"
+  }
+}

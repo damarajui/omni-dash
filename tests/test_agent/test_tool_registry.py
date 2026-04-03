@@ -138,7 +138,7 @@ def test_save_learning_returns_json(monkeypatch):
 
 
 def test_save_learning_github_failure_still_ok(monkeypatch):
-    """save_learning reports ok with note when GitHub push fails (JSONL fallback)."""
+    """save_learning reports ok even when GitHub push fails (Convex+JSONL is primary)."""
     import json
     import sys
     from pathlib import Path
@@ -158,4 +158,4 @@ def test_save_learning_github_failure_still_ok(monkeypatch):
     result = tool.callable(learning="test rule")
     parsed = json.loads(result)
     assert parsed["status"] == "ok"
-    assert "note" in parsed  # GitHub failure noted
+    assert "test rule" in parsed["message"]

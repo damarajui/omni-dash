@@ -131,10 +131,10 @@ class ToolExecutor:
     def _auto_learn_recovery(self, tool_name: str) -> None:
         """Automatically save a learning when a tool succeeds after failures."""
         try:
-            from omni_dash.agent.learnings import get_learnings_store
+            from omni_dash.memory.store import get_memory_store
 
-            store = get_learnings_store()
-            store.add_from_text(
+            store = get_memory_store()
+            store.save_learning_from_text(
                 f"{tool_name} failed {self._consecutive_failures} times then succeeded. "
                 f"Previous failure tool: {self._last_failure_tool}. "
                 "The fix involved retrying with corrected parameters.",
