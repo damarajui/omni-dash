@@ -86,12 +86,13 @@ def format_for_slack(response: str) -> str:
     return response
 
 
-def _build_system_prompt(user_message: str = "") -> str:
+def _build_system_prompt(user_message: str = "", slack_user_id: str = "") -> str:
     """Build the system prompt from CLAUDE.md + dbt catalog + skills + Slack rules.
 
     Args:
         user_message: The current user message, used to search learnings
             for relevant context injection.
+        slack_user_id: Slack user ID, used to fetch per-user preferences.
     """
     prompt_parts: list[str] = []
 
@@ -129,6 +130,28 @@ def _build_system_prompt(user_message: str = "") -> str:
         learnings_block = memory.learnings_context_block(query=user_message)
         if learnings_block:
             prompt_parts.append(f"\n\n{learnings_block}")
+
+        # Inject user preferences if available
+        if slack_user_id:
+            prefs = memory.get_user_preferences(slack_user_id)
+            if prefs:
+                pref_lines = ["\n# User Preferences\n"]
+                name = prefs.get("slackUserName", slack_user_id)
+                pref_lines.append(f"This user is *{name}*.")
+                if prefs.get("preferredChartTypes"):
+                    pref_lines.append(
+                        f"Preferred chart types: {', '.join(prefs['preferredChartTypes'])}"
+                    )
+                if prefs.get("preferredFolder"):
+                    pref_lines.append(
+                        f"Preferred folder: {prefs['preferredFolder']}"
+                    )
+                if prefs.get("notes"):
+                    pref_lines.append(f"Notes: {prefs['notes']}")
+                prompt_parts.append("\n".join(pref_lines))
+
+            # Touch user last-seen
+            memory.update_user_preferences(slack_user_id)
     except Exception as e:
         logger.debug("Memory store not available: %s", e)
 
@@ -330,6 +353,91 @@ class DashBot:
 
         return "\n".join(results)
 
+    @staticmethod
+    def _log_dashboard_creation(
+        messages: list[dict[str, Any]],
+        prompt: str,
+        model: str,
+        tool_calls: int,
+        duration_ms: int,
+        event: dict[str, Any],
+        thread_ts: str,
+    ) -> None:
+        """Scan conversation for dashboard creation results and log to Convex."""
+        import json as _json
+
+        # Scan tool results for create_dashboard or verify_dashboard outcomes
+        dashboard_id = ""
+        dashboard_url = ""
+        status = ""
+        tiles_created = 0
+        tiles_with_data = 0
+        error_summary = ""
+        retry_count = 0
+
+        for msg in messages:
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content")
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if block.get("type") != "tool_result":
+                    continue
+                try:
+                    result = _json.loads(block.get("content", "{}"))
+                except (TypeError, _json.JSONDecodeError):
+                    continue
+
+                if not isinstance(result, dict):
+                    continue
+
+                # Detect create_dashboard success
+                if "dashboard_id" in result and "url" in result:
+                    dashboard_id = result.get("dashboard_id", "")
+                    dashboard_url = result.get("url", "")
+
+                # Detect verify_dashboard verdict
+                if "tiles_checked" in result:
+                    status = result.get("status", "").lower()
+                    tiles_created = result.get("tiles_checked", 0)
+                    tiles_with_data = result.get("tiles_with_data", 0)
+
+                # Count create_dashboard errors as retries
+                if result.get("error") and "dashboard" in str(block).lower():
+                    retry_count += 1
+                    error_summary = str(result.get("error", ""))[:200]
+
+        # Only log if a dashboard was attempted
+        if not dashboard_id and not error_summary:
+            return
+
+        if not status:
+            status = "success" if dashboard_id else "fail"
+
+        try:
+            from omni_dash.memory.store import DashboardLog, get_memory_store
+
+            store = get_memory_store()
+            store.log_dashboard_creation(DashboardLog(
+                prompt=prompt[:500],
+                status=status,
+                model=model,
+                tool_calls=tool_calls,
+                duration_ms=duration_ms,
+                dashboard_id=dashboard_id,
+                dashboard_url=dashboard_url,
+                error_summary=error_summary,
+                retry_count=retry_count,
+                tiles_created=tiles_created,
+                tiles_with_data=tiles_with_data,
+                slack_user_id=event.get("user", ""),
+                slack_channel=event.get("channel", ""),
+                thread_ts=thread_ts,
+            ))
+        except Exception as e:
+            logger.debug("Dashboard log failed: %s", e)
+
     def handle_message(
         self,
         event: dict[str, Any],
@@ -398,14 +506,25 @@ class DashBot:
             # Compress old tool results + trim to budget
             messages = prepare_messages_for_api(messages)
 
-            # Set up streaming
+            # Set up streaming + tool call tracking
             streamer = SlackStreamer(client, channel, thinking_ts)
+            tool_call_count = 0
+            dashboard_created = False
+            dashboard_id = ""
+            dashboard_url = ""
 
             def _on_tool_call(name: str, _input: dict) -> None:
+                nonlocal tool_call_count
+                tool_call_count += 1
                 logger.info("Executing tool: %s", name)
 
             # Build per-request system prompt (injects relevant learnings)
-            system_prompt = _build_system_prompt(user_message=text)
+            slack_user_id = event.get("user", "")
+            system_prompt = _build_system_prompt(
+                user_message=text, slack_user_id=slack_user_id,
+            )
+
+            t0 = time.monotonic()
 
             # Run agentic loop with routed model + max turns
             messages, final_text = self.agent.run(
@@ -417,8 +536,16 @@ class DashBot:
                 on_tool_call=_on_tool_call,
             )
 
+            duration_ms = int((time.monotonic() - t0) * 1000)
+
             # Final flush of streamed text
             streamer.finish()
+
+            # Detect dashboard creation from tool results in conversation
+            self._log_dashboard_creation(
+                messages, text, routed_model, tool_call_count,
+                duration_ms, event, thread_ts,
+            )
 
             # Format for Slack
             response = format_for_slack(final_text) if final_text else (

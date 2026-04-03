@@ -31,6 +31,9 @@ coolify.env
 # UV
 uv.lock
 
+# Node / Convex
+node_modules/
+
 # OS
 .DS_Store
 Thumbs.db
