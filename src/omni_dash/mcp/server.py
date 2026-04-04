@@ -292,7 +292,11 @@ def _validate_tile_fields(
                         f"valid field names."
                     )
     except Exception as e:
-        logger.warning("Field validation failed (proceeding with creation): %s", e)
+        logger.warning("Field validation failed: %s", e)
+        errors.append(
+            f"Field validation could not complete: {e}. "
+            "Use get_topic_fields to verify field names manually."
+        )
     return errors
 
 
@@ -348,7 +352,7 @@ def _create_via_import_fallback(
     # layout indices to query presentations.
     mini_uuids: list[str] = []
     for idx, m in enumerate(memberships, start=1):
-        mini = secrets.token_hex(4)  # 8 alphanumeric chars, matches Omni format
+        mini = secrets.token_urlsafe(6)[:8]  # 8 alphanumeric chars, matches Omni format
         mini_uuids.append(f"{idx}:{mini}")
         m.setdefault("queryPresentation", {})["miniUuid"] = mini
 
@@ -639,6 +643,43 @@ def get_dbt_model_detail(model_name: str) -> str:
         return json.dumps(result, default=str)
     except Exception as e:
         return _tool_error(e, "get_dbt_model_detail")
+
+
+# --- Snowflake Direct Access ---
+
+
+@mcp.tool()
+def query_snowflake_direct(
+    sql: str,
+    database: str = "TRAINING_DATABASE",
+    schema: str = "PUBLIC",
+    limit: int = 100,
+) -> str:
+    """Execute a read-only SQL query directly against Snowflake.
+
+    Use this when Omni topics don't cover the data you need, or to check
+    raw data in the warehouse. Only SELECT queries allowed — writes blocked.
+
+    Common databases:
+    - TRAINING_DATABASE — production analytics (mart/dim/fct tables in PUBLIC schema)
+    - FIVETRAN_DATABASE — raw source data (Mongo, HubSpot, Stripe, etc.)
+    - DBT_DEV — dev schema (safe for exploration)
+
+    Args:
+        sql: SQL query (SELECT only).
+        database: Snowflake database (default TRAINING_DATABASE).
+        schema: Snowflake schema (default PUBLIC).
+        limit: Max rows (default 100).
+
+    Returns:
+        JSON with columns, rows, row_count.
+    """
+    try:
+        from omni_dash.snowflake import query_snowflake
+
+        return query_snowflake(sql, database=database, schema=schema, limit=limit)
+    except Exception as e:
+        return _tool_error(e, "query_snowflake_direct")
 
 
 # --- Dashboard Management ---
@@ -1983,13 +2024,20 @@ def verify_dashboard(dashboard_id: str, model_id: str = "") -> str:
         # Step 2: Spot-check each tile for data
         tiles_checked = 0
         tiles_with_data = 0
+        sql_tiles_skipped = 0
         issues: list[dict[str, str]] = []
 
         for qp in dash.query_presentations:
             tile_name = qp.get("name", f"tile_{tiles_checked}")
+            is_sql = qp.get("isSql", False)
             query = qp.get("query", {})
             table = query.get("table", "")
             fields = query.get("fields", [])
+
+            # SQL tiles can't be verified via field-based queries
+            if is_sql:
+                sql_tiles_skipped += 1
+                continue
 
             # Skip text/markdown tiles (no query)
             if not table or not fields:
@@ -2022,9 +2070,15 @@ def verify_dashboard(dashboard_id: str, model_id: str = "") -> str:
                 })
 
         # Step 3: Determine verdict
-        if tiles_checked == 0:
+        if tiles_checked == 0 and sql_tiles_skipped == 0:
             status = "PASS"
-            overall = "Dashboard created. No queryable tiles to verify (text-only or SQL tiles)."
+            overall = "Dashboard created. No queryable tiles to verify (text-only)."
+        elif tiles_checked == 0 and sql_tiles_skipped > 0:
+            status = "PARTIAL"
+            overall = (
+                f"Dashboard created with {sql_tiles_skipped} SQL tile(s) that "
+                "cannot be auto-verified. Check them manually in Omni."
+            )
         elif tiles_with_data == tiles_checked:
             status = "PASS"
             overall = f"Dashboard verified. All {tiles_checked} tiles return data."
@@ -2038,12 +2092,16 @@ def verify_dashboard(dashboard_id: str, model_id: str = "") -> str:
             status = "FAIL"
             overall = f"Dashboard created but ALL {tiles_checked} tiles returned 0 rows. Data may not exist or fields are wrong."
 
+        if sql_tiles_skipped > 0:
+            overall += f" ({sql_tiles_skipped} SQL tile(s) skipped — verify manually.)"
+
         return json.dumps({
             "status": status,
             "dashboard_id": dashboard_id,
             "dashboard_url": dash_url,
             "tiles_checked": tiles_checked,
             "tiles_with_data": tiles_with_data,
+            "sql_tiles_skipped": sql_tiles_skipped,
             "issues": issues,
             "overall": overall,
         }, indent=2)

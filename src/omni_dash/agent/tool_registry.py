@@ -28,7 +28,7 @@ class RegisteredTool:
 
 
 class ToolRegistry:
-    """Registers all 28 tools (24 Omni + verify_dashboard + 2 dbt + save_learning) with Anthropic-format schemas."""
+    """Registers all 29 tools (24 Omni + verify_dashboard + snowflake + 2 dbt + save_learning)."""
 
     def __init__(self) -> None:
         self._tools: dict[str, RegisteredTool] = {}
@@ -447,6 +447,43 @@ class ToolRegistry:
             srv.verify_dashboard,
         )
 
+        # --- Snowflake Direct Access ---
+        self._register(
+            "query_snowflake_direct",
+            (
+                "Execute a read-only SQL query directly against Snowflake. "
+                "Use when Omni topics don't cover the data, or to check raw "
+                "warehouse data. Only SELECT queries — writes are blocked. "
+                "Default database: TRAINING_DATABASE (production analytics)."
+            ),
+            {
+                "type": "object",
+                "properties": {
+                    "sql": {
+                        "type": "string",
+                        "description": "SQL SELECT query to execute.",
+                    },
+                    "database": {
+                        "type": "string",
+                        "description": (
+                            "Snowflake database. Options: TRAINING_DATABASE (production), "
+                            "FIVETRAN_DATABASE (raw sources), DBT_DEV (dev). Default: TRAINING_DATABASE."
+                        ),
+                    },
+                    "schema": {
+                        "type": "string",
+                        "description": "Snowflake schema (default PUBLIC).",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max rows (default 100).",
+                    },
+                },
+                "required": ["sql"],
+            },
+            self._query_snowflake,
+        )
+
         # --- dbt Data Discovery ---
         self._register(
             "search_dbt_models",
@@ -524,6 +561,18 @@ class ToolRegistry:
             },
             self._save_learning,
         )
+
+    @staticmethod
+    def _query_snowflake(
+        sql: str,
+        database: str = "TRAINING_DATABASE",
+        schema: str = "PUBLIC",
+        limit: int = 100,
+    ) -> str:
+        """Execute a read-only Snowflake query."""
+        from omni_dash.snowflake import query_snowflake
+
+        return query_snowflake(sql, database=database, schema=schema, limit=limit)
 
     @staticmethod
     def _search_dbt_models(query: str, top_k: int = 10) -> str:
