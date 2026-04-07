@@ -150,7 +150,7 @@ class DbtCatalog:
         project_path: str | None = None,
         *,
         github_repo: str | None = None,
-        github_branch: str = "main",
+        github_branch: str | None = None,
     ) -> None:
         self._registry: ModelRegistry | None = None
         self._manifest_reader: ManifestReader | None = None
@@ -160,6 +160,8 @@ class DbtCatalog:
         # Resolve manifest path
         resolved_manifest = manifest_path or os.environ.get("DBT_MANIFEST_PATH")
         resolved_project = project_path or os.environ.get("DBT_PROJECT_PATH")
+        resolved_github_repo = github_repo or os.environ.get("DBT_GITHUB_REPO")
+        resolved_github_branch = github_branch or os.environ.get("DBT_GITHUB_BRANCH", "main")
 
         if resolved_project and Path(resolved_project).expanduser().exists():
             self._registry = ModelRegistry(resolved_project)
@@ -169,12 +171,13 @@ class DbtCatalog:
             parent = Path(resolved_manifest).expanduser().parent.parent
             self._manifest_reader = ManifestReader(parent)
             logger.info("DbtCatalog: using manifest at %s", resolved_manifest)
-        elif github_repo:
-            self._try_github_manifest(github_repo, github_branch)
+        elif resolved_github_repo:
+            self._try_github_manifest(resolved_github_repo, resolved_github_branch)
         else:
             logger.warning(
-                "DbtCatalog: no manifest found. Set DBT_MANIFEST_PATH or "
-                "DBT_PROJECT_PATH. dbt search tools will be unavailable."
+                "DbtCatalog: no manifest found. Set DBT_MANIFEST_PATH, "
+                "DBT_PROJECT_PATH, or DBT_GITHUB_REPO. "
+                "dbt search tools will be unavailable."
             )
 
     def _try_github_manifest(self, repo: str, branch: str) -> None:

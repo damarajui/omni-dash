@@ -352,7 +352,11 @@ def _create_via_import_fallback(
     # layout indices to query presentations.
     mini_uuids: list[str] = []
     for idx, m in enumerate(memberships, start=1):
-        mini = secrets.token_urlsafe(6)[:8]  # 8 alphanumeric chars, matches Omni format
+        # 8 alphanumeric chars (a-z, A-Z, 0-9), matches Omni format.
+        # token_urlsafe can include '-' and '_' which Omni rejects, so
+        # generate extra and filter to just alphanumeric.
+        _alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        mini = "".join(secrets.choice(_alphabet) for _ in range(8))
         mini_uuids.append(f"{idx}:{mini}")
         m.setdefault("queryPresentation", {})["miniUuid"] = mini
 

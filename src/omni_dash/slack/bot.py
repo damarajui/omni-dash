@@ -600,11 +600,27 @@ def _validate_env() -> list[str]:
             masked = val[:4] + "..." + val[-4:] if len(val) > 12 else "***"
             logger.info("Env check: %s = %s", var, masked)
 
-    optional = ["OMNI_SHARED_MODEL_ID", "DASH_CLAUDE_MODEL", "DASH_DB_PATH"]
+    optional = [
+        "OMNI_SHARED_MODEL_ID",
+        "OMNI_SHARED_FOLDER_ID",
+        "DASH_CLAUDE_MODEL",
+        "DASH_DB_PATH",
+        "DASH_MAX_TOKENS",
+        "CONVEX_URL",
+        "CONVEX_DEPLOY_KEY",
+        "DBT_GITHUB_REPO",
+        "DBT_GITHUB_BRANCH",
+        "DBT_MANIFEST_PATH",
+        "GITHUB_TOKEN",
+        "SNOWFLAKE_ACCOUNT",
+        "SNOWFLAKE_USER",
+        "SNOWFLAKE_PASSWORD",
+    ]
     for var in optional:
         val = os.environ.get(var)
         if val:
-            logger.info("Env check: %s = %s", var, val)
+            masked = val[:4] + "..." + val[-4:] if len(val) > 12 else "***"
+            logger.info("Env check (optional): %s = %s", var, masked)
 
     return warnings
 
