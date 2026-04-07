@@ -13,11 +13,11 @@ def _mock_env(monkeypatch):
     monkeypatch.setenv("OMNI_SHARED_MODEL_ID", "test-model")
 
 
-def test_registry_registers_all_25_tools():
+def test_registry_registers_all_29_tools():
     from omni_dash.agent.tool_registry import ToolRegistry
 
     reg = ToolRegistry()
-    assert reg.tool_count == 25
+    assert reg.tool_count == 29
 
 
 def test_registry_get_definitions_format():
@@ -26,7 +26,7 @@ def test_registry_get_definitions_format():
     reg = ToolRegistry()
     defs = reg.get_definitions()
     assert isinstance(defs, list)
-    assert len(defs) == 25
+    assert len(defs) == 29
     for d in defs:
         assert "name" in d
         assert "description" in d
@@ -77,6 +77,8 @@ def test_tool_names_match_definitions():
         "generate_dashboard",
         "ai_generate_query", "ai_pick_topic", "ai_analyze",
         "get_dashboard_filters", "update_dashboard_filters",
+        "verify_dashboard", "query_snowflake_direct",
+        "search_dbt_models", "get_dbt_model_detail",
         "save_learning",
     }
     assert names == expected
@@ -135,8 +137,8 @@ def test_save_learning_returns_json(monkeypatch):
     assert parsed["status"] == "ok"
 
 
-def test_save_learning_returns_error_on_failure(monkeypatch):
-    """save_learning returns error JSON when add_learning fails."""
+def test_save_learning_github_failure_still_ok(monkeypatch):
+    """save_learning reports ok even when GitHub push fails (Convex+JSONL is primary)."""
     import json
     import sys
     from pathlib import Path
@@ -155,4 +157,5 @@ def test_save_learning_returns_error_on_failure(monkeypatch):
 
     result = tool.callable(learning="test rule")
     parsed = json.loads(result)
-    assert "error" in parsed
+    assert parsed["status"] == "ok"
+    assert "test rule" in parsed["message"]

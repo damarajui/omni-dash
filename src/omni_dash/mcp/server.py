@@ -292,7 +292,11 @@ def _validate_tile_fields(
                         f"valid field names."
                     )
     except Exception as e:
-        logger.warning("Field validation failed (proceeding with creation): %s", e)
+        logger.warning("Field validation failed: %s", e)
+        errors.append(
+            f"Field validation could not complete: {e}. "
+            "Use get_topic_fields to verify field names manually."
+        )
     return errors
 
 
@@ -348,7 +352,11 @@ def _create_via_import_fallback(
     # layout indices to query presentations.
     mini_uuids: list[str] = []
     for idx, m in enumerate(memberships, start=1):
-        mini = secrets.token_hex(4)  # 8 alphanumeric chars, matches Omni format
+        # 8 alphanumeric chars (a-z, A-Z, 0-9), matches Omni format.
+        # token_urlsafe can include '-' and '_' which Omni rejects, so
+        # generate extra and filter to just alphanumeric.
+        _alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        mini = "".join(secrets.choice(_alphabet) for _ in range(8))
         mini_uuids.append(f"{idx}:{mini}")
         m.setdefault("queryPresentation", {})["miniUuid"] = mini
 
@@ -572,6 +580,115 @@ def _create_with_vis_configs(
 # ---------------------------------------------------------------------------
 
 
+# --- dbt Data Discovery ---
+
+
+@mcp.tool()
+def search_dbt_models(query: str, top_k: int = 10) -> str:
+    """Search the dbt repository for models matching a natural language query.
+
+    Uses intelligent multi-term search with synonym expansion. For example,
+    "ARR by day split by user type" finds models with arr, revenue,
+    customer_type, daily grain, etc.
+
+    ALWAYS call this FIRST before building any dashboard to understand
+    what data is available and how it's modeled.
+
+    Args:
+        query: Natural language search (e.g., "revenue by day per customer type").
+        top_k: Max results (default 10).
+
+    Returns:
+        JSON array of matching models with name, description, columns, and
+        relevance score. Empty array if no matches.
+    """
+    try:
+        from omni_dash.dbt.catalog import get_catalog
+
+        catalog = get_catalog()
+        if not catalog.available:
+            return json.dumps({
+                "error": "dbt catalog not available. Set DBT_MANIFEST_PATH or DBT_PROJECT_PATH.",
+                "hint": "Use list_topics and get_topic_fields to discover data in Omni instead.",
+            })
+        results = catalog.search(query, top_k=top_k)
+        return json.dumps(results, default=str)
+    except Exception as e:
+        return _tool_error(e, "search_dbt_models")
+
+
+@mcp.tool()
+def get_dbt_model_detail(model_name: str) -> str:
+    """Get full details for a specific dbt model.
+
+    Returns all columns with types and descriptions, upstream dependencies,
+    materialization, schema, and tags. Use after search_dbt_models identifies
+    a candidate model.
+
+    Args:
+        model_name: Exact model name (e.g., "fct_customer_daily_ts").
+
+    Returns:
+        JSON object with complete model metadata, or error if not found.
+    """
+    try:
+        from omni_dash.dbt.catalog import get_catalog
+
+        catalog = get_catalog()
+        if not catalog.available:
+            return json.dumps({"error": "dbt catalog not available."})
+
+        result = catalog.get_model(model_name)
+        if result is None:
+            return json.dumps({
+                "error": f"Model '{model_name}' not found.",
+                "hint": "Use search_dbt_models to find available models.",
+            })
+        return json.dumps(result, default=str)
+    except Exception as e:
+        return _tool_error(e, "get_dbt_model_detail")
+
+
+# --- Snowflake Direct Access ---
+
+
+@mcp.tool()
+def query_snowflake_direct(
+    sql: str,
+    database: str = "TRAINING_DATABASE",
+    schema: str = "PUBLIC",
+    limit: int = 100,
+) -> str:
+    """Execute a read-only SQL query directly against Snowflake.
+
+    Use this when Omni topics don't cover the data you need, or to check
+    raw data in the warehouse. Only SELECT queries allowed — writes blocked.
+
+    Common databases:
+    - TRAINING_DATABASE — production analytics (mart/dim/fct tables in PUBLIC schema)
+    - FIVETRAN_DATABASE — raw source data (Mongo, HubSpot, Stripe, etc.)
+    - DBT_DEV — dev schema (safe for exploration)
+
+    Args:
+        sql: SQL query (SELECT only).
+        database: Snowflake database (default TRAINING_DATABASE).
+        schema: Snowflake schema (default PUBLIC).
+        limit: Max rows (default 100).
+
+    Returns:
+        JSON with columns, rows, row_count.
+    """
+    try:
+        from omni_dash.snowflake import query_snowflake
+
+        return query_snowflake(sql, database=database, schema=schema, limit=limit)
+    except Exception as e:
+        return _tool_error(e, "query_snowflake_direct")
+
+
+# --- Dashboard Management ---
+
+
 @mcp.tool()
 def list_dashboards(folder_id: str | None = None) -> str:
     """List dashboards in the Omni org.
@@ -702,6 +819,10 @@ def create_dashboard(
                 "error": "No model_id provided and could not auto-discover one. "
                 "Set OMNI_SHARED_MODEL_ID in .env or pass model_id."
             })
+
+        # Default to shared folder if none specified
+        if not folder_id:
+            folder_id = os.environ.get("OMNI_SHARED_FOLDER_ID", "")
 
         # Auto-validate field references before creating
         field_errors = _validate_tile_fields(tiles, resolved_model_id)
@@ -1866,6 +1987,134 @@ def validate_dashboard(
 
 
 @mcp.tool()
+def verify_dashboard(dashboard_id: str, model_id: str = "") -> str:
+    """Verify a dashboard after creation: check it exists, tiles load, data flows.
+
+    Call this AFTER create_dashboard to confirm the dashboard is working.
+    Part of the Ralph Loop: build -> verify -> fix -> retry.
+
+    Checks:
+    1. Dashboard exists and is accessible
+    2. Each tile's query returns data (spot-check with limit=1)
+    3. Reports PASS, PARTIAL, or FAIL with per-tile diagnostics
+
+    Args:
+        dashboard_id: Dashboard ID (from create_dashboard response).
+        model_id: Omni model ID. Auto-discovered if omitted.
+
+    Returns:
+        JSON verdict: {status, tiles_checked, tiles_with_data, issues[], overall}.
+    """
+    try:
+        from omni_dash.api.queries import QueryBuilder
+
+        resolved_model_id = model_id or _get_shared_model_id()
+        if not resolved_model_id:
+            return json.dumps({"error": "No model_id found. Set OMNI_SHARED_MODEL_ID."})
+
+        # Step 1: Check dashboard exists
+        try:
+            dash = _get_doc_svc().get_dashboard(dashboard_id)
+        except Exception as e:
+            return json.dumps({
+                "status": "FAIL",
+                "issues": [{"tile": "(dashboard)", "issue": f"Dashboard not found: {e}"}],
+                "overall": f"Dashboard {dashboard_id} does not exist or is not accessible.",
+            })
+
+        base_url = os.environ.get("OMNI_BASE_URL", "").rstrip("/")
+        dash_url = f"{base_url}/dashboards/{dashboard_id}" if base_url else ""
+
+        # Step 2: Spot-check each tile for data
+        tiles_checked = 0
+        tiles_with_data = 0
+        sql_tiles_skipped = 0
+        issues: list[dict[str, str]] = []
+
+        for qp in dash.query_presentations:
+            tile_name = qp.get("name", f"tile_{tiles_checked}")
+            is_sql = qp.get("isSql", False)
+            query = qp.get("query", {})
+            table = query.get("table", "")
+            fields = query.get("fields", [])
+
+            # SQL tiles can't be verified via field-based queries
+            if is_sql:
+                sql_tiles_skipped += 1
+                continue
+
+            # Skip text/markdown tiles (no query)
+            if not table or not fields:
+                continue
+
+            tiles_checked += 1
+
+            try:
+                resolved_table = _resolve_table_name(table, resolved_model_id)
+                builder = QueryBuilder(resolved_model_id, resolved_table)
+                builder.fields(fields[:3])  # Only check first 3 fields (speed)
+                builder.limit(1)
+                result = _get_query_runner().run(builder.build())
+
+                row_count = result.row_count or 0
+                if row_count > 0:
+                    tiles_with_data += 1
+                else:
+                    issues.append({
+                        "tile": tile_name,
+                        "issue": "0 rows returned",
+                        "suggestion": "Check date filter range or verify the table has data.",
+                    })
+            except Exception as e:
+                err_msg = str(e)[:200]
+                issues.append({
+                    "tile": tile_name,
+                    "issue": f"Query failed: {err_msg}",
+                    "suggestion": "Check field names against get_topic_fields output.",
+                })
+
+        # Step 3: Determine verdict
+        if tiles_checked == 0 and sql_tiles_skipped == 0:
+            status = "PASS"
+            overall = "Dashboard created. No queryable tiles to verify (text-only)."
+        elif tiles_checked == 0 and sql_tiles_skipped > 0:
+            status = "PARTIAL"
+            overall = (
+                f"Dashboard created with {sql_tiles_skipped} SQL tile(s) that "
+                "cannot be auto-verified. Check them manually in Omni."
+            )
+        elif tiles_with_data == tiles_checked:
+            status = "PASS"
+            overall = f"Dashboard verified. All {tiles_checked} tiles return data."
+        elif tiles_with_data > 0:
+            status = "PARTIAL"
+            overall = (
+                f"Dashboard created but {tiles_checked - tiles_with_data}/{tiles_checked} "
+                f"tiles have no data. Review the issues below and fix."
+            )
+        else:
+            status = "FAIL"
+            overall = f"Dashboard created but ALL {tiles_checked} tiles returned 0 rows. Data may not exist or fields are wrong."
+
+        if sql_tiles_skipped > 0:
+            overall += f" ({sql_tiles_skipped} SQL tile(s) skipped — verify manually.)"
+
+        return json.dumps({
+            "status": status,
+            "dashboard_id": dashboard_id,
+            "dashboard_url": dash_url,
+            "tiles_checked": tiles_checked,
+            "tiles_with_data": tiles_with_data,
+            "sql_tiles_skipped": sql_tiles_skipped,
+            "issues": issues,
+            "overall": overall,
+        }, indent=2)
+
+    except Exception as e:
+        return _tool_error(e, "verify_dashboard")
+
+
+@mcp.tool()
 def profile_data(
     table: str,
     fields: list[str] | None = None,
@@ -2007,6 +2256,10 @@ def generate_dashboard(
         mid = model_id or _get_shared_model_id()
         if not mid:
             return json.dumps({"error": "No model_id found. Set OMNI_SHARED_MODEL_ID."})
+
+        # Default to shared folder if none specified
+        if not folder_id:
+            folder_id = os.environ.get("OMNI_SHARED_FOLDER_ID", "")
         model_svc = _get_model_svc()
 
         adapter = OmniModelAdapter(model_svc, mid)

@@ -29,6 +29,26 @@ class ConversationStore:
     """
 
     def __init__(self, db_path: str = "/app/data/conversations.db") -> None:
+        # Ensure parent dir exists; fall back to /tmp if not writable
+        import os
+        from pathlib import Path
+
+        path_obj = Path(db_path)
+        try:
+            path_obj.parent.mkdir(parents=True, exist_ok=True)
+            # Test write
+            test_file = path_obj.parent / ".write_test"
+            test_file.touch()
+            test_file.unlink()
+        except (OSError, PermissionError):
+            fallback = Path("/tmp/omni-dash") / path_obj.name
+            fallback.parent.mkdir(parents=True, exist_ok=True)
+            logger.warning(
+                "ConversationStore: %s not writable, using fallback %s",
+                path_obj.parent, fallback,
+            )
+            db_path = str(fallback)
+
         self._db_path = db_path
         self._lock = threading.Lock()
         self._init_db()

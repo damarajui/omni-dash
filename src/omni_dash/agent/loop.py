@@ -2,6 +2,12 @@
 
 Follows the proven pattern from ``ai/service.py`` but generalised for
 any set of registered tools and with streaming support.
+
+SDK best practices (as of Anthropic SDK 0.42+):
+- Block-level cache_control on system prompt (not stream-level)
+- Configurable max_tokens (default 8192 for complex dashboards)
+- tool_choice="auto" for parallel tool execution
+- Per-run max_turns override
 """
 
 from __future__ import annotations
@@ -17,6 +23,7 @@ from omni_dash.agent.executor import ToolExecutor
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = os.environ.get("DASH_CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
+_DEFAULT_MAX_TOKENS = int(os.environ.get("DASH_MAX_TOKENS", "8192"))
 
 # Retry config for rate limit errors (429)
 _MAX_RETRIES = 3
@@ -53,6 +60,7 @@ class AgentLoop:
         self,
         *,
         model: str,
+        max_tokens: int,
         system: list[dict[str, Any]],
         messages: list[dict[str, Any]],
         tool_defs: list[dict[str, Any]],
@@ -65,11 +73,11 @@ class AgentLoop:
             try:
                 return self._client.messages.stream(
                     model=model,
-                    max_tokens=4096,
+                    max_tokens=max_tokens,
                     system=system,
                     messages=messages,
                     tools=tool_defs,
-                    cache_control={"type": "ephemeral"},
+                    tool_choice={"type": "auto"},
                 )
             except anthropic.RateLimitError as e:
                 last_err = e
@@ -91,6 +99,8 @@ class AgentLoop:
         system: str,
         *,
         model: str | None = None,
+        max_turns: int | None = None,
+        max_tokens: int | None = None,
         on_text_delta: Callable[[str], None] | None = None,
         on_tool_call: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> tuple[list[dict[str, Any]], str]:
@@ -101,6 +111,10 @@ class AgentLoop:
             system: System prompt.
             model: Override model for this run (e.g. from router).
                 Falls back to the instance default if not provided.
+            max_turns: Override max turns for this run. Falls back to
+                the instance default (15) if not provided.
+            max_tokens: Override max response tokens. Falls back to
+                DASH_MAX_TOKENS env var or 8192.
             on_text_delta: Called with each text chunk during streaming.
             on_tool_call: Called with ``(tool_name, tool_input)`` before execution.
 
@@ -110,11 +124,13 @@ class AgentLoop:
         """
         final_text = ""
         effective_model = model or self._model
+        effective_max_tokens = max_tokens or _DEFAULT_MAX_TOKENS
 
         tool_defs = self._executor.get_tool_definitions()
 
-        # Structure system prompt for caching -- cache_control on the
-        # last block tells Anthropic to cache everything up to that point.
+        # Block-level cache_control on system prompt (current SDK pattern).
+        # Placing cache_control on the last system block tells Anthropic
+        # to cache everything up to that point for 5 minutes.
         system_blocks = [
             {
                 "type": "text",
@@ -123,12 +139,15 @@ class AgentLoop:
             }
         ]
 
+        effective_max_turns = max_turns or self._max_turns
+
         logger.info(
-            "Agent loop starting: model=%s, tools=%d, messages=%d",
+            "Agent loop starting: model=%s, tools=%d, messages=%d, max_turns=%d, max_tokens=%d",
             effective_model, len(tool_defs), len(messages),
+            effective_max_turns, effective_max_tokens,
         )
 
-        for _turn in range(self._max_turns):
+        for _turn in range(effective_max_turns):
             # Stream the response
             text_parts: list[str] = []
             tool_use_blocks: list[dict[str, Any]] = []
@@ -137,6 +156,7 @@ class AgentLoop:
             logger.info("Turn %d: calling messages.stream()", _turn + 1)
             with self._stream_with_retry(
                 model=effective_model,
+                max_tokens=effective_max_tokens,
                 system=system_blocks,
                 messages=messages,
                 tool_defs=tool_defs,
@@ -176,8 +196,9 @@ class AgentLoop:
             cache_create = getattr(usage, "cache_creation_input_tokens", 0) or 0
             if cache_read or cache_create:
                 logger.info(
-                    "Turn %d cache: read=%d, created=%d, input=%d",
-                    _turn + 1, cache_read, cache_create, usage.input_tokens,
+                    "Turn %d cache: read=%d, created=%d, input=%d, output=%d",
+                    _turn + 1, cache_read, cache_create,
+                    usage.input_tokens, usage.output_tokens,
                 )
 
             # Build full_content from the response
@@ -206,7 +227,8 @@ class AgentLoop:
                 )
                 break
 
-            # Execute tool calls
+            # Execute tool calls — Claude may request multiple in parallel
+            # with tool_choice="auto"
             tool_results: list[dict[str, Any]] = []
             for tb in tool_use_blocks:
                 tool_name = tb["name"]
@@ -243,7 +265,7 @@ class AgentLoop:
             # Loop exhausted without Claude stopping naturally
             logger.warning(
                 "Agent loop hit max_turns=%d. Last tools: %s",
-                self._max_turns,
+                effective_max_turns,
                 [tb["name"] for tb in tool_use_blocks] if tool_use_blocks else "none",
             )
             if not final_text:

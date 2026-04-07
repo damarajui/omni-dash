@@ -46,6 +46,10 @@ _SONNET_PATTERNS: list[re.Pattern[str]] = [
         r"\b(?:complex|detailed|comprehensive|deep\s+dive)\b",
         r"\b(?:strategy|recommend|suggest|advise)\b",
         r"\badd\b.*\btile",
+        # Research-worthy requests (need dbt search + data exploration)
+        r"\b(?:do we have|is there|what.*data|what.*model|how.*calculat)",
+        r"\b(?:arr|revenue|churn|retention|conversion|funnel)\b.*\b(?:by|split|break)",
+        r"\b(?:show me|give me)\b.*\b(?:by|split|per|over)\b",
     ]
 ]
 
@@ -95,6 +99,13 @@ def classify_intent(message: str) -> ModelTier:
     return ModelTier.HAIKU
 
 
+# Max turns by tier — Sonnet gets more turns because research phase adds 3-5
+_MAX_TURNS: dict[ModelTier, int] = {
+    ModelTier.HAIKU: 15,
+    ModelTier.SONNET: 20,
+}
+
+
 def get_model_for_message(message: str) -> str:
     """Return the model ID to use for a given user message.
 
@@ -112,3 +123,17 @@ def get_model_for_message(message: str) -> str:
     tier = classify_intent(message)
     logger.info("Routed to %s: %s", tier.name, message[:60])
     return tier.value
+
+
+def get_max_turns_for_message(message: str) -> int:
+    """Return the max agent loop turns for a given user message.
+
+    Sonnet requests get more turns (20) to accommodate the research phase.
+    Haiku requests keep the default (15).
+    """
+    override = os.environ.get("DASH_CLAUDE_MODEL")
+    if override:
+        return 20  # If model is overridden, assume complex
+
+    tier = classify_intent(message)
+    return _MAX_TURNS.get(tier, 15)

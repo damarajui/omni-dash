@@ -1006,6 +1006,10 @@ class TestMCPRegistration:
             "ai_analyze",
             "get_dashboard_filters",
             "update_dashboard_filters",
+            "verify_dashboard",
+            "query_snowflake_direct",
+            "search_dbt_models",
+            "get_dbt_model_detail",
         }
         assert expected == names
 
@@ -1015,7 +1019,7 @@ class TestMCPRegistration:
         async def check():
             return len(await mcp_server.mcp.list_tools())
 
-        assert asyncio.run(check()) == 24
+        assert asyncio.run(check()) == 28
 
 
 # ---------------------------------------------------------------------------

@@ -19,6 +19,7 @@ def test_stream_with_retry_succeeds_first_try():
 
         result = loop._stream_with_retry(
             model="test-model",
+            max_tokens=8192,
             system=[{"type": "text", "text": "test"}],
             messages=[{"role": "user", "content": "hi"}],
             tool_defs=[],
@@ -51,6 +52,7 @@ def test_stream_with_retry_retries_on_429():
         with patch("omni_dash.agent.loop.time.sleep") as mock_sleep:
             result = loop._stream_with_retry(
                 model="test-model",
+                max_tokens=8192,
                 system=[{"type": "text", "text": "test"}],
                 messages=[{"role": "user", "content": "hi"}],
                 tool_defs=[],
@@ -84,6 +86,7 @@ def test_stream_with_retry_exhausts_retries():
             with pytest.raises(anthropic.RateLimitError):
                 loop._stream_with_retry(
                     model="test-model",
+                    max_tokens=8192,
                     system=[{"type": "text", "text": "test"}],
                     messages=[{"role": "user", "content": "hi"}],
                     tool_defs=[],
@@ -94,7 +97,7 @@ def test_stream_with_retry_exhausts_retries():
 
 
 def test_system_prompt_uses_cache_control():
-    """Verify system prompt is structured with cache_control for caching."""
+    """Verify system prompt blocks have cache_control, and tool_choice is auto."""
     from omni_dash.agent.loop import AgentLoop
 
     with patch("omni_dash.agent.loop.AgentLoop.__init__", return_value=None):
@@ -105,10 +108,9 @@ def test_system_prompt_uses_cache_control():
         loop._executor = MagicMock()
         loop._executor.get_tool_definitions.return_value = []
 
-        # Mock stream to return a simple text response
         mock_response = MagicMock()
         mock_response.content = [MagicMock(type="text", text="hello")]
-        mock_response.usage = MagicMock(input_tokens=100, cache_read_input_tokens=0, cache_creation_input_tokens=50)
+        mock_response.usage = MagicMock(input_tokens=100, output_tokens=10, cache_read_input_tokens=0, cache_creation_input_tokens=50)
 
         mock_stream_ctx = MagicMock()
         mock_stream_ctx.__enter__ = MagicMock(return_value=mock_stream_ctx)
@@ -121,16 +123,20 @@ def test_system_prompt_uses_cache_control():
         messages = [{"role": "user", "content": "hi"}]
         loop.run(messages, "test system prompt")
 
-        # Check that system was passed as structured blocks with cache_control
         call_kwargs = loop._client.messages.stream.call_args
+        # Block-level cache_control on system prompt
         system_arg = call_kwargs.kwargs.get("system") or call_kwargs[1].get("system")
         assert isinstance(system_arg, list)
         assert system_arg[0]["cache_control"] == {"type": "ephemeral"}
         assert system_arg[0]["text"] == "test system prompt"
 
-        # Check cache_control was passed at top level
-        cache_arg = call_kwargs.kwargs.get("cache_control") or call_kwargs[1].get("cache_control")
-        assert cache_arg == {"type": "ephemeral"}
+        # tool_choice should be auto
+        tool_choice = call_kwargs.kwargs.get("tool_choice")
+        assert tool_choice == {"type": "auto"}
+
+        # max_tokens should be configurable (default 8192)
+        max_tokens = call_kwargs.kwargs.get("max_tokens")
+        assert max_tokens == 8192
 
 
 def test_run_uses_model_override():
@@ -147,7 +153,7 @@ def test_run_uses_model_override():
 
         mock_response = MagicMock()
         mock_response.content = [MagicMock(type="text", text="done")]
-        mock_response.usage = MagicMock(input_tokens=50, cache_read_input_tokens=0, cache_creation_input_tokens=0)
+        mock_response.usage = MagicMock(input_tokens=50, output_tokens=5, cache_read_input_tokens=0, cache_creation_input_tokens=0)
 
         mock_stream_ctx = MagicMock()
         mock_stream_ctx.__enter__ = MagicMock(return_value=mock_stream_ctx)
@@ -160,7 +166,6 @@ def test_run_uses_model_override():
         messages = [{"role": "user", "content": "hi"}]
         loop.run(messages, "system", model="override-model")
 
-        # Check model was passed correctly
         call_kwargs = loop._client.messages.stream.call_args
         assert call_kwargs.kwargs["model"] == "override-model"
 
@@ -179,7 +184,7 @@ def test_run_uses_default_model_when_no_override():
 
         mock_response = MagicMock()
         mock_response.content = [MagicMock(type="text", text="done")]
-        mock_response.usage = MagicMock(input_tokens=50, cache_read_input_tokens=0, cache_creation_input_tokens=0)
+        mock_response.usage = MagicMock(input_tokens=50, output_tokens=5, cache_read_input_tokens=0, cache_creation_input_tokens=0)
 
         mock_stream_ctx = MagicMock()
         mock_stream_ctx.__enter__ = MagicMock(return_value=mock_stream_ctx)
